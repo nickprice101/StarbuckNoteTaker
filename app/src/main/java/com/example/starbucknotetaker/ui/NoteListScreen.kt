@@ -1,12 +1,16 @@
 package com.example.starbucknotetaker.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.material.swipeable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
+import androidx.compose.material.FractionalThreshold
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.NoteAdd
@@ -16,12 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.roundToInt
 
 @Composable
 fun NoteListScreen(
@@ -83,38 +85,44 @@ private fun SwipeToDeleteNoteItem(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
-    BoxWithConstraints {
-        val width = constraints.maxWidth.toFloat()
-        val swipeState = rememberSwipeableState(0)
-        val maxSwipe = width * 0.2f
-        val anchors = mapOf(0f to 0, -maxSwipe to 1)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .swipeable(
-                    state = swipeState,
-                    anchors = anchors,
-                    orientation = Orientation.Horizontal,
-                    thresholds = { _, _ -> FractionalThreshold(0.3f) }
-                )
-        ) {
-            Box(
+    val dismissState = rememberDismissState(
+        confirmStateChange = { value ->
+            if (value == DismissValue.DismissedToStart) {
+                onDelete()
+            }
+            false
+        }
+    )
+    SwipeToDismiss(
+        state = dismissState,
+        directions = setOf(DismissDirection.EndToStart),
+        dismissThresholds = { FractionalThreshold(0.5f) },
+        background = {
+            Row(
                 modifier = Modifier
-                    .fillMaxSize(),
-                contentAlignment = Alignment.CenterEnd
+                    .fillMaxSize()
+                    .background(Color.Red)
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color.White
+                    )
                 }
             }
+        },
+        dismissContent = {
             NoteListItem(
                 note = note,
                 showDate = showDate,
-                onClick = onClick,
-                modifier = Modifier.offset { IntOffset(swipeState.offset.value.roundToInt(), 0) }
+                onClick = onClick
             )
         }
-    }
+    )
 }
 
 @Composable
