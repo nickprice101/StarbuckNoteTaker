@@ -21,7 +21,8 @@ android {
         release {
             def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
             if (keystorePath) {
-                storeFile file(keystorePath)
+                def keyFile = keystorePath.startsWith("/") ? file(keystorePath) : rootProject.file(keystorePath)
+                storeFile keyFile
                 storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("ANDROID_KEY_ALIAS")
                 keyPassword System.getenv("ANDROID_KEY_PASSWORD")
