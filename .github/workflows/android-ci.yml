@@ -38,19 +38,21 @@ jobs:
       #    mkdir -p app
       #    echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/starbuckstreamer.jks
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon
         env:
-          ANDROID_KEYSTORE_PATH: starbuckstreamer.jks
+          ANDROID_KEYSTORE_PATH: app/starbuckstreamer.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+          ANDROID_VERSION_NAME: 1.0.${{ github.run_number }}
 
       - name: Rename APK with build version
         run: |
           mkdir -p build-out
           VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
-          cp app/build/outputs/apk/debug/app-debug.apk \
+          cp app/build/outputs/apk/release/app-release.apk \
             "build-out/StarbuckNoteTaker-${VERSION_NAME}.apk"
 
       - name: Upload APK artifact
