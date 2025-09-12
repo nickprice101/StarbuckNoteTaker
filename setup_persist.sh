@@ -71,12 +71,12 @@ if [ -f "./gradlew" ]; then
   echo "🛠️  Found ./gradlew, ensuring it's executable..."
   chmod +x ./gradlew
 
-  #if [ -d "$PROJECT_DIR/app/build/outputs/apk/debug" ]; then
-  #  echo "✅ Build output already exists. Skipping Gradle build."
-  #else
-  #  echo "🚀 Running ./gradlew build..."
-  #  ./gradlew build --no-daemon
-  #fi
+  if [ -d "$PROJECT_DIR/app/build/outputs/apk/debug" ]; then
+    echo "✅ Build output already exists. Skipping Gradle build."
+  else
+    echo "🚀 Running ./gradlew build..."
+    ./gradlew build --no-daemon
+  fi
 else
   echo "⚠️  No ./gradlew found in project directory. Skipping build."
 fi
