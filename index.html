@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Starbuck Note Taker</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Starbuck Note Taker</h1>
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="Search notes..." />
+                <button id="clearSearch">Clear</button>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button id="addNoteBtn" class="btn-primary">Add New Note</button>
+        </div>
+
+        <div id="notesContainer" class="notes-container">
+            <!-- Notes will be dynamically inserted here -->
+        </div>
+
+        <!-- Note Editor Modal -->
+        <div id="noteModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <input type="text" id="noteTitle" placeholder="Note title..." />
+                    <button id="closeModal" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="editor-toolbar">
+                        <button id="addLinkBtn" class="toolbar-btn">Add Link</button>
+                        <button id="addImageBtn" class="toolbar-btn">Add Image</button>
+                        <input type="file" id="imageUpload" accept="image/*" style="display: none;">
+                    </div>
+                    <textarea id="noteContent" placeholder="Start typing your note..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveNoteBtn" class="btn-primary">Save Note</button>
+                    <button id="deleteNoteBtn" class="btn-danger">Delete Note</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
