@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -31,16 +32,19 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val start = if (pinManager.isPinSet()) "pin_enter" else "pin_setup"
+    val context = LocalContext.current
     NavHost(navController = navController, startDestination = start) {
         composable("pin_setup") {
-            PinSetupScreen(pinManager = pinManager) {
+            PinSetupScreen(pinManager = pinManager) { pin ->
+                noteViewModel.loadNotes(context, pin)
                 navController.navigate("list") {
                     popUpTo("pin_setup") { inclusive = true }
                 }
             }
         }
         composable("pin_enter") {
-            PinEnterScreen(pinManager = pinManager) {
+            PinEnterScreen(pinManager = pinManager) { pin ->
+                noteViewModel.loadNotes(context, pin)
                 navController.navigate("list") {
                     popUpTo("pin_enter") { inclusive = true }
                 }
