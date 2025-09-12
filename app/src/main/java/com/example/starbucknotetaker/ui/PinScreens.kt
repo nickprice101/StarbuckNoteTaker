@@ -37,7 +37,7 @@ private class PinVisualTransformation(private val revealLast: Boolean) : VisualT
 }
 
 @Composable
-fun PinSetupScreen(pinManager: PinManager, onDone: () -> Unit) {
+fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     var pin by remember { mutableStateOf("") }
     var firstPin by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -97,7 +97,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: () -> Unit) {
                 } else {
                     if (pin == firstPin) {
                         pinManager.setPin(pin)
-                        onDone()
+                        onDone(pin)
                     } else {
                         error = "PINs do not match"
                         pin = ""
@@ -112,7 +112,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: () -> Unit) {
 }
 
 @Composable
-fun PinEnterScreen(pinManager: PinManager, onSuccess: () -> Unit) {
+fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
     var reveal by remember { mutableStateOf(false) }
@@ -166,7 +166,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: () -> Unit) {
         Button(
             onClick = {
                 if (pin.length in 4..6 && pinManager.checkPin(pin)) {
-                    onSuccess()
+                    onSuccess(pin)
                 } else {
                     error = true
                 }
