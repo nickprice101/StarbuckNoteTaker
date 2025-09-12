@@ -27,4 +27,10 @@ class NoteViewModel : ViewModel() {
         )
         _notes.add(0, note) // newest first
     }
+
+    fun deleteNote(index: Int) {
+        if (index in _notes.indices) {
+            _notes.removeAt(index)
+        }
+    }
 }

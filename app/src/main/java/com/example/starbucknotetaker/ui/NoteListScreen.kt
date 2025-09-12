@@ -1,11 +1,13 @@
 package com.example.starbucknotetaker.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,11 +20,13 @@ import com.example.starbucknotetaker.Note
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun NoteListScreen(
     notes: List<Note>,
     onAddNote: () -> Unit,
-    onOpenNote: (Int) -> Unit
+    onOpenNote: (Int) -> Unit,
+    onDeleteNote: (Int) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = remember(query, notes) {
@@ -53,9 +57,33 @@ fun NoteListScreen(
                     .padding(8.dp)
             )
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(filtered) { _, note ->
+                itemsIndexed(filtered, key = { _, note -> note.id }) { _, note ->
                     val originalIndex = notes.indexOf(note)
-                    NoteListItem(note = note, onClick = { onOpenNote(originalIndex) })
+                    val dismissState = rememberDismissState(confirmStateChange = { value ->
+                        if (value == DismissValue.DismissedToStart) {
+                            onDeleteNote(originalIndex)
+                        }
+                        true
+                    })
+                    SwipeToDismiss(
+                        state = dismissState,
+                        background = {
+                            val color = if (dismissState.targetValue == DismissValue.Default) Color.Transparent else Color.Red
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(color)
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                            }
+                        },
+                        directions = setOf(DismissDirection.EndToStart),
+                        dismissContent = {
+                            NoteListItem(note = note, onClick = { onOpenNote(originalIndex) })
+                        }
+                    )
                 }
             }
         }
