@@ -1,0 +1,14 @@
+# Ignore Gradle project-specific cache directory
+.gradle/
+
+# Ignore Gradle build output directories
+build/
+app/build/
+
+# Android Studio files
+.idea/
+*.iml
+
+# Local configuration
+local.properties
+gradle/wrapper/gradle-wrapper.jar
