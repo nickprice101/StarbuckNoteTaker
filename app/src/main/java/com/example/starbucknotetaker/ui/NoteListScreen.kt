@@ -1,7 +1,8 @@
 package com.example.starbucknotetaker.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.material.swipeable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -15,12 +16,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
 import java.text.SimpleDateFormat
-import java.util.Locale
+import java.util.*
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun NoteListScreen(
     notes: List<Note>,
@@ -44,9 +46,10 @@ fun NoteListScreen(
             }
         }
     ) { padding ->
-        Column(modifier = Modifier
-            .padding(padding)
-            .fillMaxSize()
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
         ) {
             OutlinedTextField(
                 value = query,
@@ -57,32 +60,14 @@ fun NoteListScreen(
                     .padding(8.dp)
             )
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(filtered, key = { _, note -> note.id }) { _, note ->
+                itemsIndexed(filtered, key = { _, note -> note.id }) { index, note ->
                     val originalIndex = notes.indexOf(note)
-                    val dismissState = rememberDismissState(confirmStateChange = { value ->
-                        if (value == DismissValue.DismissedToStart) {
-                            onDeleteNote(originalIndex)
-                        }
-                        true
-                    })
-                    SwipeToDismiss(
-                        state = dismissState,
-                        background = {
-                            val color = if (dismissState.targetValue == DismissValue.Default) Color.Transparent else Color.Red
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(color)
-                                    .padding(horizontal = 20.dp),
-                                contentAlignment = Alignment.CenterEnd
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
-                            }
-                        },
-                        directions = setOf(DismissDirection.EndToStart),
-                        dismissContent = {
-                            NoteListItem(note = note, onClick = { onOpenNote(originalIndex) })
-                        }
+                    val showDate = index == 0 || !isSameDay(filtered[index - 1].date, note.date)
+                    SwipeToDeleteNoteItem(
+                        note = note,
+                        showDate = showDate,
+                        onClick = { onOpenNote(originalIndex) },
+                        onDelete = { onDeleteNote(originalIndex) }
                     )
                 }
             }
@@ -91,19 +76,66 @@ fun NoteListScreen(
 }
 
 @Composable
-fun NoteListItem(note: Note, onClick: () -> Unit) {
+@OptIn(ExperimentalMaterialApi::class)
+private fun SwipeToDeleteNoteItem(
+    note: Note,
+    showDate: Boolean,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    BoxWithConstraints {
+        val width = constraints.maxWidth.toFloat()
+        val swipeState = rememberSwipeableState(0)
+        val maxSwipe = width * 0.2f
+        val anchors = mapOf(0f to 0, -maxSwipe to 1)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .swipeable(
+                    state = swipeState,
+                    anchors = anchors,
+                    orientation = Orientation.Horizontal,
+                    thresholds = { _, _ -> FractionalThreshold(0.3f) }
+                )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize(),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+                }
+            }
+            NoteListItem(
+                note = note,
+                showDate = showDate,
+                onClick = onClick,
+                modifier = Modifier.offset { IntOffset(swipeState.offset.value.roundToInt(), 0) }
+            )
+        }
+    }
+}
+
+@Composable
+fun NoteListItem(note: Note, showDate: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
-    Column(modifier = Modifier
-        .fillMaxWidth()
-        .clickable(onClick = onClick)
-        .padding(8.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(8.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = formatter.format(java.util.Date(note.date)), fontWeight = FontWeight.Light)
-            Divider(modifier = Modifier
-                .padding(start = 8.dp)
-                .height(1.dp)
-                .weight(1f))
+        if (showDate) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = formatter.format(Date(note.date)), fontWeight = FontWeight.Light)
+                Divider(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .height(1.dp)
+                        .weight(1f)
+                )
+            }
         }
         Text(
             text = note.title,
@@ -119,4 +151,9 @@ fun NoteListItem(note: Note, onClick: () -> Unit) {
             modifier = Modifier.padding(top = 2.dp)
         )
     }
+}
+
+private fun isSameDay(first: Long, second: Long): Boolean {
+    val formatter = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+    return formatter.format(Date(first)) == formatter.format(Date(second))
 }
