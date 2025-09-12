@@ -1,57 +1,109 @@
 package com.example.starbucknotetaker.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.Button
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import com.example.starbucknotetaker.PinManager
+
+private class PinVisualTransformation(private val revealLast: Boolean) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val out = buildString {
+            text.text.forEachIndexed { index, c ->
+                append(if (revealLast && index == text.text.lastIndex) c else '*')
+            }
+        }
+        return TransformedText(AnnotatedString(out), OffsetMapping.Identity)
+    }
+}
 
 @Composable
 fun PinSetupScreen(pinManager: PinManager, onDone: () -> Unit) {
     var pin by remember { mutableStateOf("") }
-    var confirmPin by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
+    var firstPin by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var reveal by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(pin) {
+        if (reveal) {
+            delay(1000)
+            reveal = false
+        }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    val message = if (firstPin == null) {
+        "This is the first time you've accessed this application. Please set a one-time PIN of 4 to 6 characters."
+    } else {
+        "Please confirm your PIN."
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Text(message, modifier = Modifier.padding(bottom = 16.dp))
         OutlinedTextField(
             value = pin,
-            onValueChange = { pin = it },
-            label = { Text("Enter PIN") },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+            onValueChange = { input ->
+                if (input.length <= 6 && input.all { it.isDigit() }) {
+                    pin = input
+                    reveal = true
+                }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = PinVisualTransformation(reveal),
+            singleLine = true,
+            textStyle = androidx.compose.material.LocalTextStyle.current.copy(
+                textAlign = TextAlign.Center,
+                fontSize = 32.sp
+            ),
+            modifier = Modifier
+                .width(200.dp)
+                .focusRequester(focusRequester)
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = confirmPin,
-            onValueChange = { confirmPin = it },
-            label = { Text("Confirm PIN") },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-        )
-        if (error) {
-            Text("PINs do not match", color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+        if (error != null) {
+            Text(error!!, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
         }
-        Button(onClick = {
-            if (pin.isNotEmpty() && pin == confirmPin) {
-                pinManager.setPin(pin)
-                onDone()
-            } else {
-                error = true
-            }
-        }, modifier = Modifier.padding(top = 16.dp)) {
-            Text("Save")
+        Button(
+            onClick = {
+                if (pin.length < 4) {
+                    error = "PIN must be 4-6 digits"
+                } else if (firstPin == null) {
+                    firstPin = pin
+                    pin = ""
+                    error = null
+                } else {
+                    if (pin == firstPin) {
+                        pinManager.setPin(pin)
+                        onDone()
+                    } else {
+                        error = "PINs do not match"
+                        pin = ""
+                    }
+                }
+            },
+            modifier = Modifier.padding(top = 16.dp)
+        ) {
+            Text(if (firstPin == null) "Next" else "Save")
         }
     }
 }
@@ -60,29 +112,55 @@ fun PinSetupScreen(pinManager: PinManager, onDone: () -> Unit) {
 fun PinEnterScreen(pinManager: PinManager, onSuccess: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    var reveal by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(pin) {
+        if (reveal) {
+            delay(1000)
+            reveal = false
+        }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Text("Please enter your PIN.", modifier = Modifier.padding(bottom = 16.dp))
         OutlinedTextField(
             value = pin,
-            onValueChange = { pin = it },
-            label = { Text("Enter PIN") },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+            onValueChange = { input ->
+                if (input.length <= 6 && input.all { it.isDigit() }) {
+                    pin = input
+                    reveal = true
+                }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = PinVisualTransformation(reveal),
+            singleLine = true,
+            textStyle = androidx.compose.material.LocalTextStyle.current.copy(
+                textAlign = TextAlign.Center,
+                fontSize = 32.sp
+            ),
+            modifier = Modifier
+                .width(200.dp)
+                .focusRequester(focusRequester)
         )
         if (error) {
             Text("Incorrect PIN", color = Color.Red, modifier = Modifier.padding(top = 8.dp))
         }
-        Button(onClick = {
-            if (pinManager.checkPin(pin)) {
-                onSuccess()
-            } else {
-                error = true
-            }
-        }, modifier = Modifier.padding(top = 16.dp)) {
+        Button(
+            onClick = {
+                if (pin.length in 4..6 && pinManager.checkPin(pin)) {
+                    onSuccess()
+                } else {
+                    error = true
+                }
+            },
+            modifier = Modifier.padding(top = 16.dp)
+        ) {
             Text("Unlock")
         }
     }
