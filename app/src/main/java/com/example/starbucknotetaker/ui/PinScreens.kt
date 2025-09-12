@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.Button
-import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
 import androidx.compose.material.TextField
 import androidx.compose.material.TextFieldDefaults
@@ -59,12 +58,15 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+            .padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(message, modifier = Modifier.padding(bottom = 16.dp))
-        OutlinedTextField(
+        TextField(
             value = pin,
             onValueChange = { input ->
                 if (input.length <= 6 && input.all { it.isDigit() }) {
@@ -78,6 +80,12 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
             textStyle = androidx.compose.material.LocalTextStyle.current.copy(
                 textAlign = TextAlign.Center,
                 fontSize = 32.sp
+            ),
+            colors = TextFieldDefaults.textFieldColors(
+                backgroundColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                textColor = Color.Black
             ),
             modifier = Modifier
                 .width(200.dp)
