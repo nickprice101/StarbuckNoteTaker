@@ -1,10 +1,13 @@
 package com.example.starbucknotetaker.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.Button
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
+import androidx.compose.material.TextField
+import androidx.compose.material.TextFieldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,12 +127,15 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: () -> Unit) {
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+            .padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("Please enter your PIN.", modifier = Modifier.padding(bottom = 16.dp))
-        OutlinedTextField(
+        TextField(
             value = pin,
             onValueChange = { input ->
                 if (input.length <= 6 && input.all { it.isDigit() }) {
@@ -142,7 +148,13 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: () -> Unit) {
             singleLine = true,
             textStyle = androidx.compose.material.LocalTextStyle.current.copy(
                 textAlign = TextAlign.Center,
-                fontSize = 32.sp
+                fontSize = 64.sp
+            ),
+            colors = TextFieldDefaults.textFieldColors(
+                backgroundColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                textColor = Color.Black
             ),
             modifier = Modifier
                 .width(200.dp)
