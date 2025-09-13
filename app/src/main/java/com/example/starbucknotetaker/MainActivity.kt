@@ -18,6 +18,8 @@ import com.example.starbucknotetaker.ui.NoteDetailScreen
 import com.example.starbucknotetaker.ui.NoteListScreen
 import com.example.starbucknotetaker.ui.PinEnterScreen
 import com.example.starbucknotetaker.ui.PinSetupScreen
+import com.example.starbucknotetaker.ui.EditNoteScreen
+import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 
 class MainActivity : ComponentActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
@@ -26,8 +28,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val pinManager = PinManager(applicationContext)
         setContent {
-            val navController = rememberNavController()
-            AppContent(navController, noteViewModel, pinManager)
+            StarbuckNoteTakerTheme {
+                val navController = rememberNavController()
+                AppContent(navController, noteViewModel, pinManager)
+            }
         }
     }
 }
@@ -100,7 +104,27 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             val index = backStackEntry.arguments?.getString("index")?.toIntOrNull() ?: 0
             val note = noteViewModel.notes.getOrNull(index)
             if (note != null) {
-                NoteDetailScreen(note = note, onBack = { navController.popBackStack() })
+                NoteDetailScreen(
+                    note = note,
+                    onBack = { navController.popBackStack() },
+                    onEdit = { navController.navigate("edit/$index") }
+                )
+            }
+        }
+        composable("edit/{index}") { backStackEntry ->
+            val index = backStackEntry.arguments?.getString("index")?.toIntOrNull() ?: 0
+            val note = noteViewModel.notes.getOrNull(index)
+            if (note != null) {
+                EditNoteScreen(
+                    note = note,
+                    onSave = { title, content, images ->
+                        noteViewModel.updateNote(index, title, content, images)
+                        navController.popBackStack()
+                    },
+                    onCancel = { navController.popBackStack() },
+                    onDisablePinCheck = { pinCheckEnabled = false },
+                    onEnablePinCheck = { pinCheckEnabled = true }
+                )
             }
         }
     }
