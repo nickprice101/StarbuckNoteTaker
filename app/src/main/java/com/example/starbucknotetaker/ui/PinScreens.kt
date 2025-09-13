@@ -125,6 +125,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     var error by remember { mutableStateOf(false) }
     var reveal by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val storedPinLength = remember { pinManager.getPinLength() }
 
     LaunchedEffect(pin) {
         if (reveal) {
@@ -134,54 +135,57 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Please enter your PIN.", modifier = Modifier.padding(bottom = 16.dp))
-        TextField(
-            value = pin,
-            onValueChange = { input ->
-                if (input.length <= 6 && input.all { it.isDigit() }) {
-                    pin = input
-                    reveal = true
-                }
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            visualTransformation = PinVisualTransformation(reveal),
-            singleLine = true,
-            textStyle = androidx.compose.material.LocalTextStyle.current.copy(
-                textAlign = TextAlign.Center,
-                fontSize = 64.sp
-            ),
-            colors = TextFieldDefaults.textFieldColors(
-                backgroundColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                textColor = Color.Black
-            ),
+        Column(
             modifier = Modifier
-                .width(200.dp)
-                .focusRequester(focusRequester)
-        )
-        if (error) {
-            Text("Incorrect PIN", color = Color.Red, modifier = Modifier.padding(top = 8.dp))
-        }
-        Button(
-            onClick = {
-                if (pin.length in 4..6 && pinManager.checkPin(pin)) {
-                    onSuccess(pin)
-                } else {
-                    error = true
-                }
-            },
-            modifier = Modifier.padding(top = 16.dp)
+                .fillMaxWidth()
+                .fillMaxHeight(0.6f)
+                .align(Alignment.TopCenter)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Unlock")
+            Text("Please enter your PIN.", modifier = Modifier.padding(bottom = 16.dp))
+            TextField(
+                value = pin,
+                onValueChange = { input ->
+                    if (input.length <= 6 && input.all { it.isDigit() }) {
+                        pin = input
+                        reveal = true
+                        error = false
+                        if (input.length == storedPinLength) {
+                            if (pinManager.checkPin(input)) {
+                                onSuccess(input)
+                            } else {
+                                error = true
+                            }
+                        }
+                    }
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                visualTransformation = PinVisualTransformation(reveal),
+                singleLine = true,
+                textStyle = androidx.compose.material.LocalTextStyle.current.copy(
+                    textAlign = TextAlign.Center,
+                    fontSize = 64.sp
+                ),
+                colors = TextFieldDefaults.textFieldColors(
+                    backgroundColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    textColor = Color.Black
+                ),
+                modifier = Modifier
+                    .width(200.dp)
+                    .focusRequester(focusRequester)
+            )
+            if (error) {
+                Text("Incorrect PIN", color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+            }
         }
     }
 }
