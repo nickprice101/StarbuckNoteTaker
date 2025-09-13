@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -26,6 +27,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
         val pinManager = PinManager(applicationContext)
         setContent {
@@ -57,9 +60,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     LaunchedEffect(requireAuth) {
         if (requireAuth && navController.currentDestination?.route !in listOf("pin_enter", "pin_setup")) {
-            navController.navigate("pin_enter") {
-                popUpTo("pin_enter") { inclusive = true }
-            }
+            navController.navigate("pin_enter")
         }
     }
 
@@ -77,8 +78,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             PinEnterScreen(pinManager = pinManager) { pin ->
                 requireAuth = false
                 noteViewModel.loadNotes(context, pin)
-                navController.navigate("list") {
-                    popUpTo("pin_enter") { inclusive = true }
+                if (navController.previousBackStackEntry != null) {
+                    navController.popBackStack()
+                } else {
+                    navController.navigate("list") {
+                        popUpTo("pin_enter") { inclusive = true }
+                    }
                 }
             }
         }
