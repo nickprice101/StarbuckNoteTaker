@@ -1,11 +1,13 @@
 package com.example.starbucknotetaker
 
 import android.os.Bundle
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -44,8 +46,10 @@ class MainActivity : ComponentActivity() {
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val start = if (pinManager.isPinSet()) "pin_enter" else "pin_setup"
     val context = LocalContext.current
+    val prefs = context.getSharedPreferences("nav_state", Context.MODE_PRIVATE)
     var requireAuth by remember { mutableStateOf(false) }
     var pinCheckEnabled by remember { mutableStateOf(true) }
+    var lastRoute by rememberSaveable { mutableStateOf<String?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
@@ -60,6 +64,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     LaunchedEffect(requireAuth) {
         if (requireAuth && navController.currentDestination?.route !in listOf("pin_enter", "pin_setup")) {
+            val entry = navController.currentBackStackEntry
+            lastRoute = entry?.destination?.route?.let { route ->
+                entry.arguments?.keySet()?.fold(route) { acc, key ->
+                    acc.replace("{$key}", entry.arguments?.get(key).toString())
+                }
+            }
+            lastRoute?.let { prefs.edit().putString("last_route", it).apply() }
             navController.navigate("pin_enter")
         }
     }
@@ -78,13 +89,21 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             PinEnterScreen(pinManager = pinManager) { pin ->
                 requireAuth = false
                 noteViewModel.loadNotes(context, pin)
-                if (navController.previousBackStackEntry != null) {
+                val destination = prefs.getString("last_route", null) ?: lastRoute
+                if (destination != null) {
+                    prefs.edit().remove("last_route").apply()
+                    navController.navigate(destination) {
+                        popUpTo("pin_enter") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                } else if (navController.previousBackStackEntry != null) {
                     navController.popBackStack()
                 } else {
                     navController.navigate("list") {
                         popUpTo("pin_enter") { inclusive = true }
                     }
                 }
+                lastRoute = null
             }
         }
         composable("list") {
