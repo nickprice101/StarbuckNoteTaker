@@ -8,50 +8,43 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.zip.ZipInputStream
 
 /**
  * Downloads the summarization models from GitHub Releases on first run.
  * The models are stored under `files/models` in the app's internal storage.
  */
 object ModelFetcher {
-    // URL of the ZIP file hosted on the repo's Releases page
-    private const val ZIP_URL = "https://github.com/nickprice101/StarbuckNoteTaker/releases/download/v1.0.0/flan_t5_small_tflite_min.zip"
-    private const val ZIP_NAME = "flan_t5_small_tflite_min.zip"
-    // Optional SHA-256 of the ZIP for integrity checking
-    private const val ZIP_SHA256 = "PUT_SHA256_OF_ZIP_HERE"
+    private const val BASE_URL = "https://github.com/nickprice101/StarbuckNoteTaker/releases/download/v1.0.0/"
 
-    // File names inside the ZIP archive
-    const val ENCODER_NAME = "flan_t5_small_tflite_min/encoder_int8_dynamic.tflite"
-    const val DECODER_NAME = "flan_t5_small_tflite_min/decoder_step_int8_dynamic.tflite"
+    private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite.file"
+    private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite.file"
+    private const val SPIECE_REMOTE = "spiece.model.file"
+
+    const val ENCODER_NAME = "encoder_int8_dynamic.tflite"
+    const val DECODER_NAME = "decoder_step_int8_dynamic.tflite"
+    const val SPIECE_NAME = "spiece.model"
 
     private val client by lazy { OkHttpClient() }
 
     /**
-     * Ensures the encoder and decoder models are present under `files/models` and returns
-     * their [File] locations. Downloads and unzips them if necessary.
+     * Ensures the encoder, decoder and tokenizer model are present under `files/models` and
+     * returns their [File] locations. Downloads them individually if necessary.
      */
-    suspend fun ensureModels(context: Context): Pair<File, File> = withContext(Dispatchers.IO) {
+    suspend fun ensureModels(context: Context): Triple<File, File, File> = withContext(Dispatchers.IO) {
         val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
-        val encoderFile = File(modelsDir, "encoder_int8_dynamic.tflite")
-        val decoderFile = File(modelsDir, "decoder_step_int8_dynamic.tflite")
+        val encoderFile = File(modelsDir, ENCODER_NAME)
+        val decoderFile = File(modelsDir, DECODER_NAME)
+        val spieceFile = File(modelsDir, SPIECE_NAME)
 
-        if (encoderFile.exists() && decoderFile.exists()) return@withContext encoderFile to decoderFile
+        if (!encoderFile.exists()) download(BASE_URL + ENCODER_REMOTE, encoderFile)
+        if (!decoderFile.exists()) download(BASE_URL + DECODER_REMOTE, decoderFile)
+        if (!spieceFile.exists()) download(BASE_URL + SPIECE_REMOTE, spieceFile)
 
-        val zipFile = File(context.cacheDir, ZIP_NAME)
-        download(ZIP_URL, zipFile)
-
-        if (ZIP_SHA256.isNotBlank()) {
-            val got = sha256(zipFile)
-            require(got.equals(ZIP_SHA256, ignoreCase = true)) {
-                "Model ZIP SHA-256 mismatch. expected=$ZIP_SHA256 got=$got"
-            }
+        require(encoderFile.exists() && decoderFile.exists() && spieceFile.exists()) {
+            "Failed to download model files"
         }
 
-        unzipSelect(zipFile, modelsDir, setOf(ENCODER_NAME, DECODER_NAME))
-        require(encoderFile.exists() && decoderFile.exists()) { "Model files missing after unzip" }
-        zipFile.delete()
-        encoderFile to decoderFile
+        Triple(encoderFile, decoderFile, spieceFile)
     }
 
     private fun download(url: String, dest: File) {
@@ -71,6 +64,8 @@ object ModelFetcher {
         }
     }
 
+    // Legacy functions kept for potential future integrity checks.
+    @Suppress("unused")
     private fun sha256(file: File): String {
         val md = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { ins ->
@@ -82,28 +77,6 @@ object ModelFetcher {
             }
         }
         return md.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private fun unzipSelect(zip: File, dstDir: File, wanted: Set<String>) {
-        ZipInputStream(zip.inputStream()).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
-                val name = entry.name
-                if (!entry.isDirectory && name in wanted) {
-                    val outFile = File(dstDir, name.substringAfterLast('/'))
-                    outFile.outputStream().use { out ->
-                        val buf = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (true) {
-                            val read = zis.read(buf)
-                            if (read == -1) break
-                            out.write(buf, 0, read)
-                        }
-                    }
-                }
-                zis.closeEntry()
-                entry = zis.nextEntry
-            }
-        }
     }
 }
 

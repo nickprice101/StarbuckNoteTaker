@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
+import com.example.starbucknotetaker.SentencePieceProcessor
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.MappedByteBuffer
@@ -12,20 +13,22 @@ import java.nio.channels.FileChannel
 /**
  * Simple on-device text summarizer.
  *
- * The implementation ensures T5 encoder/decoder TFLite models are downloaded on-demand
- * and can be extended to run full sequence-to-sequence inference. Currently it falls back to a
- * lightweight extractive summary when the models cannot be used.
+ * Downloads T5 encoder/decoder and SentencePiece tokenizer on demand and performs
+ * greedy sequence-to-sequence inference. If anything fails it falls back to a
+ * lightweight extractive strategy.
  */
 class Summarizer(private val context: Context) {
     private var encoder: Interpreter? = null
     private var decoder: Interpreter? = null
+    private var tokenizer: SentencePieceProcessor? = null
 
     private suspend fun loadModelsIfNeeded() {
-        if (encoder != null && decoder != null) return
+        if (encoder != null && decoder != null && tokenizer != null) return
         try {
-            val (encFile, decFile) = ModelFetcher.ensureModels(context)
+            val (encFile, decFile, spFile) = ModelFetcher.ensureModels(context)
             encoder = Interpreter(mapFile(encFile))
             decoder = Interpreter(mapFile(decFile))
+            tokenizer = SentencePieceProcessor().apply { load(spFile.absolutePath) }
         } catch (_: Exception) {
             // leave interpreters null to trigger fallback
         }
@@ -38,18 +41,54 @@ class Summarizer(private val context: Context) {
     }
 
     /**
-     * Generates a two line summary for the given [text]. Model inference runs on a background
+     * Generates a summary for the given [text]. Model inference runs on a background
      * dispatcher. If the models cannot be loaded, this falls back to a simple extractive
      * summary using the first couple of sentences.
      */
     suspend fun summarize(text: String): String = withContext(Dispatchers.Default) {
         loadModelsIfNeeded()
-        if (encoder == null || decoder == null) {
+        val enc = encoder
+        val dec = decoder
+        val tok = tokenizer
+        if (enc == null || dec == null || tok == null) {
             return@withContext fallbackSummary(text)
         }
-        // TODO: Implement full encoder/decoder inference using the loaded models and tokenizer.
-        // For now we return a basic extractive summary.
-        fallbackSummary(text)
+
+        val prefix = "summarize: "
+        val inputIds = tok.encodeAsIds(prefix + text)
+        val encLen = kotlin.math.min(inputIds.size, MAX_INPUT_TOKENS)
+        val encInput = Array(1) { IntArray(MAX_INPUT_TOKENS) }
+        for (i in 0 until encLen) encInput[0][i] = inputIds[i]
+        val encLength = intArrayOf(encLen)
+        val encOutShape = enc.getOutputTensor(0).shape()
+        val encHidden = Array(encOutShape[0]) { Array(encOutShape[1]) { FloatArray(encOutShape[2]) } }
+        enc.run(arrayOf(encInput, encLength), arrayOf(encHidden))
+
+        val numInputs = dec.inputTensorCount
+        val cache = Array(numInputs - 3) { FloatArray(dec.getInputTensor(it + 3).numElements()) }
+        var token = START_TOKEN
+        val result = mutableListOf<Int>()
+        repeat(MAX_OUTPUT_TOKENS) {
+            val inputs = arrayOfNulls<Any>(numInputs)
+            inputs[0] = intArrayOf(token)
+            inputs[1] = encHidden
+            inputs[2] = encLength
+            for (i in cache.indices) inputs[i + 3] = cache[i]
+
+            val logits = FloatArray(VOCAB_SIZE)
+            val outputs = HashMap<Int, Any>()
+            outputs[0] = logits
+            val newCache = Array(cache.size) { FloatArray(dec.getOutputTensor(it + 1).numElements()) }
+            for (i in newCache.indices) outputs[i + 1] = newCache[i]
+            dec.runForMultipleInputsOutputs(inputs, outputs)
+
+            val next = argmax(logits)
+            if (next == EOS_ID) return@repeat
+            result.add(next)
+            token = next
+            for (i in cache.indices) cache[i] = newCache[i]
+        }
+        return@withContext tok.decodeIds(result.toIntArray())
     }
 
     fun fallbackSummary(text: String): String {
@@ -59,5 +98,24 @@ class Summarizer(private val context: Context) {
         val candidate = sentences.take(2).joinToString(". ")
         return if (candidate.isNotEmpty()) candidate else text.take(200)
     }
-}
 
+    private fun argmax(arr: FloatArray): Int {
+        var maxIdx = 0
+        var maxVal = arr[0]
+        for (i in 1 until arr.size) {
+            if (arr[i] > maxVal) {
+                maxVal = arr[i]
+                maxIdx = i
+            }
+        }
+        return maxIdx
+    }
+
+    companion object {
+        private const val MAX_INPUT_TOKENS = 256
+        private const val MAX_OUTPUT_TOKENS = 64
+        private const val START_TOKEN = 0
+        private const val EOS_ID = 1
+        private const val VOCAB_SIZE = 32128
+    }
+}
