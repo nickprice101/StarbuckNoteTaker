@@ -1,16 +1,14 @@
 # Model assets
 
-This directory holds optional TensorFlow Lite and tokenizer files for on-device
-summarisation.
+This directory is intentionally left empty. On first run the application
+downloads the required TensorFlow Lite models from the project's GitHub
+Releases and stores them under the app's internal `files/models` directory.
 
-The following files are expected at runtime:
+If you prefer to bundle the models manually (for offline installs), place the
+following files here:
 
 - `encoder_int8_dynamic.tflite`
 - `decoder_step_int8_dynamic.tflite`
 - `spiece.model`
 
-Download them from the project's release page and place them in this folder:
-https://github.com/nickprice101/StarbuckNoteTaker/releases/tag/v1.0.0
-
-These binaries are not tracked in git; they must be added manually after
-cloning the repository.
+These binaries remain untracked by git.
