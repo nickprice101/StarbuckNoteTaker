@@ -1,6 +1,10 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
@@ -29,7 +33,10 @@ class Summarizer(private val context: Context) {
             encoder = Interpreter(mapFile(encFile))
             decoder = Interpreter(mapFile(decFile))
             tokenizer = SentencePieceProcessor().apply { load(spFile.absolutePath) }
-        } catch (_: Exception) {
+            showToast("AI summarizer loaded")
+        } catch (e: Exception) {
+            Log.e("Summarizer", "Failed to load models", e)
+            showToast("Summarizer init failed: ${'$'}{e.message}", Toast.LENGTH_LONG)
             // leave interpreters null to trigger fallback
         }
     }
@@ -51,6 +58,7 @@ class Summarizer(private val context: Context) {
         val dec = decoder
         val tok = tokenizer
         if (enc == null || dec == null || tok == null) {
+            showToast("Using fallback summarization")
             return@withContext fallbackSummary(text)
         }
 
@@ -117,5 +125,11 @@ class Summarizer(private val context: Context) {
         private const val START_TOKEN = 0
         private const val EOS_ID = 1
         private const val VOCAB_SIZE = 32128
+    }
+
+    private fun showToast(message: String, length: Int = Toast.LENGTH_SHORT) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, message, length).show()
+        }
     }
 }
