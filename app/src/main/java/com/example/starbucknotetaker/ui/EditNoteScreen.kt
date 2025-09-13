@@ -2,7 +2,9 @@ package com.example.starbucknotetaker.ui
 
 import android.content.Intent
 import android.util.Base64
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,6 +25,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.exifinterface.media.ExifInterface
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import com.example.starbucknotetaker.Note
 import kotlinx.coroutines.launch
 
@@ -65,7 +71,22 @@ fun EditNoteScreen(
             )
             context.contentResolver.openInputStream(it)?.use { input ->
                 val bytes = input.readBytes()
-                val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
+                val exif = ExifInterface(ByteArrayInputStream(bytes))
+                val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                val exifRotation = when (orientation) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+                var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (exifRotation != 0) {
+                    val matrix = Matrix().apply { postRotate(exifRotation.toFloat()) }
+                    bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                }
+                val baos = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                val base64 = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
                 blocks.add(EditBlock.Image(base64))
                 blocks.add(EditBlock.Text(""))
             }
@@ -171,7 +192,30 @@ fun EditNoteScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
                             IconButton(
-                                onClick = { blocks.removeAt(index) },
+                                onClick = {
+                                    val matrix = Matrix().apply { postRotate(270f) }
+                                    val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                                    val baos = ByteArrayOutputStream()
+                                    rotated.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                                    blocks[index] = EditBlock.Image(Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT))
+                                },
+                                modifier = Modifier.align(Alignment.BottomStart)
+                            ) {
+                                Icon(Icons.Default.RotateLeft, contentDescription = "Rotate", tint = Color.White)
+                            }
+                            IconButton(
+                                onClick = {
+                                    blocks.removeAt(index)
+                                    val prevIndex = index - 1
+                                    if (prevIndex >= 0 && prevIndex < blocks.size) {
+                                        val prev = blocks[prevIndex]
+                                        val next = blocks.getOrNull(prevIndex + 1)
+                                        if (prev is EditBlock.Text && next is EditBlock.Text) {
+                                            blocks[prevIndex] = EditBlock.Text(prev.text + "\n" + next.text)
+                                            blocks.removeAt(prevIndex + 1)
+                                        }
+                                    }
+                                },
                                 modifier = Modifier.align(Alignment.TopEnd)
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White)

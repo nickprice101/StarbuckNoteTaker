@@ -4,6 +4,12 @@ import android.content.Context
 import android.net.Uri
 import android.util.Base64
 import android.util.Patterns
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import java.net.URL
@@ -29,7 +35,7 @@ class NoteViewModel : ViewModel() {
         _notes.addAll(s.loadNotes(pin))
     }
 
-    fun addNote(title: String?, content: String, images: List<Uri>) {
+    fun addNote(title: String?, content: String, images: List<Pair<Uri, Int>>) {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
         } else {
@@ -37,11 +43,27 @@ class NoteViewModel : ViewModel() {
         }
         val embeddedImages = mutableListOf<String>()
         context?.let { ctx ->
-            images.forEach { uri ->
+            images.forEach { (uri, rotation) ->
                 try {
                     ctx.contentResolver.openInputStream(uri)?.use { input ->
                         val bytes = input.readBytes()
-                        embeddedImages.add(Base64.encodeToString(bytes, Base64.DEFAULT))
+                        val exif = ExifInterface(ByteArrayInputStream(bytes))
+                        val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                        val exifRotation = when (orientation) {
+                            ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                            ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                            else -> 0
+                        }
+                        val totalRotation = (exifRotation + rotation) % 360
+                        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (totalRotation != 0) {
+                            val matrix = Matrix().apply { postRotate(totalRotation.toFloat()) }
+                            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        }
+                        val baos = ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                        embeddedImages.add(Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT))
                     }
                 } catch (_: Exception) {}
             }
