@@ -1,29 +1,29 @@
 package com.example.starbucknotetaker
 
-import java.io.File
+import ai.djl.sentencepiece.SpTokenizer
+import java.nio.file.Paths
 
 /**
- * Minimal stand-in for the real SentencePiece tokenizer.
- * This implementation uses a trivial whitespace-based scheme so that
- * summarization can run without the actual native dependency.
- * It does not generate meaningful summaries but keeps the pipeline functional.
+ * Wrapper around DJL's SentencePiece tokenizer providing simple encode/decode
+ * helpers used by the T5 summarization model.
  */
 class SentencePieceProcessor {
-    fun load(model: String) {
-        // In a real implementation, [model] would be parsed. Here we only check existence.
-        File(model)
+    private lateinit var tokenizer: SpTokenizer
+
+    /** Loads the SentencePiece model from [modelPath]. */
+    fun load(modelPath: String) {
+        tokenizer = SpTokenizer(Paths.get(modelPath))
     }
 
-    fun encodeAsIds(text: String): IntArray {
-        if (text.isEmpty()) return intArrayOf()
-        return text.split(" ").map { it.hashCode() and 0x7FFFFFFF % VOCAB_SIZE }.toIntArray()
-    }
+    /** Encodes [text] into an array of token IDs. */
+    fun encodeAsIds(text: String): IntArray = tokenizer.processor.encode(text)
 
-    fun decodeIds(ids: IntArray): String {
-        return ids.joinToString(" ") { it.toString() }
-    }
+    /** Decodes token [ids] back into a string. */
+    fun decodeIds(ids: IntArray): String = tokenizer.processor.decode(ids)
 
-    companion object {
-        private const val VOCAB_SIZE = 32128
+    /** Releases native resources. */
+    fun close() {
+        tokenizer.close()
     }
 }
+

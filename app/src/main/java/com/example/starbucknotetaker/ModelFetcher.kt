@@ -16,9 +16,9 @@ import java.security.MessageDigest
 object ModelFetcher {
     private const val BASE_URL = "https://github.com/nickprice101/StarbuckNoteTaker/releases/download/v1.0.0/"
 
-    private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite.file"
-    private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite.file"
-    private const val SPIECE_REMOTE = "spiece.model.file"
+    private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
+    private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
+    private const val SPIECE_REMOTE = "spiece.model"
 
     const val ENCODER_NAME = "encoder_int8_dynamic.tflite"
     const val DECODER_NAME = "decoder_step_int8_dynamic.tflite"
