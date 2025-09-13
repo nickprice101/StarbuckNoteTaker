@@ -23,7 +23,9 @@ import coil.compose.rememberAsyncImagePainter
 @Composable
 fun AddNoteScreen(
     onSave: (String?, String, List<Uri>) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onDisablePinCheck: () -> Unit,
+    onEnablePinCheck: () -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
@@ -31,6 +33,7 @@ fun AddNoteScreen(
     val context = LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        onEnablePinCheck()
         uri?.let {
             context.contentResolver.takePersistableUriPermission(
                 it,
@@ -40,6 +43,10 @@ fun AddNoteScreen(
             blocks.add(NoteBlock.Image(it))
             blocks.add(NoteBlock.Text(""))
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onEnablePinCheck() }
     }
 
     Scaffold(
@@ -122,7 +129,10 @@ fun AddNoteScreen(
             }
             item {
                 OutlinedButton(
-                    onClick = { launcher.launch(arrayOf("image/*")) },
+                    onClick = {
+                        onDisablePinCheck()
+                        launcher.launch(arrayOf("image/*"))
+                    },
                     modifier = Modifier
                         .padding(top = 8.dp)
                         .fillMaxWidth()
