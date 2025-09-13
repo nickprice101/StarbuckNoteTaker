@@ -5,21 +5,28 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import android.util.Patterns
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -28,13 +35,19 @@ import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
 
 @Composable
-fun NoteDetailScreen(note: Note, onBack: () -> Unit) {
+fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
     val context = LocalContext.current
+    var fullImage by remember { mutableStateOf<String?>(null) }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(note.title) },
             navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
+            },
+            actions = {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit")
+                }
             }
         )
     }) { padding ->
@@ -59,6 +72,7 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 8.dp)
+                                .clickable { fullImage = base64 }
                         )
                     }
                 } else {
@@ -89,6 +103,51 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit) {
                             },
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
+                }
+            }
+        }
+        fullImage?.let { img ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                val bytes = remember(img) { Base64.decode(img, Base64.DEFAULT) }
+                val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+                IconButton(
+                    onClick = { fullImage = null },
+                    modifier = Modifier.align(Alignment.TopStart)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                }
+                IconButton(
+                    onClick = {
+                        val bytesToSave = Base64.decode(img, Base64.DEFAULT)
+                        val name = "note_image_${System.currentTimeMillis()}.png"
+                        val values = ContentValues().apply {
+                            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        }
+                        val uri = context.contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            values
+                        )
+                        uri?.let {
+                            context.contentResolver.openOutputStream(it)?.use { out ->
+                                out.write(bytesToSave)
+                            }
+                            Toast.makeText(context, "Image saved", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Save", tint = Color.White)
                 }
             }
         }

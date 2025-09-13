@@ -77,6 +77,15 @@ class NoteViewModel : ViewModel() {
             pin?.let { store?.saveNotes(_notes, it) }
         }
     }
+
+    fun updateNote(index: Int, title: String?, content: String, images: List<String>) {
+        if (index in _notes.indices) {
+            val note = _notes[index]
+            val finalTitle = if (title.isNullOrBlank()) note.title else title
+            _notes[index] = note.copy(title = finalTitle, content = content.trim(), images = images)
+            pin?.let { store?.saveNotes(_notes, it) }
+        }
+    }
     private fun isImageUrl(url: String): Boolean {
         val lower = url.lowercase()
         return Patterns.WEB_URL.matcher(url).matches() &&
