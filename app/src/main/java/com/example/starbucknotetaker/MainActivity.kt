@@ -55,6 +55,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && pinCheckEnabled) {
+                val entry = navController.currentBackStackEntry
+                lastRoute = entry?.destination?.route?.let { route ->
+                    entry.arguments?.keySet()?.fold(route) { acc, key ->
+                        acc.replace("{$key}", entry.arguments?.get(key).toString())
+                    }
+                }
+                lastRoute?.let { prefs.edit().putString("last_route", it).commit() }
                 requireAuth = true
             }
         }
@@ -64,13 +71,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     LaunchedEffect(requireAuth) {
         if (requireAuth && navController.currentDestination?.route !in listOf("pin_enter", "pin_setup")) {
-            val entry = navController.currentBackStackEntry
-            lastRoute = entry?.destination?.route?.let { route ->
-                entry.arguments?.keySet()?.fold(route) { acc, key ->
-                    acc.replace("{$key}", entry.arguments?.get(key).toString())
-                }
-            }
-            lastRoute?.let { prefs.edit().putString("last_route", it).apply() }
             navController.navigate("pin_enter")
         }
     }
