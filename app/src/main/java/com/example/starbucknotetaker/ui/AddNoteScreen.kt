@@ -39,8 +39,14 @@ fun AddNoteScreen(
                 it,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            blocks.add(NoteBlock.Image(it, 0))
-            blocks.add(NoteBlock.Text(""))
+            val last = blocks.lastOrNull()
+            if (last is NoteBlock.Text && last.text.isBlank()) {
+                blocks[blocks.size - 1] = NoteBlock.Image(it, 0)
+                blocks.add(NoteBlock.Text(""))
+            } else {
+                blocks.add(NoteBlock.Image(it, 0))
+                blocks.add(NoteBlock.Text(""))
+            }
         }
         onEnablePinCheck()
     }
