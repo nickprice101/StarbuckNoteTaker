@@ -52,7 +52,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     val message = if (firstPin == null) {
-        "This is the first time you've accessed this application. Please set a one-time PIN of 4 to 6 characters."
+        "Create a custom PIN"
     } else {
         "Please confirm your PIN."
     }
@@ -79,7 +79,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
             singleLine = true,
             textStyle = androidx.compose.material.LocalTextStyle.current.copy(
                 textAlign = TextAlign.Center,
-                fontSize = 32.sp
+                fontSize = 64.sp
             ),
             colors = TextFieldDefaults.textFieldColors(
                 backgroundColor = Color.Transparent,

@@ -122,7 +122,9 @@ private fun SwipeToDeleteNoteItem(
                 .background(Color.Red),
             contentAlignment = Alignment.Center
         ) {
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = {
+                scope.launch { swipeState.animateTo(2) }
+            }) {
                 Icon(
                     Icons.Default.Delete,
                     contentDescription = "Delete",
