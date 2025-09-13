@@ -113,18 +113,20 @@ private fun SwipeToDeleteNoteItem(
                 orientation = Orientation.Horizontal
             )
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxHeight()
+                .width(actionWidth)
+                .align(Alignment.CenterEnd)
                 .background(Color.Red),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
+            contentAlignment = Alignment.Center
         ) {
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.width(actionWidth)
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = Color.White
+                )
             }
         }
         NoteListItem(
