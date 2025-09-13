@@ -67,9 +67,11 @@ fun NoteListScreen(
                 itemsIndexed(filtered, key = { _, note -> note.id }) { index, note ->
                     val originalIndex = notes.indexOf(note)
                     val showDate = index == 0 || !isSameDay(filtered[index - 1].date, note.date)
+                    if (showDate) {
+                        DateHeader(note.date)
+                    }
                     SwipeToDeleteNoteItem(
                         note = note,
-                        showDate = showDate,
                         onClick = { onOpenNote(originalIndex) },
                         onDelete = { onDeleteNote(originalIndex) }
                     )
@@ -83,7 +85,6 @@ fun NoteListScreen(
 @Composable
 private fun SwipeToDeleteNoteItem(
     note: Note,
-    showDate: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -131,7 +132,6 @@ private fun SwipeToDeleteNoteItem(
         }
         NoteListItem(
             note = note,
-            showDate = showDate,
             onClick = {
                 if (swipeState.currentValue == 1) {
                     scope.launch { swipeState.animateTo(0) }
@@ -145,25 +145,14 @@ private fun SwipeToDeleteNoteItem(
 }
 
 @Composable
-fun NoteListItem(note: Note, showDate: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colors.surface)
             .clickable(onClick = onClick)
             .padding(8.dp)
     ) {
-        if (showDate) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = formatter.format(Date(note.date)), fontWeight = FontWeight.Light)
-                Divider(
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .height(1.dp)
-                        .weight(1f)
-                )
-            }
-        }
         Text(
             text = note.title,
             fontWeight = FontWeight.Bold,
@@ -176,6 +165,25 @@ fun NoteListItem(note: Note, showDate: Boolean, onClick: () -> Unit, modifier: M
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun DateHeader(date: Long) {
+    val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp, top = 8.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = formatter.format(Date(date)), fontWeight = FontWeight.Light)
+        Divider(
+            modifier = Modifier
+                .padding(start = 8.dp)
+                .height(1.dp)
+                .weight(1f)
         )
     }
 }
