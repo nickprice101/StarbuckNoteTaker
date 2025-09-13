@@ -45,48 +45,59 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit) {
             val lines = remember(note.content) { note.content.lines() }
             lines.forEach { line ->
                 val trimmed = line.trim()
-                if (isImageUrl(trimmed)) {
-                    Image(
-                        painter = rememberAsyncImagePainter(trimmed),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    )
-                } else {
-                    val annotated = buildAnnotatedString {
-                        var lastIndex = 0
-                        val matcher = Patterns.WEB_URL.matcher(trimmed)
-                        while (matcher.find()) {
-                            val start = matcher.start()
-                            val end = matcher.end()
-                            append(trimmed.substring(lastIndex, start))
-                            val url = trimmed.substring(start, end)
-                            pushStringAnnotation(tag = "URL", annotation = url)
-                            pushStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline))
-                            append(url)
-                            pop()
-                            pop()
-                            lastIndex = end
+                val placeholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
+                when {
+                    placeholder != null -> {
+                        val index = placeholder.groupValues[1].toInt()
+                        note.images.getOrNull(index)?.let { uri ->
+                            Image(
+                                painter = rememberAsyncImagePainter(uri),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            )
                         }
-                        append(trimmed.substring(lastIndex))
                     }
-                    ClickableText(text = annotated, onClick = { offset ->
-                        annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))
-                            context.startActivity(intent)
+                    isImageUrl(trimmed) -> {
+                        Image(
+                            painter = rememberAsyncImagePainter(trimmed),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                        )
+                    }
+                    else -> {
+                        val annotated = buildAnnotatedString {
+                            var lastIndex = 0
+                            val matcher = Patterns.WEB_URL.matcher(trimmed)
+                            while (matcher.find()) {
+                                val start = matcher.start()
+                                val end = matcher.end()
+                                append(trimmed.substring(lastIndex, start))
+                                val url = trimmed.substring(start, end)
+                                pushStringAnnotation(tag = "URL", annotation = url)
+                                pushStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline))
+                                append(url)
+                                pop()
+                                pop()
+                                lastIndex = end
+                            }
+                            append(trimmed.substring(lastIndex))
                         }
-                    }, modifier = Modifier.padding(bottom = 8.dp))
+                        ClickableText(
+                            text = annotated,
+                            onClick = { offset ->
+                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))
+                                    context.startActivity(intent)
+                                }
+                            },
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
                 }
-            }
-            note.images.forEach { uri ->
-                Image(
-                    painter = rememberAsyncImagePainter(uri),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                )
             }
         }
     }
