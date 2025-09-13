@@ -18,6 +18,19 @@ This repository uses the included Gradle wrapper. Typical commands:
 ./gradlew test     # run unit tests
 ```
 
+## On-device summarization models
+
+To enable the optional summarizer, download the TensorFlow Lite model files from the
+project's release page and place them in `app/src/main/assets/`:
+
+- `encoder_int8_dynamic.tflite`
+- `decoder_step_int8_dynamic.tflite`
+- `spiece.model`
+
+Release downloads: https://github.com/nickprice101/StarbuckNoteTaker/releases/tag/v1.0.0
+
+These binaries are excluded from version control and must be added manually.
+
 ## Requirements
 
 - Android Studio Giraffe (or newer)
@@ -26,4 +39,3 @@ This repository uses the included Gradle wrapper. Typical commands:
 ## Contributing
 
 Contributions are welcome. Feel free to open issues or submit pull requests.
-

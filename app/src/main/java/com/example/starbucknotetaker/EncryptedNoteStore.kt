@@ -40,7 +40,8 @@ class EncryptedNoteStore(private val context: Context) {
                     title = obj.getString("title"),
                     content = obj.getString("content"),
                     date = obj.getLong("date"),
-                    images = images
+                    images = images,
+                    summary = obj.optString("summary", "")
                 )
             )
         }
@@ -58,6 +59,7 @@ class EncryptedNoteStore(private val context: Context) {
             val imagesArray = JSONArray()
             note.images.forEach { imagesArray.put(it) }
             obj.put("images", imagesArray)
+            obj.put("summary", note.summary)
             arr.put(obj)
         }
         val json = arr.toString().toByteArray(Charsets.UTF_8)
