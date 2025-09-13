@@ -13,4 +13,6 @@ class PinManager(context: Context) {
     }
 
     fun checkPin(pin: String): Boolean = prefs.getString("pin", null) == pin
+
+    fun getPinLength(): Int = prefs.getString("pin", null)?.length ?: 0
 }
