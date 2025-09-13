@@ -1,5 +1,6 @@
 package com.example.starbucknotetaker.ui
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 
@@ -26,9 +28,14 @@ fun AddNoteScreen(
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
     val images = remember { mutableStateListOf<Uri>() }
+    val context = LocalContext.current
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
             images.add(it)
             blocks.add(NoteBlock.Image(it))
             blocks.add(NoteBlock.Text(""))
@@ -115,7 +122,7 @@ fun AddNoteScreen(
             }
             item {
                 OutlinedButton(
-                    onClick = { launcher.launch("image/*") },
+                    onClick = { launcher.launch(arrayOf("image/*")) },
                     modifier = Modifier
                         .padding(top = 8.dp)
                         .fillMaxWidth()

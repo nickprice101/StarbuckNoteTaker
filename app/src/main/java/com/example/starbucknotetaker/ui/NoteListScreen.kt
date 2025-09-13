@@ -35,10 +35,8 @@ fun NoteListScreen(
     onDeleteNote: (Int) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(query, notes) {
-        notes.filter {
-            it.title.contains(query, true) || it.content.contains(query, true)
-        }
+    val filtered = notes.filter {
+        it.title.contains(query, true) || it.content.contains(query, true)
     }
     Scaffold(
         floatingActionButton = {
