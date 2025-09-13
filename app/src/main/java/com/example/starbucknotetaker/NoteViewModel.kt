@@ -12,7 +12,9 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import java.net.URL
+import kotlinx.coroutines.launch
 
 /**
  * ViewModel storing notes in memory.
@@ -25,6 +27,7 @@ class NoteViewModel : ViewModel() {
     private var pin: String? = null
     private var store: EncryptedNoteStore? = null
     private var context: Context? = null
+    private var summarizer: Summarizer? = null
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -33,6 +36,7 @@ class NoteViewModel : ViewModel() {
         store = s
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
+        summarizer = Summarizer(context.applicationContext)
     }
 
     fun addNote(title: String?, content: String, images: List<Pair<Uri, Int>>) {
@@ -87,10 +91,18 @@ class NoteViewModel : ViewModel() {
             title = finalTitle,
             content = finalContent.trim(),
             date = System.currentTimeMillis(),
-            images = embeddedImages
+            images = embeddedImages,
+            summary = summarizer?.let { it.fallbackSummary(finalContent) } ?: finalContent.take(200)
         )
         _notes.add(0, note) // newest first
         pin?.let { store?.saveNotes(_notes, it) }
+        summarizer?.let { sum ->
+            viewModelScope.launch {
+                val summary = sum.summarize(finalContent)
+                _notes[0] = _notes[0].copy(summary = summary)
+                pin?.let { store?.saveNotes(_notes, it) }
+            }
+        }
     }
 
     fun deleteNote(index: Int) {
@@ -104,8 +116,21 @@ class NoteViewModel : ViewModel() {
         if (index in _notes.indices) {
             val note = _notes[index]
             val finalTitle = if (title.isNullOrBlank()) note.title else title
-            _notes[index] = note.copy(title = finalTitle, content = content.trim(), images = images)
+            val updated = note.copy(
+                title = finalTitle,
+                content = content.trim(),
+                images = images,
+                summary = summarizer?.let { it.fallbackSummary(content) } ?: content.take(200)
+            )
+            _notes[index] = updated
             pin?.let { store?.saveNotes(_notes, it) }
+            summarizer?.let { sum ->
+                viewModelScope.launch {
+                    val summary = sum.summarize(updated.content)
+                    _notes[index] = updated.copy(summary = summary)
+                    pin?.let { store?.saveNotes(_notes, it) }
+                }
+            }
         }
     }
     private fun isImageUrl(url: String): Boolean {

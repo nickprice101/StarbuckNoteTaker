@@ -36,7 +36,9 @@ fun NoteListScreen(
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = notes.filter {
-        it.title.contains(query, true) || it.content.contains(query, true)
+        it.title.contains(query, true) ||
+                it.content.contains(query, true) ||
+                it.summary.contains(query, true)
     }
     var openIndex by remember { mutableStateOf<Int?>(null) }
     Scaffold(
@@ -180,11 +182,8 @@ fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier)
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
-        val preview = remember(note.content) {
-            note.content.replace(Regex("\\[\\[image:\\d+]]"), "[Image]")
-        }
         Text(
-            text = preview,
+            text = note.summary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 2.dp)
