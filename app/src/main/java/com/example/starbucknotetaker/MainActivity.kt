@@ -64,8 +64,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         if (requireAuth && navController.currentDestination?.route !in listOf("pin_enter", "pin_setup")) {
             val entry = navController.currentBackStackEntry
             lastRoute = entry?.destination?.route?.let { route ->
-                entry.arguments?.keySet()?.fold(route) { acc, key ->
-                    acc.replace("{$key}", entry.arguments?.get(key).toString())
+                val args = entry.arguments
+                if (args == null) {
+                    route
+                } else {
+                    args.keySet().fold(route) { acc, key ->
+                        acc.replace("{$key}", args.get(key).toString())
+                    }
                 }
             }
             navController.navigate("pin_enter")
