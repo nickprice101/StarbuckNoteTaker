@@ -162,8 +162,11 @@ fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier)
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
+        val preview = remember(note.content) {
+            note.content.replace(Regex("\\[\\[image:\\d+]]"), "[Image]")
+        }
         Text(
-            text = note.content,
+            text = preview,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 2.dp)
