@@ -20,16 +20,12 @@ This repository uses the included Gradle wrapper. Typical commands:
 
 ## On-device summarization models
 
-To enable the optional summarizer, download the TensorFlow Lite model files from the
-project's release page and place them in `app/src/main/assets/`:
+The app downloads its TensorFlow Lite summarisation models from the project's
+GitHub Releases on first run and caches them under internal storage. If the
+download fails, summaries gracefully fall back to a simple extractive method.
 
-- `encoder_int8_dynamic.tflite`
-- `decoder_step_int8_dynamic.tflite`
-- `spiece.model`
-
-Release downloads: https://github.com/nickprice101/StarbuckNoteTaker/releases/tag/v1.0.0
-
-These binaries are excluded from version control and must be added manually.
+The release asset URL and optional SHA-256 checksum are configured in
+`ModelFetcher`. Update these constants when publishing new model versions.
 
 ## Requirements
 
