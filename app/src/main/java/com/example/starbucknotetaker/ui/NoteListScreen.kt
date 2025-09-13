@@ -38,6 +38,7 @@ fun NoteListScreen(
     val filtered = notes.filter {
         it.title.contains(query, true) || it.content.contains(query, true)
     }
+    var openIndex by remember { mutableStateOf<Int?>(null) }
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(
@@ -70,8 +71,14 @@ fun NoteListScreen(
                     }
                     SwipeToDeleteNoteItem(
                         note = note,
+                        isOpen = openIndex == originalIndex,
+                        onOpen = { openIndex = originalIndex },
+                        onClose = { if (openIndex == originalIndex) openIndex = null },
                         onClick = { onOpenNote(originalIndex) },
-                        onDelete = { onDeleteNote(originalIndex) }
+                        onDelete = {
+                            onDeleteNote(originalIndex)
+                            if (openIndex == originalIndex) openIndex = null
+                        }
                     )
                 }
             }
@@ -83,6 +90,9 @@ fun NoteListScreen(
 @Composable
 private fun SwipeToDeleteNoteItem(
     note: Note,
+    isOpen: Boolean,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -91,9 +101,19 @@ private fun SwipeToDeleteNoteItem(
     val swipeState = rememberSwipeableState(0)
     val scope = rememberCoroutineScope()
 
+    LaunchedEffect(isOpen) {
+        if (isOpen) {
+            swipeState.animateTo(1)
+        } else {
+            swipeState.animateTo(0)
+        }
+    }
+
     LaunchedEffect(swipeState.currentValue) {
-        if (swipeState.currentValue == 2) {
-            onDelete()
+        if (swipeState.currentValue == 1) {
+            onOpen()
+        } else {
+            onClose()
         }
     }
 
@@ -105,8 +125,7 @@ private fun SwipeToDeleteNoteItem(
                 state = swipeState,
                 anchors = mapOf(
                     0f to 0,
-                    -actionWidthPx to 1,
-                    -actionWidthPx * 2 to 2
+                    -actionWidthPx to 1
                 ),
                 thresholds = { _, _ -> FractionalThreshold(0.3f) },
                 orientation = Orientation.Horizontal
@@ -121,7 +140,8 @@ private fun SwipeToDeleteNoteItem(
             contentAlignment = Alignment.Center
         ) {
             IconButton(onClick = {
-                scope.launch { swipeState.animateTo(2) }
+                onDelete()
+                scope.launch { swipeState.snapTo(0) }
             }) {
                 Icon(
                     Icons.Default.Delete,

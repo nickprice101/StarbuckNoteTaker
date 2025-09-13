@@ -4,8 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -33,9 +36,31 @@ class MainActivity : ComponentActivity() {
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val start = if (pinManager.isPinSet()) "pin_enter" else "pin_setup"
     val context = LocalContext.current
+    var requireAuth by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                requireAuth = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(requireAuth) {
+        if (requireAuth && navController.currentDestination?.route !in listOf("pin_enter", "pin_setup")) {
+            navController.navigate("pin_enter") {
+                popUpTo("pin_enter") { inclusive = true }
+            }
+        }
+    }
+
     NavHost(navController = navController, startDestination = start) {
         composable("pin_setup") {
             PinSetupScreen(pinManager = pinManager) { pin ->
+                requireAuth = false
                 noteViewModel.loadNotes(context, pin)
                 navController.navigate("list") {
                     popUpTo("pin_setup") { inclusive = true }
@@ -44,6 +69,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
         composable("pin_enter") {
             PinEnterScreen(pinManager = pinManager) { pin ->
+                requireAuth = false
                 noteViewModel.loadNotes(context, pin)
                 navController.navigate("list") {
                     popUpTo("pin_enter") { inclusive = true }
