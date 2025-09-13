@@ -1,7 +1,6 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
-import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -31,9 +30,9 @@ class EncryptedNoteStore(private val context: Context) {
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             val imagesJson = obj.optJSONArray("images") ?: JSONArray()
-            val images = mutableListOf<Uri>()
+            val images = mutableListOf<String>()
             for (j in 0 until imagesJson.length()) {
-                images.add(Uri.parse(imagesJson.getString(j)))
+                images.add(imagesJson.getString(j))
             }
             notes.add(
                 Note(
@@ -57,7 +56,7 @@ class EncryptedNoteStore(private val context: Context) {
             obj.put("content", note.content)
             obj.put("date", note.date)
             val imagesArray = JSONArray()
-            note.images.forEach { imagesArray.put(it.toString()) }
+            note.images.forEach { imagesArray.put(it) }
             obj.put("images", imagesArray)
             arr.put(obj)
         }

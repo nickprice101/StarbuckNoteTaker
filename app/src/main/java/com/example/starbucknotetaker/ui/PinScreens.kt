@@ -61,8 +61,9 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
+            .padding(16.dp)
+            .imePadding(),
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(message, modifier = Modifier.padding(bottom = 16.dp))
