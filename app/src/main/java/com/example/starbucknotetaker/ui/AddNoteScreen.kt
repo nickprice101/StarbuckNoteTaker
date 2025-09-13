@@ -13,36 +13,36 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 
 @Composable
 fun AddNoteScreen(
-    onSave: (String?, String, List<Uri>) -> Unit,
+    onSave: (String?, String, List<Pair<Uri, Int>>) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
-    val images = remember { mutableStateListOf<Uri>() }
     val context = LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        onEnablePinCheck()
         uri?.let {
             context.contentResolver.takePersistableUriPermission(
                 it,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            images.add(it)
-            blocks.add(NoteBlock.Image(it))
+            blocks.add(NoteBlock.Image(it, 0))
             blocks.add(NoteBlock.Text(""))
         }
+        onEnablePinCheck()
     }
 
     DisposableEffect(Unit) {
@@ -60,6 +60,7 @@ fun AddNoteScreen(
                 },
                 actions = {
                     IconButton(onClick = {
+                        val imageList = mutableListOf<Pair<Uri, Int>>()
                         val content = buildString {
                             var imageIndex = 0
                             blocks.forEach { block ->
@@ -72,12 +73,13 @@ fun AddNoteScreen(
                                         append("[[image:")
                                         append(imageIndex)
                                         append("]]\n")
+                                        imageList.add(block.uri to block.rotation)
                                         imageIndex++
                                     }
                                 }
                             }
                         }.trim()
-                        onSave(title, content, images)
+                        onSave(title, content, imageList)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")
                     }
@@ -116,14 +118,28 @@ fun AddNoteScreen(
                         )
                     }
                     is NoteBlock.Image -> {
-                        Image(
-                            painter = rememberAsyncImagePainter(block.uri),
-                            contentDescription = null,
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(200.dp)
                                 .padding(vertical = 8.dp)
-                        )
+                        ) {
+                            Image(
+                                painter = rememberAsyncImagePainter(block.uri),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer(rotationZ = block.rotation.toFloat())
+                            )
+                            IconButton(
+                                onClick = {
+                                    blocks[index] = block.copy(rotation = (block.rotation + 270) % 360)
+                                },
+                                modifier = Modifier.align(Alignment.BottomStart)
+                            ) {
+                                Icon(Icons.Default.RotateLeft, contentDescription = "Rotate")
+                            }
+                        }
                     }
                 }
             }
@@ -148,6 +164,6 @@ fun AddNoteScreen(
 
 private sealed class NoteBlock {
     data class Text(val text: String) : NoteBlock()
-    data class Image(val uri: Uri) : NoteBlock()
+    data class Image(val uri: Uri, val rotation: Int) : NoteBlock()
 }
 

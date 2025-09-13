@@ -126,28 +126,34 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                 ) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                 }
-                IconButton(
-                    onClick = {
-                        val bytesToSave = Base64.decode(img, Base64.DEFAULT)
-                        val name = "note_image_${System.currentTimeMillis()}.png"
-                        val values = ContentValues().apply {
-                            put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                        }
-                        val uri = context.contentResolver.insert(
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            values
-                        )
-                        uri?.let {
-                            context.contentResolver.openOutputStream(it)?.use { out ->
-                                out.write(bytesToSave)
+                var menuExpanded by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.White)
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(onClick = {
+                            val bytesToSave = Base64.decode(img, Base64.DEFAULT)
+                            val name = "note_image_${System.currentTimeMillis()}.png"
+                            val values = ContentValues().apply {
+                                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
                             }
-                            Toast.makeText(context, "Image saved", Toast.LENGTH_SHORT).show()
+                            val uri = context.contentResolver.insert(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                values
+                            )
+                            uri?.let {
+                                context.contentResolver.openOutputStream(it)?.use { out ->
+                                    out.write(bytesToSave)
+                                }
+                                Toast.makeText(context, "Image saved", Toast.LENGTH_SHORT).show()
+                            }
+                            menuExpanded = false
+                        }) {
+                            Text("Save image")
                         }
-                    },
-                    modifier = Modifier.align(Alignment.TopEnd)
-                ) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Save", tint = Color.White)
+                    }
                 }
             }
         }
