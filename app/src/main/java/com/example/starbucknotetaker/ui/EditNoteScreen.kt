@@ -29,7 +29,9 @@ import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import com.example.starbucknotetaker.Note
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun EditNoteScreen(
@@ -52,7 +54,14 @@ fun EditNoteScreen(
                         add(EditBlock.Text(""))
                     }
                 } else {
-                    add(EditBlock.Text(line))
+                    val last = lastOrNull()
+                    if (last is EditBlock.Text) {
+                        val lastIndex = size - 1
+                        val newText = if (last.text.isEmpty()) line else last.text + "\n" + line
+                        this[lastIndex] = EditBlock.Text(newText)
+                    } else {
+                        add(EditBlock.Text(line))
+                    }
                 }
             }
             if (isEmpty()) add(EditBlock.Text(""))
@@ -69,26 +78,38 @@ fun EditNoteScreen(
                 it,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            context.contentResolver.openInputStream(it)?.use { input ->
-                val bytes = input.readBytes()
-                val exif = ExifInterface(ByteArrayInputStream(bytes))
-                val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-                val exifRotation = when (orientation) {
-                    ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                    ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                    ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                    else -> 0
+            scope.launch {
+                val base64 = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(it)?.use { input ->
+                        val bytes = input.readBytes()
+                        val exif = ExifInterface(ByteArrayInputStream(bytes))
+                        val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                        val exifRotation = when (orientation) {
+                            ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                            ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                            else -> 0
+                        }
+                        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (exifRotation != 0) {
+                            val matrix = Matrix().apply { postRotate(exifRotation.toFloat()) }
+                            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        }
+                        val baos = ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                        Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
+                    }
                 }
-                var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                if (exifRotation != 0) {
-                    val matrix = Matrix().apply { postRotate(exifRotation.toFloat()) }
-                    bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                base64?.let { data ->
+                    val last = blocks.lastOrNull()
+                    if (last is EditBlock.Text && last.text.isBlank()) {
+                        blocks[blocks.size - 1] = EditBlock.Image(data)
+                        blocks.add(EditBlock.Text(""))
+                    } else {
+                        blocks.add(EditBlock.Image(data))
+                        blocks.add(EditBlock.Text(""))
+                    }
                 }
-                val baos = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                val base64 = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-                blocks.add(EditBlock.Image(base64))
-                blocks.add(EditBlock.Text(""))
             }
         }
     }
@@ -178,30 +199,43 @@ fun EditNoteScreen(
                         )
                     }
                     is EditBlock.Image -> {
+                        var bitmap by remember(block.data) { mutableStateOf<Bitmap?>(null) }
+                        LaunchedEffect(block.data) {
+                            bitmap = withContext(Dispatchers.IO) {
+                                val bytes = Base64.decode(block.data, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            }
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(200.dp)
                                 .padding(vertical = 8.dp)
                         ) {
-                            val bytes = remember(block.data) { Base64.decode(block.data, Base64.DEFAULT) }
-                            val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            IconButton(
-                                onClick = {
-                                    val matrix = Matrix().apply { postRotate(270f) }
-                                    val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                                    val baos = ByteArrayOutputStream()
-                                    rotated.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                                    blocks[index] = EditBlock.Image(Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT))
-                                },
-                                modifier = Modifier.align(Alignment.BottomStart)
-                            ) {
-                                Icon(Icons.Default.RotateLeft, contentDescription = "Rotate", tint = Color.White)
+                            bitmap?.let { bmp ->
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            val (rotated, encoded) = withContext(Dispatchers.IO) {
+                                                val matrix = Matrix().apply { postRotate(270f) }
+                                                val r = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                                                val baos = ByteArrayOutputStream()
+                                                r.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                                                r to Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
+                                            }
+                                            bitmap = rotated
+                                            blocks[index] = EditBlock.Image(encoded)
+                                        }
+                                    },
+                                    modifier = Modifier.align(Alignment.BottomStart)
+                                ) {
+                                    Icon(Icons.Default.RotateLeft, contentDescription = "Rotate", tint = Color.White)
+                                }
                             }
                             IconButton(
                                 onClick = {
