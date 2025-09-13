@@ -77,7 +77,8 @@ dependencies {
     implementation 'com.google.android.material:material:1.12.0' // Or the latest version
     implementation 'androidx.exifinterface:exifinterface:1.3.7'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation 'org.tensorflow:tensorflow-lite-task-text:0.4.4'
     implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
 
