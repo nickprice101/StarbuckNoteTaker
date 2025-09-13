@@ -52,7 +52,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && pinCheckEnabled) {
+            if (event == Lifecycle.Event.ON_PAUSE && pinCheckEnabled) {
                 requireAuth = true
             }
         }
