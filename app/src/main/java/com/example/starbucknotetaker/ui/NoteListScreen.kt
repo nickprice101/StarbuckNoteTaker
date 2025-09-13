@@ -17,6 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.colorResource
+import com.example.starbucknotetaker.R
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,7 +45,7 @@ fun NoteListScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onAddNote,
-                backgroundColor = Color(0xFF4CAF50)
+                backgroundColor = colorResource(id = R.color.fab_color)
             ) {
                 Icon(Icons.Default.NoteAdd, contentDescription = "Add note", tint = Color.White)
             }

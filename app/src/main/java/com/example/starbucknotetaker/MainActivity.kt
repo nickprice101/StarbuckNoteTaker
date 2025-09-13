@@ -37,11 +37,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val start = if (pinManager.isPinSet()) "pin_enter" else "pin_setup"
     val context = LocalContext.current
     var requireAuth by remember { mutableStateOf(false) }
+    var pinCheckEnabled by remember { mutableStateOf(true) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
+            if (event == Lifecycle.Event.ON_STOP && pinCheckEnabled) {
                 requireAuth = true
             }
         }
@@ -85,10 +86,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             )
         }
         composable("add") {
-            AddNoteScreen(onSave = { title, content, images ->
-                noteViewModel.addNote(title, content, images)
-                navController.popBackStack()
-            }, onBack = { navController.popBackStack() })
+            AddNoteScreen(
+                onSave = { title, content, images ->
+                    noteViewModel.addNote(title, content, images)
+                    navController.popBackStack()
+                },
+                onBack = { navController.popBackStack() },
+                onDisablePinCheck = { pinCheckEnabled = false },
+                onEnablePinCheck = { pinCheckEnabled = true }
+            )
         }
         composable("detail/{index}") { backStackEntry ->
             val index = backStackEntry.arguments?.getString("index")?.toIntOrNull() ?: 0
