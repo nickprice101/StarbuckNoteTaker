@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -20,12 +21,26 @@ import com.example.starbucknotetaker.ui.PinEnterScreen
 import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
+import kotlinx.coroutines.launch
+import org.tensorflow.lite.Interpreter
+import java.io.File
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 
 class MainActivity : ComponentActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
+    private var encoder: Interpreter? = null
+    private var decoder: Interpreter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        lifecycleScope.launch {
+            val (encFile, decFile) = ModelFetcher.ensureModels(this@MainActivity)
+            encoder = Interpreter(mapFile(encFile))
+            decoder = Interpreter(mapFile(decFile))
+        }
+
         val pinManager = PinManager(applicationContext)
         setContent {
             StarbuckNoteTakerTheme {
@@ -33,6 +48,17 @@ class MainActivity : ComponentActivity() {
                 AppContent(navController, noteViewModel, pinManager)
             }
         }
+    }
+
+    private fun mapFile(file: File): MappedByteBuffer {
+        val raf = java.io.RandomAccessFile(file, "r")
+        return raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length()).also { raf.close() }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        encoder?.close()
+        decoder?.close()
     }
 }
 
