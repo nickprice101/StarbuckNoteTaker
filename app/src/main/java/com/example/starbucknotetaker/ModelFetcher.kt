@@ -10,11 +10,11 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 
 /**
- * Downloads the summarization models from GitHub Releases on first run.
+ * Downloads the summarization models from a public endpoint on first run.
  * The models are stored under `files/models` in the app's internal storage.
  */
 object ModelFetcher {
-    private const val BASE_URL = "https://github.com/nickprice101/StarbuckNoteTaker/releases/download/v1.0.0/"
+    private const val BASE_URL = "https://music.corsicanescape.com/apk/"
 
     private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
     private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
