@@ -1,7 +1,7 @@
 package com.example.starbucknotetaker
 
 import ai.djl.sentencepiece.SpTokenizer
-import java.nio.file.Paths
+import java.io.File
 
 /**
  * Wrapper around DJL's SentencePiece tokenizer providing simple encode/decode
@@ -12,7 +12,9 @@ class SentencePieceProcessor {
 
     /** Loads the SentencePiece model from [modelPath]. */
     fun load(modelPath: String) {
-        tokenizer = SpTokenizer(Paths.get(modelPath))
+        File(modelPath).inputStream().use { inputStream ->
+            tokenizer = SpTokenizer(inputStream)
+        }
     }
 
     /** Encodes [text] into an array of token IDs. */
