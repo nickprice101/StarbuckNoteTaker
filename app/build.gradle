@@ -54,12 +54,12 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '11'
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
         coreLibraryDesugaringEnabled true
     }
 
@@ -67,6 +67,10 @@ android {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
+    }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
     }
 }
 
@@ -95,12 +99,17 @@ dependencies {
         exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
+    implementation 'org.tensorflow:tensorflow-lite-api:2.13.0'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation 'ai.djl.sentencepiece:sentencepiece:0.33.0'
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:5.2.0'
+    testImplementation 'org.mockito:mockito-inline:5.2.0'
+    testImplementation 'org.mockito.kotlin:mockito-kotlin:5.1.0'
+    testImplementation 'org.tensorflow:tensorflow-lite-api:2.13.0'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation platform('androidx.compose:compose-bom:2024.06.00')
