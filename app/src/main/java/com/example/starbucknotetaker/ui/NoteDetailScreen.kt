@@ -17,7 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -42,7 +42,12 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
         TopAppBar(
             title = { Text(note.title) },
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back"
+                    )
+                }
             },
             actions = {
                 IconButton(onClick = onEdit) {
