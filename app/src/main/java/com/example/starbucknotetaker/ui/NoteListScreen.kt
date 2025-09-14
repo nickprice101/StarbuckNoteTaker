@@ -12,7 +12,7 @@ import androidx.compose.material.rememberSwipeableState
 import androidx.compose.material.swipeable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +47,11 @@ fun NoteListScreen(
                 onClick = onAddNote,
                 backgroundColor = MaterialTheme.colors.primary
             ) {
-                Icon(Icons.Default.NoteAdd, contentDescription = "Add note", tint = Color.White)
+                Icon(
+                    Icons.AutoMirrored.Filled.NoteAdd,
+                    contentDescription = "Add note",
+                    tint = Color.White
+                )
             }
         }
     ) { padding ->

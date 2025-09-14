@@ -17,7 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -192,7 +192,9 @@ fun EditNoteScreen(
                         OutlinedTextField(
                             value = block.text,
                             onValueChange = { newText -> blocks[index] = block.copy(text = newText) },
-                            label = { if (index == 0) Text("Content") else null },
+                            label = if (index == 0) {
+                                { Text("Content") }
+                            } else null,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
@@ -234,7 +236,11 @@ fun EditNoteScreen(
                                     },
                                     modifier = Modifier.align(Alignment.BottomStart)
                                 ) {
-                                    Icon(Icons.Default.RotateLeft, contentDescription = "Rotate", tint = Color.White)
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.RotateLeft,
+                                        contentDescription = "Rotate",
+                                        tint = Color.White
+                                    )
                                 }
                             }
                             IconButton(

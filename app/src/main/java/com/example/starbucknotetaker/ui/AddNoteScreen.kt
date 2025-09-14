@@ -10,10 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +61,10 @@ fun AddNoteScreen(
                 title = { Text("New Note") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 },
                 actions = {
@@ -117,7 +120,9 @@ fun AddNoteScreen(
                             onValueChange = { newText ->
                                 blocks[index] = block.copy(text = newText)
                             },
-                            label = { if (index == 0) Text("Content") else null },
+                            label = if (index == 0) {
+                                { Text("Content") }
+                            } else null,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
@@ -143,7 +148,10 @@ fun AddNoteScreen(
                                 },
                                 modifier = Modifier.align(Alignment.BottomStart)
                             ) {
-                                Icon(Icons.Default.RotateLeft, contentDescription = "Rotate")
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.RotateLeft,
+                                        contentDescription = "Rotate"
+                                    )
                             }
                         }
                     }
