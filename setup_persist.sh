@@ -30,26 +30,28 @@ if [ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]; then
   unzip -q tools.zip
   rm tools.zip
   mv cmdline-tools latest
-
-  echo "🔐 Accepting Android SDK licenses silently..."
-  yes | sdkmanager --licenses > /dev/null
-
-  echo "📦 Installing platform-tools, build-tools, and platform..."
-  sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null
 else
   echo "✅ Android SDK already installed at $ANDROID_SDK_ROOT"
 fi
 
-# After installing platform-tools/build-tools:
-sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
-           "ndk;26.1.10909125"
+echo "🔐 Accepting Android SDK licenses silently..."
+yes | sdkmanager --licenses > /dev/null
+
+echo "📦 Installing required SDK packages..."
+sdkmanager --install \
+  "platform-tools" \
+  "platforms;android-35" \
+  "build-tools;35.0.0" \
+  "ndk;26.1.10909125" > /dev/null
 
 ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
 export ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 
-echo "sdk.dir=$ANDROID_SDK_ROOT" > "$PROJECT_DIR/local.properties"
-echo "ndk.dir=$ANDROID_NDK_ROOT" >> "$PROJECT_DIR/local.properties"
-
+echo "📄 Writing local.properties with SDK and NDK paths..."
+cat <<EOF > "$PROJECT_DIR/local.properties"
+sdk.dir=$ANDROID_SDK_ROOT
+ndk.dir=$ANDROID_NDK_ROOT
+EOF
 
 # ----------------------------
 # GRADLE INSTALLATION
@@ -66,12 +68,6 @@ if [ ! -d "$GRADLE_INSTALL_DIR" ]; then
 else
   echo "✅ Gradle $GRADLE_VERSION already installed at $GRADLE_INSTALL_DIR"
 fi
-
-# ----------------------------
-# WRITE local.properties
-# ----------------------------
-echo "📄 Writing local.properties with SDK path..."
-echo "sdk.dir=$ANDROID_SDK_ROOT" > "$PROJECT_DIR/local.properties"
 
 # ----------------------------
 # CONDITIONAL GRADLE BUILD
