@@ -107,6 +107,16 @@ class Summarizer(private val context: Context) {
         return if (candidate.isNotEmpty()) candidate else text.take(200)
     }
 
+    /** Releases model and tokenizer resources. */
+    fun close() {
+        encoder?.close()
+        decoder?.close()
+        tokenizer?.close()
+        encoder = null
+        decoder = null
+        tokenizer = null
+    }
+
     private fun argmax(arr: FloatArray): Int {
         var maxIdx = 0
         var maxVal = arr[0]
