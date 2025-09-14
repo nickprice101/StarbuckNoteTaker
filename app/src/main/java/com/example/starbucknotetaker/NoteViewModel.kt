@@ -133,6 +133,11 @@ class NoteViewModel : ViewModel() {
             }
         }
     }
+
+    override fun onCleared() {
+        summarizer?.close()
+        super.onCleared()
+    }
     private fun isImageUrl(url: String): Boolean {
         val lower = url.lowercase()
         return Patterns.WEB_URL.matcher(url).matches() &&
