@@ -40,6 +40,17 @@ else
   echo "✅ Android SDK already installed at $ANDROID_SDK_ROOT"
 fi
 
+# After installing platform-tools/build-tools:
+sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
+           "ndk;26.1.10909125"
+
+ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+export ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+
+echo "sdk.dir=$ANDROID_SDK_ROOT" > "$PROJECT_DIR/local.properties"
+echo "ndk.dir=$ANDROID_NDK_ROOT" >> "$PROJECT_DIR/local.properties"
+
+
 # ----------------------------
 # GRADLE INSTALLATION
 # ----------------------------
