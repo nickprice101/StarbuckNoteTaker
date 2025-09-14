@@ -20,12 +20,13 @@ This repository uses the included Gradle wrapper. Typical commands:
 
 ## On-device summarization models
 
-The app downloads its TensorFlow Lite summarisation models from the project's
-GitHub Releases on first run and caches them under internal storage. If the
-download fails, summaries gracefully fall back to a simple extractive method.
+The app downloads its TensorFlow Lite summarisation models from a public
+endpoint at `https://music.corsicanescape.com/apk/` on first run and caches
+them under internal storage. If the download fails, summaries gracefully fall
+back to a simple extractive method.
 
-The release asset URL and optional SHA-256 checksum are configured in
-`ModelFetcher`. Update these constants when publishing new model versions.
+The model URLs are configured in `ModelFetcher`. Update these constants when
+publishing new model versions or moving the files.
 
 ## Requirements
 
