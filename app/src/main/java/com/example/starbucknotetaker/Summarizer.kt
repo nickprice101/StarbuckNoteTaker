@@ -48,6 +48,14 @@ class Summarizer(
         when (val result = fetcher.ensureModels(context)) {
             is ModelFetcher.Result.Success -> {
                 try {
+                    if (!hasNativeTokenizerLib()) {
+                        logger(
+                            "summarizer missing native tokenizer lib",
+                            UnsatisfiedLinkError("libpenguin.so not found")
+                        )
+                        _state.emit(SummarizerState.Fallback)
+                        return
+                    }
                     encoder = Interpreter(mapFile(result.encoder))
                     decoder = Interpreter(mapFile(result.decoder))
                     tokenizer = spFactory().apply { load(result.spiece.absolutePath) }
@@ -70,6 +78,11 @@ class Summarizer(
         RandomAccessFile(file, "r").use { raf ->
             return raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
         }
+    }
+
+    private fun hasNativeTokenizerLib(): Boolean {
+        val libDir = context.applicationInfo.nativeLibraryDir ?: return false
+        return File(libDir, "libpenguin.so").exists()
     }
 
     /**
