@@ -10,6 +10,8 @@ import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import android.os.Environment
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -155,6 +157,32 @@ class NoteViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    fun exportNotes(context: Context) {
+        val currentPin = pin ?: return
+        store?.saveNotes(_notes, currentPin)
+        val src = File(context.filesDir, "notes.enc")
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!downloads.exists()) downloads.mkdirs()
+        val dest = File(downloads, "notes.snarchive")
+        try {
+            src.copyTo(dest, overwrite = true)
+        } catch (_: Exception) {}
+    }
+
+    fun importNotes(context: Context, uri: Uri, archivePin: String, overwrite: Boolean) {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val bytes = input.readBytes()
+                val imported = EncryptedNoteStore(context).loadNotesFromBytes(bytes, archivePin)
+                if (overwrite) {
+                    _notes.clear()
+                }
+                _notes.addAll(imported)
+                pin?.let { store?.saveNotes(_notes, it) }
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onCleared() {

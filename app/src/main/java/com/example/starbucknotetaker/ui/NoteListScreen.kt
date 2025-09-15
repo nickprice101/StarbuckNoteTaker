@@ -12,6 +12,7 @@ import androidx.compose.material.rememberSwipeableState
 import androidx.compose.material.swipeable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +33,8 @@ fun NoteListScreen(
     notes: List<Note>,
     onAddNote: () -> Unit,
     onOpenNote: (Int) -> Unit,
-    onDeleteNote: (Int) -> Unit
+    onDeleteNote: (Int) -> Unit,
+    onSettings: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = notes.filter {
@@ -43,15 +45,29 @@ fun NoteListScreen(
     var openIndex by remember { mutableStateOf<Int?>(null) }
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddNote,
-                backgroundColor = MaterialTheme.colors.primary
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.NoteAdd,
-                    contentDescription = "Add note",
-                    tint = Color.White
-                )
+                FloatingActionButton(
+                    onClick = onSettings,
+                    backgroundColor = MaterialTheme.colors.primary
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = Color.White
+                    )
+                }
+                FloatingActionButton(
+                    onClick = onAddNote,
+                    backgroundColor = MaterialTheme.colors.primary
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.NoteAdd,
+                        contentDescription = "Add note",
+                        tint = Color.White
+                    )
+                }
             }
         }
     ) { padding ->
