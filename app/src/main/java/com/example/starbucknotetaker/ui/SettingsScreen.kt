@@ -18,7 +18,9 @@ import androidx.compose.ui.unit.dp
 fun SettingsScreen(
     onBack: () -> Unit,
     onImport: (Uri, String, Boolean) -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    onDisablePinCheck: () -> Unit,
+    onEnablePinCheck: () -> Unit
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
@@ -27,6 +29,11 @@ fun SettingsScreen(
             selectedUri = uri
             showDialog = true
         }
+        onEnablePinCheck()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onEnablePinCheck() }
     }
 
     if (showDialog && selectedUri != null) {
@@ -94,7 +101,10 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text("Import saved archive file (.snarchive), the original user PIN is required to import.")
-            Button(onClick = { launcher.launch("*/*") }) {
+            Button(onClick = {
+                onDisablePinCheck()
+                launcher.launch("*/*")
+            }) {
                 Text("Import archived notes file")
             }
             Text("Export content to an archive file (.snarchive), the original user PIN will be required to import later.")
