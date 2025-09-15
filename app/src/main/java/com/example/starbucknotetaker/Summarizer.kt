@@ -1,10 +1,10 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
@@ -23,7 +23,14 @@ import java.nio.channels.FileChannel
  */
 class Summarizer(
     private val context: Context,
-    private val fetcher: ModelFetcher = ModelFetcher()
+    private val fetcher: ModelFetcher = ModelFetcher(),
+    private val spFactory: () -> SentencePieceProcessor = { SentencePieceProcessor() },
+    private val toast: (String, Int) -> Unit = { msg, length ->
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, msg, length).show()
+        }
+    },
+    private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", msg, t) }
 ) {
     private var encoder: Interpreter? = null
     private var decoder: Interpreter? = null
@@ -35,10 +42,10 @@ class Summarizer(
             val (encFile, decFile, spFile) = fetcher.ensureModels(context)
             encoder = Interpreter(mapFile(encFile))
             decoder = Interpreter(mapFile(decFile))
-            tokenizer = SentencePieceProcessor().apply { load(spFile.absolutePath) }
+            tokenizer = spFactory().apply { load(spFile.absolutePath) }
             showToast("AI summarizer loaded")
-        } catch (e: Exception) {
-            Log.e("Summarizer", "Failed to load models", e)
+        } catch (e: Throwable) {
+            logger("Failed to load models", e)
             showToast("Summarizer init failed: ${'$'}{e.message}", Toast.LENGTH_LONG)
             // leave interpreters null to trigger fallback
         }
@@ -141,8 +148,6 @@ class Summarizer(
     }
 
     private fun showToast(message: String, length: Int = Toast.LENGTH_SHORT) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, message, length).show()
-        }
+        toast(message, length)
     }
 }
