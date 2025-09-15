@@ -13,6 +13,9 @@ import javax.crypto.spec.SecretKeySpec
 
 class EncryptedNoteStore(private val context: Context) {
     private val file = File(context.filesDir, "notes.enc")
+    companion object {
+        private const val VERSION = 1
+    }
 
     fun loadNotes(pin: String): List<Note> {
         if (!file.exists()) return emptyList()
@@ -29,7 +32,13 @@ class EncryptedNoteStore(private val context: Context) {
         val key = deriveKey(pin, salt)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
         val json = String(cipher.doFinal(cipherText), Charsets.UTF_8)
-        val arr = JSONArray(json)
+        val root = runCatching { JSONObject(json) }.getOrNull()
+        @Suppress("UNUSED_VARIABLE")
+        val version = root?.optInt("version", VERSION) ?: VERSION // currently unused but reserved for future migrations
+        val arr = when {
+            root != null && root.has("notes") -> root.getJSONArray("notes")
+            else -> JSONArray(json)
+        }
         val notes = mutableListOf<Note>()
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
@@ -88,7 +97,11 @@ class EncryptedNoteStore(private val context: Context) {
             obj.put("summary", note.summary)
             arr.put(obj)
         }
-        val json = arr.toString().toByteArray(Charsets.UTF_8)
+        val root = JSONObject().apply {
+            put("version", VERSION)
+            put("notes", arr)
+        }
+        val json = root.toString().toByteArray(Charsets.UTF_8)
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
