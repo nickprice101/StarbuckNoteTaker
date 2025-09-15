@@ -50,7 +50,8 @@ class SummarizerTest {
         val client = OkHttpClient()
         val fetcher = ModelFetcher(server.url("/").toString(), client)
 
-        fetcher.ensureModels(context)
+        val fetchResult = fetcher.ensureModels(context)
+        assertTrue(fetchResult is ModelFetcher.Result.Success)
 
         val savedDir = File(modelsDir, "models")
         assertTrue(File(savedDir, ModelFetcher.ENCODER_NAME).exists())
@@ -96,8 +97,8 @@ class SummarizerTest {
         setField(summarizer, "decoder", decoder)
         setField(summarizer, "tokenizer", tokenizer)
 
-        val result = summarizer.summarize("input text")
-        assertEquals("mock summary", result)
+        val summary = summarizer.summarize("input text")
+        assertEquals("mock summary", summary)
         server.shutdown()
     }
 
@@ -109,7 +110,9 @@ class SummarizerTest {
         val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(byteArrayOf()) }
 
         val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(Triple(encFile, decFile, spFile))
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, spFile)
+        )
 
         val tokenizer = mock<SentencePieceProcessor>()
         whenever(tokenizer.load(any())).thenThrow(UnsatisfiedLinkError("missing lib"))

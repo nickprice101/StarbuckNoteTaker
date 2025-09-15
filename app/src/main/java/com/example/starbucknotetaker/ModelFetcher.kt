@@ -29,35 +29,46 @@ class ModelFetcher(
         const val SPIECE_NAME = "spiece.model"
     }
 
+    sealed class Result {
+        data class Success(val encoder: File, val decoder: File, val spiece: File) : Result()
+        data class Failure(val message: String, val throwable: Throwable? = null) : Result()
+    }
+
     /**
      * Ensures the encoder, decoder and tokenizer model are present under `files/models` and
      * returns their [File] locations. Downloads them individually if necessary.
      */
-    suspend fun ensureModels(context: Context): Triple<File, File, File> =
+    suspend fun ensureModels(context: Context): Result =
         withContext(Dispatchers.IO) {
             val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
             val encoderFile = File(modelsDir, ENCODER_NAME)
             val decoderFile = File(modelsDir, DECODER_NAME)
             val spieceFile = File(modelsDir, SPIECE_NAME)
 
-            if (!encoderFile.exists() || !isValidTflite(encoderFile)) {
-                encoderFile.delete()
-                download(baseUrl + ENCODER_REMOTE, encoderFile)
-            }
-            if (!decoderFile.exists() || !isValidTflite(decoderFile)) {
-                decoderFile.delete()
-                download(baseUrl + DECODER_REMOTE, decoderFile)
-            }
-            if (!spieceFile.exists() || spieceFile.length() == 0L) {
-                spieceFile.delete()
-                download(baseUrl + SPIECE_REMOTE, spieceFile)
-            }
+            try {
+                if (!encoderFile.exists() || !isValidTflite(encoderFile)) {
+                    encoderFile.delete()
+                    download(baseUrl + ENCODER_REMOTE, encoderFile)
+                }
+                if (!decoderFile.exists() || !isValidTflite(decoderFile)) {
+                    decoderFile.delete()
+                    download(baseUrl + DECODER_REMOTE, decoderFile)
+                }
+                if (!spieceFile.exists() || spieceFile.length() == 0L) {
+                    spieceFile.delete()
+                    download(baseUrl + SPIECE_REMOTE, spieceFile)
+                }
 
-            require(
-                encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
-            ) { "Failed to download model files" }
-
-            Triple(encoderFile, decoderFile, spieceFile)
+                return@withContext if (
+                    encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
+                ) {
+                    Result.Success(encoderFile, decoderFile, spieceFile)
+                } else {
+                    Result.Failure("Failed to download model files")
+                }
+            } catch (t: Throwable) {
+                Result.Failure(t.message ?: "Failed to download model files", t)
+            }
         }
 
     private fun download(url: String, dest: File) {

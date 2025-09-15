@@ -42,18 +42,25 @@ class Summarizer(
 
     private suspend fun loadModelsIfNeeded() {
         if (encoder != null && decoder != null && tokenizer != null) return
-        try {
-            _state.emit(SummarizerState.Loading)
-            val (encFile, decFile, spFile) = fetcher.ensureModels(context)
-            encoder = Interpreter(mapFile(encFile))
-            decoder = Interpreter(mapFile(decFile))
-            tokenizer = spFactory().apply { load(spFile.absolutePath) }
-            _state.emit(SummarizerState.Ready)
-        } catch (e: Throwable) {
-            logger("Failed to load models", e)
-            _state.emit(SummarizerState.Error(e.message ?: "Failed to load models"))
-            // leave interpreters null to trigger fallback
+        _state.emit(SummarizerState.Loading)
+        when (val result = fetcher.ensureModels(context)) {
+            is ModelFetcher.Result.Success -> {
+                try {
+                    encoder = Interpreter(mapFile(result.encoder))
+                    decoder = Interpreter(mapFile(result.decoder))
+                    tokenizer = spFactory().apply { load(result.spiece.absolutePath) }
+                    _state.emit(SummarizerState.Ready)
+                } catch (e: Throwable) {
+                    logger("Failed to load models", e)
+                    _state.emit(SummarizerState.Error(e.message ?: "Failed to load models"))
+                }
+            }
+            is ModelFetcher.Result.Failure -> {
+                logger("Failed to fetch models", result.throwable ?: Exception(result.message))
+                _state.emit(SummarizerState.Error(result.message))
+            }
         }
+        // leave interpreters null to trigger fallback
     }
 
     private fun mapFile(file: File): MappedByteBuffer {
