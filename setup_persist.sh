@@ -47,10 +47,9 @@ sdkmanager --install \
 ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
 export ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 
-echo "📄 Writing local.properties with SDK and NDK paths..."
+echo "📄 Writing local.properties with SDK path..."
 cat <<EOF > "$PROJECT_DIR/local.properties"
 sdk.dir=$ANDROID_SDK_ROOT
-ndk.dir=$ANDROID_NDK_ROOT
 EOF
 
 # ----------------------------
