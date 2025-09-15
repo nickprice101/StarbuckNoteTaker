@@ -101,6 +101,26 @@ class SummarizerTest {
         server.shutdown()
     }
 
+    @Test
+    fun summarizeFallsBackWhenTokenizerNativeMissing() = runBlocking {
+        // Create dummy model files so fetcher doesn't attempt network
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(byteArrayOf()) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(byteArrayOf()) }
+        val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(byteArrayOf()) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(Triple(encFile, decFile, spFile))
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        whenever(tokenizer.load(any())).thenThrow(UnsatisfiedLinkError("missing lib"))
+
+        val summarizer = Summarizer(context, fetcher, spFactory = { tokenizer }, toast = { _, _ -> }, logger = { _, _ -> })
+
+        val text = "One. Two. Three."
+        val result = summarizer.summarize(text)
+        assertEquals("One. Two", result)
+    }
+
     private fun setField(target: Any, fieldName: String, value: Any?) {
         val field = target.javaClass.getDeclaredField(fieldName)
         field.isAccessible = true
