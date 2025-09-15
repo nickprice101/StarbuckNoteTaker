@@ -2,6 +2,9 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -39,13 +42,22 @@ class SummarizerTest {
 
     @Test
     fun summarizeDownloadsAndUsesLatestModels() = runBlocking {
-        ModelFetcher.ensureModels(context)
+        val server = MockWebServer().apply { start() }
+        server.enqueue(MockResponse().setBody("enc"))
+        server.enqueue(MockResponse().setBody("dec"))
+        server.enqueue(MockResponse().setBody("sp"))
 
-        assertTrue(File(modelsDir, ModelFetcher.ENCODER_NAME).exists())
-        assertTrue(File(modelsDir, ModelFetcher.DECODER_NAME).exists())
-        assertTrue(File(modelsDir, ModelFetcher.SPIECE_NAME).exists())
+        val client = OkHttpClient()
+        val fetcher = ModelFetcher(server.url("/").toString(), client)
 
-        val summarizer = Summarizer(context)
+        fetcher.ensureModels(context)
+
+        val savedDir = File(modelsDir, "models")
+        assertTrue(File(savedDir, ModelFetcher.ENCODER_NAME).exists())
+        assertTrue(File(savedDir, ModelFetcher.DECODER_NAME).exists())
+        assertTrue(File(savedDir, ModelFetcher.SPIECE_NAME).exists())
+
+        val summarizer = Summarizer(context, fetcher)
 
         val encoder = mock<Interpreter>()
         val decoder = mock<Interpreter>()
@@ -86,6 +98,7 @@ class SummarizerTest {
 
         val result = summarizer.summarize("input text")
         assertEquals("mock summary", result)
+        server.shutdown()
     }
 
     private fun setField(target: Any, fieldName: String, value: Any?) {

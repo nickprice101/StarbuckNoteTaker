@@ -21,7 +21,10 @@ import java.nio.channels.FileChannel
  * greedy sequence-to-sequence inference. If anything fails it falls back to a
  * lightweight extractive strategy.
  */
-class Summarizer(private val context: Context) {
+class Summarizer(
+    private val context: Context,
+    private val fetcher: ModelFetcher = ModelFetcher()
+) {
     private var encoder: Interpreter? = null
     private var decoder: Interpreter? = null
     private var tokenizer: SentencePieceProcessor? = null
@@ -29,7 +32,7 @@ class Summarizer(private val context: Context) {
     private suspend fun loadModelsIfNeeded() {
         if (encoder != null && decoder != null && tokenizer != null) return
         try {
-            val (encFile, decFile, spFile) = ModelFetcher.ensureModels(context)
+            val (encFile, decFile, spFile) = fetcher.ensureModels(context)
             encoder = Interpreter(mapFile(encFile))
             decoder = Interpreter(mapFile(decFile))
             tokenizer = SentencePieceProcessor().apply { load(spFile.absolutePath) }
