@@ -40,13 +40,22 @@ class ModelFetcher(
             val decoderFile = File(modelsDir, DECODER_NAME)
             val spieceFile = File(modelsDir, SPIECE_NAME)
 
-            if (!encoderFile.exists()) download(baseUrl + ENCODER_REMOTE, encoderFile)
-            if (!decoderFile.exists()) download(baseUrl + DECODER_REMOTE, decoderFile)
-            if (!spieceFile.exists()) download(baseUrl + SPIECE_REMOTE, spieceFile)
-
-            require(encoderFile.exists() && decoderFile.exists() && spieceFile.exists()) {
-                "Failed to download model files"
+            if (!encoderFile.exists() || !isValidTflite(encoderFile)) {
+                encoderFile.delete()
+                download(baseUrl + ENCODER_REMOTE, encoderFile)
             }
+            if (!decoderFile.exists() || !isValidTflite(decoderFile)) {
+                decoderFile.delete()
+                download(baseUrl + DECODER_REMOTE, decoderFile)
+            }
+            if (!spieceFile.exists() || spieceFile.length() == 0L) {
+                spieceFile.delete()
+                download(baseUrl + SPIECE_REMOTE, spieceFile)
+            }
+
+            require(
+                encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
+            ) { "Failed to download model files" }
 
             Triple(encoderFile, decoderFile, spieceFile)
         }
@@ -65,6 +74,19 @@ class ModelFetcher(
                     }
                 }
             }
+        }
+    }
+
+    private fun isValidTflite(file: File): Boolean {
+        if (!file.exists() || file.length() < 4) return false
+        file.inputStream().use { ins ->
+            val header = ByteArray(4)
+            val read = ins.read(header)
+            return read == 4 &&
+                header[0] == 'T'.code.toByte() &&
+                header[1] == 'F'.code.toByte() &&
+                header[2] == 'L'.code.toByte() &&
+                header[3] == '3'.code.toByte()
         }
     }
 
