@@ -13,39 +13,43 @@ import java.security.MessageDigest
  * Downloads the summarization models from a public endpoint on first run.
  * The models are stored under `files/models` in the app's internal storage.
  */
-object ModelFetcher {
-    private const val BASE_URL = "https://music.corsicanescape.com/apk/"
+class ModelFetcher(
+    private val baseUrl: String = DEFAULT_BASE_URL,
+    private val client: OkHttpClient = OkHttpClient()
+) {
+    companion object {
+        private const val DEFAULT_BASE_URL = "https://music.corsicanescape.com/apk/"
 
-    private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
-    private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
-    private const val SPIECE_REMOTE = "spiece.model"
+        private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
+        private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
+        private const val SPIECE_REMOTE = "spiece.model"
 
-    const val ENCODER_NAME = "encoder_int8_dynamic.tflite"
-    const val DECODER_NAME = "decoder_step_int8_dynamic.tflite"
-    const val SPIECE_NAME = "spiece.model"
-
-    private val client by lazy { OkHttpClient() }
+        const val ENCODER_NAME = "encoder_int8_dynamic.tflite"
+        const val DECODER_NAME = "decoder_step_int8_dynamic.tflite"
+        const val SPIECE_NAME = "spiece.model"
+    }
 
     /**
      * Ensures the encoder, decoder and tokenizer model are present under `files/models` and
      * returns their [File] locations. Downloads them individually if necessary.
      */
-    suspend fun ensureModels(context: Context): Triple<File, File, File> = withContext(Dispatchers.IO) {
-        val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
-        val encoderFile = File(modelsDir, ENCODER_NAME)
-        val decoderFile = File(modelsDir, DECODER_NAME)
-        val spieceFile = File(modelsDir, SPIECE_NAME)
+    suspend fun ensureModels(context: Context): Triple<File, File, File> =
+        withContext(Dispatchers.IO) {
+            val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
+            val encoderFile = File(modelsDir, ENCODER_NAME)
+            val decoderFile = File(modelsDir, DECODER_NAME)
+            val spieceFile = File(modelsDir, SPIECE_NAME)
 
-        if (!encoderFile.exists()) download(BASE_URL + ENCODER_REMOTE, encoderFile)
-        if (!decoderFile.exists()) download(BASE_URL + DECODER_REMOTE, decoderFile)
-        if (!spieceFile.exists()) download(BASE_URL + SPIECE_REMOTE, spieceFile)
+            if (!encoderFile.exists()) download(baseUrl + ENCODER_REMOTE, encoderFile)
+            if (!decoderFile.exists()) download(baseUrl + DECODER_REMOTE, decoderFile)
+            if (!spieceFile.exists()) download(baseUrl + SPIECE_REMOTE, spieceFile)
 
-        require(encoderFile.exists() && decoderFile.exists() && spieceFile.exists()) {
-            "Failed to download model files"
+            require(encoderFile.exists() && decoderFile.exists() && spieceFile.exists()) {
+                "Failed to download model files"
+            }
+
+            Triple(encoderFile, decoderFile, spieceFile)
         }
-
-        Triple(encoderFile, decoderFile, spieceFile)
-    }
 
     private fun download(url: String, dest: File) {
         val req = Request.Builder().url(url).get().build()
