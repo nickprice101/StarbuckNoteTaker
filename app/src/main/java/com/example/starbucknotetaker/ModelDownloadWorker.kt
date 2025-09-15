@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import android.content.pm.ServiceInfo
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -89,6 +90,14 @@ class ModelDownloadWorker(
             .setProgress(100, progress, false)
             .build()
 
-        return ForegroundInfo(42, notification)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                42,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(42, notification)
+        }
     }
 }
