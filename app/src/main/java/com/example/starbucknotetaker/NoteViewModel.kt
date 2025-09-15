@@ -18,6 +18,9 @@ import java.net.URL
 import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.widget.Toast
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 
 /**
  * ViewModel storing notes in memory.
@@ -31,6 +34,8 @@ class NoteViewModel : ViewModel() {
     private var store: EncryptedNoteStore? = null
     private var context: Context? = null
     private var summarizer: Summarizer? = null
+    private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
+    val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -39,7 +44,24 @@ class NoteViewModel : ViewModel() {
         store = s
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
-        summarizer = Summarizer(context.applicationContext)
+        summarizer = Summarizer(context.applicationContext).also { sum ->
+            viewModelScope.launch {
+                sum.state.collect { state ->
+                    _summarizerState.value = state
+                    this@NoteViewModel.context?.let { ctx ->
+                        when (state) {
+                            Summarizer.SummarizerState.Ready ->
+                                Toast.makeText(ctx, "AI summarizer loaded", Toast.LENGTH_SHORT).show()
+                            Summarizer.SummarizerState.Fallback ->
+                                Toast.makeText(ctx, "Using fallback summarization", Toast.LENGTH_SHORT).show()
+                            is Summarizer.SummarizerState.Error ->
+                                Toast.makeText(ctx, "Summarizer init failed: ${'$'}{state.message}", Toast.LENGTH_LONG).show()
+                            else -> {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun addNote(title: String?, content: String, images: List<Pair<Uri, Int>>, files: List<Uri>) {
