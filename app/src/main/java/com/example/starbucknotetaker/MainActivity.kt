@@ -159,7 +159,9 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
-                onExport = { uri -> noteViewModel.exportNotes(context, uri) }
+                onExport = { uri -> noteViewModel.exportNotes(context, uri) },
+                onDisablePinCheck = { pinCheckEnabled = false },
+                onEnablePinCheck = { pinCheckEnabled = true }
             )
         }
     }
