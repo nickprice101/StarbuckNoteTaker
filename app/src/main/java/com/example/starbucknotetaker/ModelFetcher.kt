@@ -1,12 +1,15 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import android.util.Log
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
-import java.io.FileOutputStream
 import java.security.MessageDigest
 
 /**
@@ -14,19 +17,18 @@ import java.security.MessageDigest
  * The models are stored under `files/models` in the app's internal storage.
  */
 class ModelFetcher(
-    private val baseUrl: String = DEFAULT_BASE_URL,
-    private val client: OkHttpClient = OkHttpClient()
+    private val baseUrl: String = DEFAULT_BASE_URL
 ) {
     companion object {
         private const val DEFAULT_BASE_URL = "https://music.corsicanescape.com/apk/"
 
-        private const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
-        private const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
-        private const val SPIECE_REMOTE = "spiece.model"
+        const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
+        const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
+        const val SPIECE_REMOTE = "spiece.model"
 
-        const val ENCODER_NAME = "encoder_int8_dynamic.tflite"
-        const val DECODER_NAME = "decoder_step_int8_dynamic.tflite"
-        const val SPIECE_NAME = "spiece.model"
+        const val ENCODER_NAME = ENCODER_REMOTE
+        const val DECODER_NAME = DECODER_REMOTE
+        const val SPIECE_NAME = SPIECE_REMOTE
     }
 
     sealed class Result {
@@ -45,48 +47,31 @@ class ModelFetcher(
             val decoderFile = File(modelsDir, DECODER_NAME)
             val spieceFile = File(modelsDir, SPIECE_NAME)
 
-            try {
-                if (!encoderFile.exists() || !isValidTflite(encoderFile)) {
-                    encoderFile.delete()
-                    download(baseUrl + ENCODER_REMOTE, encoderFile)
-                }
-                if (!decoderFile.exists() || !isValidTflite(decoderFile)) {
-                    decoderFile.delete()
-                    download(baseUrl + DECODER_REMOTE, decoderFile)
-                }
-                if (!spieceFile.exists() || spieceFile.length() == 0L) {
-                    spieceFile.delete()
-                    download(baseUrl + SPIECE_REMOTE, spieceFile)
-                }
+            val haveModels = encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
+            val valid = haveModels && isValidTflite(encoderFile) && isValidTflite(decoderFile) && spieceFile.length() > 0L
+            if (valid) {
+                Log.d("Summarizer", "summarizer: model files already present")
+                return@withContext Result.Success(encoderFile, decoderFile, spieceFile)
+            }
 
-                return@withContext if (
-                    encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
-                ) {
-                    Result.Success(encoderFile, decoderFile, spieceFile)
-                } else {
-                    Result.Failure("Failed to download model files")
-                }
-            } catch (t: Throwable) {
-                Result.Failure(t.message ?: "Failed to download model files", t)
+            Log.d("Summarizer", "summarizer: scheduling model download")
+            val work = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
+                .setInputData(workDataOf("baseUrl" to baseUrl))
+                .build()
+            val wm = WorkManager.getInstance(context)
+            wm.enqueueUniqueWork("summarizer-model-download", ExistingWorkPolicy.KEEP, work)
+            wm.getWorkInfoByIdFlow(work.id).first { it.state.isFinished }
+
+            return@withContext if (
+                encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
+            ) {
+                Log.d("Summarizer", "summarizer: model download complete")
+                Result.Success(encoderFile, decoderFile, spieceFile)
+            } else {
+                Log.e("Summarizer", "summarizer: model download failed")
+                Result.Failure("Failed to download model files")
             }
         }
-
-    private fun download(url: String, dest: File) {
-        val req = Request.Builder().url(url).get().build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) error("HTTP ${'$'}{resp.code}: ${'$'}url")
-            resp.body?.byteStream().use { ins ->
-                FileOutputStream(dest).use { out ->
-                    val buf = ByteArray(DEFAULT_BUFFER_SIZE)
-                    while (true) {
-                        val read = ins?.read(buf) ?: -1
-                        if (read == -1) break
-                        out.write(buf, 0, read)
-                    }
-                }
-            }
-        }
-    }
 
     private fun isValidTflite(file: File): Boolean {
         if (!file.exists() || file.length() < 4) return false
