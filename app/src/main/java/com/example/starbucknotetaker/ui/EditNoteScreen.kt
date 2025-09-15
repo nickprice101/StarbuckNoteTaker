@@ -1,11 +1,12 @@
 package com.example.starbucknotetaker.ui
 
 import android.content.Intent
-import android.util.Base64
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Base64
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -14,29 +15,31 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.automirrored.filled.RotateLeft
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import com.example.starbucknotetaker.Note
+import com.example.starbucknotetaker.NoteFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 
 @Composable
 fun EditNoteScreen(
     note: Note,
-    onSave: (String?, String, List<String>) -> Unit,
+    onSave: (String?, String, List<String>, List<NoteFile>) -> Unit,
     onCancel: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit
@@ -46,21 +49,33 @@ fun EditNoteScreen(
         mutableStateListOf<EditBlock>().apply {
             val lines = note.content.lines()
             lines.forEach { line ->
-                val placeholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(line.trim())
-                if (placeholder != null) {
-                    val idx = placeholder.groupValues[1].toInt()
-                    note.images.getOrNull(idx)?.let { data ->
-                        add(EditBlock.Image(data))
-                        add(EditBlock.Text(""))
+                val trimmed = line.trim()
+                val imgPlaceholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
+                val filePlaceholder = Regex("\\[\\[file:(\\d+)]]").matchEntire(trimmed)
+                when {
+                    imgPlaceholder != null -> {
+                        val idx = imgPlaceholder.groupValues[1].toInt()
+                        note.images.getOrNull(idx)?.let { data ->
+                            add(EditBlock.Image(data))
+                            add(EditBlock.Text(""))
+                        }
                     }
-                } else {
-                    val last = lastOrNull()
-                    if (last is EditBlock.Text) {
-                        val lastIndex = size - 1
-                        val newText = if (last.text.isEmpty()) line else last.text + "\n" + line
-                        this[lastIndex] = EditBlock.Text(newText)
-                    } else {
-                        add(EditBlock.Text(line))
+                    filePlaceholder != null -> {
+                        val idx = filePlaceholder.groupValues[1].toInt()
+                        note.files.getOrNull(idx)?.let { file ->
+                            add(EditBlock.File(file))
+                            add(EditBlock.Text(""))
+                        }
+                    }
+                    else -> {
+                        val last = lastOrNull()
+                        if (last is EditBlock.Text) {
+                            val lastIndex = size - 1
+                            val newText = if (last.text.isEmpty()) line else last.text + "\n" + line
+                            this[lastIndex] = EditBlock.Text(newText)
+                        } else {
+                            add(EditBlock.Text(line))
+                        }
                     }
                 }
             }
@@ -71,7 +86,7 @@ fun EditNoteScreen(
     val scaffoldState = rememberScaffoldState()
     val scope = rememberCoroutineScope()
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         onEnablePinCheck()
         uri?.let {
             context.contentResolver.takePersistableUriPermission(
@@ -114,6 +129,39 @@ fun EditNoteScreen(
         }
     }
 
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        onEnablePinCheck()
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            scope.launch {
+                val file = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(it)?.use { input ->
+                        val bytes = input.readBytes()
+                        val name = context.contentResolver.query(it, null, null, null, null)?.use { c ->
+                            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else "file"
+                        } ?: "file"
+                        val mime = context.contentResolver.getType(it) ?: "application/octet-stream"
+                        NoteFile(name, mime, Base64.encodeToString(bytes, Base64.DEFAULT))
+                    }
+                }
+                file?.let { f ->
+                    val last = blocks.lastOrNull()
+                    if (last is EditBlock.Text && last.text.isBlank()) {
+                        blocks[blocks.size - 1] = EditBlock.File(f)
+                        blocks.add(EditBlock.Text(""))
+                    } else {
+                        blocks.add(EditBlock.File(f))
+                        blocks.add(EditBlock.Text(""))
+                    }
+                }
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose { onEnablePinCheck() }
     }
@@ -139,6 +187,7 @@ fun EditNoteScreen(
                 actions = {
                     IconButton(onClick = {
                         val images = mutableListOf<String>()
+                        val files = mutableListOf<NoteFile>()
                         val content = buildString {
                             blocks.forEach { block ->
                                 when (block) {
@@ -152,11 +201,17 @@ fun EditNoteScreen(
                                         append("]]\n")
                                         images.add(block.data)
                                     }
+                                    is EditBlock.File -> {
+                                        append("[[file:")
+                                        append(files.size)
+                                        append("]]\n")
+                                        files.add(block.file)
+                                    }
                                 }
                             }
                         }.trim()
                         scope.launch {
-                            onSave(title, content, images)
+                            onSave(title, content, images, files)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes saved",
                                 duration = SnackbarDuration.Short
@@ -192,9 +247,7 @@ fun EditNoteScreen(
                         OutlinedTextField(
                             value = block.text,
                             onValueChange = { newText -> blocks[index] = block.copy(text = newText) },
-                            label = if (index == 0) {
-                                { Text("Content") }
-                            } else null,
+                            label = if (index == 0) { { Text("Content") } } else null,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
@@ -262,21 +315,74 @@ fun EditNoteScreen(
                             }
                         }
                     }
+                    is EditBlock.File -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(block.file.name)
+                            IconButton(
+                                onClick = {
+                                    blocks.removeAt(index)
+                                    val prevIndex = index - 1
+                                    if (prevIndex >= 0 && prevIndex < blocks.size) {
+                                        val prev = blocks[prevIndex]
+                                        val next = blocks.getOrNull(prevIndex + 1)
+                                        if (prev is EditBlock.Text && next is EditBlock.Text) {
+                                            blocks[prevIndex] = EditBlock.Text(prev.text + "\n" + next.text)
+                                            blocks.removeAt(prevIndex + 1)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.align(Alignment.CenterVertically)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Remove")
+                            }
+                        }
+                    }
                 }
             }
             item {
-                OutlinedButton(
-                    onClick = {
-                        onDisablePinCheck()
-                        launcher.launch(arrayOf("image/*"))
-                    },
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Image, contentDescription = "Add Image")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Image")
+                var menuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedButton(
+                        onClick = {
+                            menuExpanded = true
+                            onDisablePinCheck()
+                        },
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.InsertDriveFile, contentDescription = "Add File")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add File")
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = {
+                        menuExpanded = false
+                        onEnablePinCheck()
+                    }) {
+                        DropdownMenuItem(onClick = {
+                            menuExpanded = false
+                            imageLauncher.launch(arrayOf("image/*"))
+                        }) {
+                            Icon(Icons.Default.Image, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add Image")
+                        }
+                        DropdownMenuItem(onClick = {
+                            menuExpanded = false
+                            fileLauncher.launch(arrayOf("*/*"))
+                        }) {
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add File")
+                        }
+                    }
                 }
             }
         }
@@ -286,5 +392,6 @@ fun EditNoteScreen(
 private sealed class EditBlock {
     data class Text(val text: String) : EditBlock()
     data class Image(val data: String) : EditBlock()
+    data class File(val file: NoteFile) : EditBlock()
 }
 

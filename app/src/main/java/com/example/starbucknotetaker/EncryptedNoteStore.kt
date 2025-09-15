@@ -34,6 +34,18 @@ class EncryptedNoteStore(private val context: Context) {
             for (j in 0 until imagesJson.length()) {
                 images.add(imagesJson.getString(j))
             }
+            val filesJson = obj.optJSONArray("files") ?: JSONArray()
+            val files = mutableListOf<NoteFile>()
+            for (j in 0 until filesJson.length()) {
+                val f = filesJson.getJSONObject(j)
+                files.add(
+                    NoteFile(
+                        name = f.getString("name"),
+                        mime = f.getString("mime"),
+                        data = f.getString("data"),
+                    )
+                )
+            }
             notes.add(
                 Note(
                     id = obj.getLong("id"),
@@ -41,6 +53,7 @@ class EncryptedNoteStore(private val context: Context) {
                     content = obj.getString("content"),
                     date = obj.getLong("date"),
                     images = images,
+                    files = files,
                     summary = obj.optString("summary", "")
                 )
             )
@@ -59,6 +72,15 @@ class EncryptedNoteStore(private val context: Context) {
             val imagesArray = JSONArray()
             note.images.forEach { imagesArray.put(it) }
             obj.put("images", imagesArray)
+            val filesArray = JSONArray()
+            note.files.forEach { f ->
+                val fo = JSONObject()
+                fo.put("name", f.name)
+                fo.put("mime", f.mime)
+                fo.put("data", f.data)
+                filesArray.put(fo)
+            }
+            obj.put("files", filesArray)
             obj.put("summary", note.summary)
             arr.put(obj)
         }

@@ -117,8 +117,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
         composable("add") {
             AddNoteScreen(
-                onSave = { title, content, images ->
-                    noteViewModel.addNote(title, content, images)
+                onSave = { title, content, images, files ->
+                    noteViewModel.addNote(title, content, images, files)
                     navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() },
@@ -143,8 +143,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             if (note != null) {
                 EditNoteScreen(
                     note = note,
-                    onSave = { title, content, images ->
-                        noteViewModel.updateNote(index, title, content, images)
+                    onSave = { title, content, images, files ->
+                        noteViewModel.updateNote(index, title, content, images, files)
                         navController.popBackStack()
                     },
                     onCancel = { navController.popBackStack() },

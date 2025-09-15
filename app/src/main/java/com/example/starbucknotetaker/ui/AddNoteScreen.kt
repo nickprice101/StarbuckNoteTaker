@@ -2,6 +2,7 @@ package com.example.starbucknotetaker.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -11,9 +12,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.automirrored.filled.RotateLeft
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,7 +26,7 @@ import coil.compose.rememberAsyncImagePainter
 
 @Composable
 fun AddNoteScreen(
-    onSave: (String?, String, List<Pair<Uri, Int>>) -> Unit,
+    onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit
@@ -33,7 +35,7 @@ fun AddNoteScreen(
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
     val context = LocalContext.current
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
             context.contentResolver.takePersistableUriPermission(
                 it,
@@ -45,6 +47,24 @@ fun AddNoteScreen(
                 blocks.add(NoteBlock.Text(""))
             } else {
                 blocks.add(NoteBlock.Image(it, 0))
+                blocks.add(NoteBlock.Text(""))
+            }
+        }
+        onEnablePinCheck()
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            val last = blocks.lastOrNull()
+            if (last is NoteBlock.Text && last.text.isBlank()) {
+                blocks[blocks.size - 1] = NoteBlock.File(it)
+                blocks.add(NoteBlock.Text(""))
+            } else {
+                blocks.add(NoteBlock.File(it))
                 blocks.add(NoteBlock.Text(""))
             }
         }
@@ -63,15 +83,17 @@ fun AddNoteScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = "Back",
                         )
                     }
                 },
                 actions = {
                     IconButton(onClick = {
                         val imageList = mutableListOf<Pair<Uri, Int>>()
+                        val fileList = mutableListOf<Uri>()
                         val content = buildString {
                             var imageIndex = 0
+                            var fileIndex = 0
                             blocks.forEach { block ->
                                 when (block) {
                                     is NoteBlock.Text -> {
@@ -85,10 +107,17 @@ fun AddNoteScreen(
                                         imageList.add(block.uri to block.rotation)
                                         imageIndex++
                                     }
+                                    is NoteBlock.File -> {
+                                        append("[[file:")
+                                        append(fileIndex)
+                                        append("]]\n")
+                                        fileList.add(block.uri)
+                                        fileIndex++
+                                    }
                                 }
                             }
                         }.trim()
-                        onSave(title, content, imageList)
+                        onSave(title, content, imageList, fileList)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")
                     }
@@ -148,28 +177,68 @@ fun AddNoteScreen(
                                 },
                                 modifier = Modifier.align(Alignment.BottomStart)
                             ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.RotateLeft,
-                                        contentDescription = "Rotate"
-                                    )
+                                Icon(
+                                    Icons.AutoMirrored.Filled.RotateLeft,
+                                    contentDescription = "Rotate",
+                                )
                             }
+                        }
+                    }
+                    is NoteBlock.File -> {
+                        val name = remember(block.uri) {
+                            var result = "File"
+                            context.contentResolver.query(block.uri, null, null, null, null)?.use { c ->
+                                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                if (idx >= 0 && c.moveToFirst()) result = c.getString(idx)
+                            }
+                            result
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(name)
                         }
                     }
                 }
             }
             item {
-                OutlinedButton(
-                    onClick = {
-                        onDisablePinCheck()
-                        launcher.launch(arrayOf("image/*"))
-                    },
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Image, contentDescription = "Add Image")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Image")
+                var menuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.InsertDriveFile, contentDescription = "Add File")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add File")
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(onClick = {
+                            menuExpanded = false
+                            onDisablePinCheck()
+                            imageLauncher.launch(arrayOf("image/*"))
+                        }) {
+                            Icon(Icons.Default.Image, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add Image")
+                        }
+                        DropdownMenuItem(onClick = {
+                            menuExpanded = false
+                            onDisablePinCheck()
+                            fileLauncher.launch(arrayOf("*/*"))
+                        }) {
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add File")
+                        }
+                    }
                 }
             }
         }
@@ -179,5 +248,6 @@ fun AddNoteScreen(
 private sealed class NoteBlock {
     data class Text(val text: String) : NoteBlock()
     data class Image(val uri: Uri, val rotation: Int) : NoteBlock()
+    data class File(val uri: Uri) : NoteBlock()
 }
 

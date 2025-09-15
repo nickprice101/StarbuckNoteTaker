@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.net.URL
 import kotlinx.coroutines.launch
+import android.provider.OpenableColumns
 
 /**
  * ViewModel storing notes in memory.
@@ -39,13 +40,14 @@ class NoteViewModel : ViewModel() {
         summarizer = Summarizer(context.applicationContext)
     }
 
-    fun addNote(title: String?, content: String, images: List<Pair<Uri, Int>>) {
+    fun addNote(title: String?, content: String, images: List<Pair<Uri, Int>>, files: List<Uri>) {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
         } else {
             title
         }
         val embeddedImages = mutableListOf<String>()
+        val embeddedFiles = mutableListOf<NoteFile>()
         context?.let { ctx ->
             images.forEach { (uri, rotation) ->
                 try {
@@ -71,6 +73,25 @@ class NoteViewModel : ViewModel() {
                     }
                 } catch (_: Exception) {}
             }
+            files.forEach { uri ->
+                try {
+                    ctx.contentResolver.openInputStream(uri)?.use { input ->
+                        val bytes = input.readBytes()
+                        val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else "file"
+                        } ?: "file"
+                        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                        embeddedFiles.add(
+                            NoteFile(
+                                name = name,
+                                mime = mime,
+                                data = Base64.encodeToString(bytes, Base64.DEFAULT)
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
         }
 
         var finalContent = content
@@ -92,6 +113,7 @@ class NoteViewModel : ViewModel() {
             content = finalContent.trim(),
             date = System.currentTimeMillis(),
             images = embeddedImages,
+            files = embeddedFiles,
             summary = summarizer?.let { it.fallbackSummary(finalContent) } ?: finalContent.take(200)
         )
         _notes.add(0, note) // newest first
@@ -112,7 +134,7 @@ class NoteViewModel : ViewModel() {
         }
     }
 
-    fun updateNote(index: Int, title: String?, content: String, images: List<String>) {
+    fun updateNote(index: Int, title: String?, content: String, images: List<String>, files: List<NoteFile>) {
         if (index in _notes.indices) {
             val note = _notes[index]
             val finalTitle = if (title.isNullOrBlank()) note.title else title
@@ -120,6 +142,7 @@ class NoteViewModel : ViewModel() {
                 title = finalTitle,
                 content = content.trim(),
                 images = images,
+                files = files,
                 summary = summarizer?.let { it.fallbackSummary(content) } ?: content.take(200)
             )
             _notes[index] = updated
