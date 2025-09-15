@@ -2,10 +2,9 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import android.util.Log
-import android.widget.Toast
-import android.os.Handler
-import android.os.Looper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
 import com.example.starbucknotetaker.SentencePieceProcessor
@@ -25,28 +24,34 @@ class Summarizer(
     private val context: Context,
     private val fetcher: ModelFetcher = ModelFetcher(),
     private val spFactory: () -> SentencePieceProcessor = { SentencePieceProcessor() },
-    private val toast: (String, Int) -> Unit = { msg, length ->
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, msg, length).show()
-        }
-    },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", msg, t) }
 ) {
     private var encoder: Interpreter? = null
     private var decoder: Interpreter? = null
     private var tokenizer: SentencePieceProcessor? = null
 
+    sealed class SummarizerState {
+        object Loading : SummarizerState()
+        object Ready : SummarizerState()
+        object Fallback : SummarizerState()
+        data class Error(val message: String) : SummarizerState()
+    }
+
+    private val _state = MutableStateFlow<SummarizerState>(SummarizerState.Ready)
+    val state: StateFlow<SummarizerState> = _state
+
     private suspend fun loadModelsIfNeeded() {
         if (encoder != null && decoder != null && tokenizer != null) return
         try {
+            _state.emit(SummarizerState.Loading)
             val (encFile, decFile, spFile) = fetcher.ensureModels(context)
             encoder = Interpreter(mapFile(encFile))
             decoder = Interpreter(mapFile(decFile))
             tokenizer = spFactory().apply { load(spFile.absolutePath) }
-            showToast("AI summarizer loaded")
+            _state.emit(SummarizerState.Ready)
         } catch (e: Throwable) {
             logger("Failed to load models", e)
-            showToast("Summarizer init failed: ${'$'}{e.message}", Toast.LENGTH_LONG)
+            _state.emit(SummarizerState.Error(e.message ?: "Failed to load models"))
             // leave interpreters null to trigger fallback
         }
     }
@@ -68,7 +73,7 @@ class Summarizer(
         val dec = decoder
         val tok = tokenizer
         if (enc == null || dec == null || tok == null) {
-            showToast("Using fallback summarization")
+            _state.emit(SummarizerState.Fallback)
             return@withContext fallbackSummary(text)
         }
 
@@ -145,9 +150,5 @@ class Summarizer(
         private const val START_TOKEN = 0
         private const val EOS_ID = 1
         private const val VOCAB_SIZE = 32128
-    }
-
-    private fun showToast(message: String, length: Int = Toast.LENGTH_SHORT) {
-        toast(message, length)
     }
 }

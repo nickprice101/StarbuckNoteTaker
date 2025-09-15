@@ -114,7 +114,7 @@ class SummarizerTest {
         val tokenizer = mock<SentencePieceProcessor>()
         whenever(tokenizer.load(any())).thenThrow(UnsatisfiedLinkError("missing lib"))
 
-        val summarizer = Summarizer(context, fetcher, spFactory = { tokenizer }, toast = { _, _ -> }, logger = { _, _ -> })
+        val summarizer = Summarizer(context, fetcher, spFactory = { tokenizer }, logger = { _, _ -> })
 
         val text = "One. Two. Three."
         val result = summarizer.summarize(text)
