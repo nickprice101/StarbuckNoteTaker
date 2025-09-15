@@ -24,7 +24,8 @@ class Summarizer(
     private val context: Context,
     private val fetcher: ModelFetcher = ModelFetcher(),
     private val spFactory: () -> SentencePieceProcessor = { SentencePieceProcessor() },
-    private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", msg, t) }
+    private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
+    private val debug: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
 ) {
     private var encoder: Interpreter? = null
     private var decoder: Interpreter? = null
@@ -42,6 +43,7 @@ class Summarizer(
 
     private suspend fun loadModelsIfNeeded() {
         if (encoder != null && decoder != null && tokenizer != null) return
+        debug("loading summarizer models")
         _state.emit(SummarizerState.Loading)
         when (val result = fetcher.ensureModels(context)) {
             is ModelFetcher.Result.Success -> {
@@ -49,14 +51,15 @@ class Summarizer(
                     encoder = Interpreter(mapFile(result.encoder))
                     decoder = Interpreter(mapFile(result.decoder))
                     tokenizer = spFactory().apply { load(result.spiece.absolutePath) }
+                    debug("summarizer models ready")
                     _state.emit(SummarizerState.Ready)
                 } catch (e: Throwable) {
-                    logger("Failed to load models", e)
+                    logger("summarizer failed to load models", e)
                     _state.emit(SummarizerState.Error(e.message ?: "Failed to load models"))
                 }
             }
             is ModelFetcher.Result.Failure -> {
-                logger("Failed to fetch models", result.throwable ?: Exception(result.message))
+                logger("summarizer failed to fetch models", result.throwable ?: Exception(result.message))
                 _state.emit(SummarizerState.Error(result.message))
             }
         }
@@ -75,11 +78,13 @@ class Summarizer(
      * summary using the first couple of sentences.
      */
     suspend fun summarize(text: String): String = withContext(Dispatchers.Default) {
+        debug("summarizing text of length ${'$'}{text.length}")
         loadModelsIfNeeded()
         val enc = encoder
         val dec = decoder
         val tok = tokenizer
         if (enc == null || dec == null || tok == null) {
+            debug("summarizer falling back")
             _state.emit(SummarizerState.Fallback)
             return@withContext fallbackSummary(text)
         }
@@ -118,7 +123,9 @@ class Summarizer(
             token = next
             for (i in cache.indices) cache[i] = newCache[i]
         }
-        return@withContext tok.decodeIds(result.toIntArray())
+        val summary = tok.decodeIds(result.toIntArray())
+        debug("summarizer inference complete")
+        return@withContext summary
     }
 
     fun fallbackSummary(text: String): String {
