@@ -13,19 +13,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
     onImport: (Uri, String, Boolean) -> Unit,
-    onExport: () -> Unit
+    onExport: (Uri) -> Unit
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
         if (uri != null) {
             selectedUri = uri
             showDialog = true
+        }
+    }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            onExport(uri)
         }
     }
 
@@ -94,11 +106,15 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text("Import saved archive file (.snarchive), the original user PIN is required to import.")
-            Button(onClick = { launcher.launch("*/*") }) {
+            Button(onClick = { importLauncher.launch("*/*") }) {
                 Text("Import archived notes file")
             }
             Text("Export content to an archive file (.snarchive), the original user PIN will be required to import later.")
-            Button(onClick = onExport) {
+            Button(onClick = {
+                val formatter = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.getDefault())
+                val name = "notes-${formatter.format(Date())}.snarchive"
+                exportLauncher.launch(name)
+            }) {
                 Text("Export archived notes file")
             }
         }

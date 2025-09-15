@@ -11,13 +11,13 @@ import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import android.os.Environment
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.net.URL
 import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
+import android.widget.Toast
 
 /**
  * ViewModel storing notes in memory.
@@ -159,16 +159,20 @@ class NoteViewModel : ViewModel() {
         }
     }
 
-    fun exportNotes(context: Context) {
+    fun exportNotes(context: Context, uri: Uri) {
         val currentPin = pin ?: return
         store?.saveNotes(_notes, currentPin)
         val src = File(context.filesDir, "notes.enc")
-        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        if (!downloads.exists()) downloads.mkdirs()
-        val dest = File(downloads, "notes.snarchive")
         try {
-            src.copyTo(dest, overwrite = true)
-        } catch (_: Exception) {}
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                src.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            }
+            Toast.makeText(context, "Archive saved", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, "Failed to save archive", Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun importNotes(context: Context, uri: Uri, archivePin: String, overwrite: Boolean) {

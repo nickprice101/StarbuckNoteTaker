@@ -159,7 +159,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
-                onExport = { noteViewModel.exportNotes(context) }
+                onExport = { uri -> noteViewModel.exportNotes(context, uri) }
             )
         }
     }
