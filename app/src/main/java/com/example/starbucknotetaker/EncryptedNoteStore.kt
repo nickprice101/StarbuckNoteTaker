@@ -17,6 +17,10 @@ class EncryptedNoteStore(private val context: Context) {
     fun loadNotes(pin: String): List<Note> {
         if (!file.exists()) return emptyList()
         val bytes = file.readBytes()
+        return loadNotesFromBytes(bytes, pin)
+    }
+
+    fun loadNotesFromBytes(bytes: ByteArray, pin: String): List<Note> {
         if (bytes.size < 28) return emptyList()
         val salt = bytes.copyOfRange(0, 16)
         val iv = bytes.copyOfRange(16, 28)

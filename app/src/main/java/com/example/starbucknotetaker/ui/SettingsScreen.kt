@@ -1,0 +1,107 @@
+package com.example.starbucknotetaker.ui
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onImport: (Uri, String, Boolean) -> Unit,
+    onExport: () -> Unit
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            selectedUri = uri
+            showDialog = true
+        }
+    }
+
+    if (showDialog && selectedUri != null) {
+        var pin by remember { mutableStateOf("") }
+        var overwrite by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Import Archive") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = pin,
+                        onValueChange = { pin = it },
+                        label = { Text("Archive PIN") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = !overwrite, onClick = { overwrite = false })
+                        Text("Append", Modifier.padding(start = 8.dp))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = overwrite, onClick = { overwrite = true })
+                        Text("Overwrite", Modifier.padding(start = 8.dp))
+                    }
+                    if (overwrite) {
+                        Text(
+                            "This will delete existing notes.",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.error,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedUri?.let { onImport(it, pin, overwrite) }
+                    showDialog = false
+                }) { Text("Import") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            Text("Import saved archive file (.snarchive), the original user PIN is required to import.")
+            Button(onClick = { launcher.launch("*/*") }) {
+                Text("Import archived notes file")
+            }
+            Text("Export content to an archive file (.snarchive), the original user PIN will be required to import later.")
+            Button(onClick = onExport) {
+                Text("Export archived notes file")
+            }
+        }
+    }
+}
+

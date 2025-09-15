@@ -22,6 +22,7 @@ import com.example.starbucknotetaker.ui.PinEnterScreen
 import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
+import com.example.starbucknotetaker.ui.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
@@ -112,7 +113,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 notes = noteViewModel.notes,
                 onAddNote = { navController.navigate("add") },
                 onOpenNote = { index -> navController.navigate("detail/$index") },
-                onDeleteNote = { index -> noteViewModel.deleteNote(index) }
+                onDeleteNote = { index -> noteViewModel.deleteNote(index) },
+                onSettings = { navController.navigate("settings") }
             )
         }
         composable("add") {
@@ -152,6 +154,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     onEnablePinCheck = { pinCheckEnabled = true }
                 )
             }
+        }
+        composable("settings") {
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
+                onExport = { noteViewModel.exportNotes(context) }
+            )
         }
     }
 }
