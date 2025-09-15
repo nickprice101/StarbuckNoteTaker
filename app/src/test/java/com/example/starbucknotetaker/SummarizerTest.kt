@@ -2,7 +2,9 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.doAnswer
@@ -10,9 +12,22 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.Tensor
+import com.example.starbucknotetaker.SentencePieceProcessor
+import java.io.File
+import java.nio.file.Files
 
 class SummarizerTest {
     private val context: Context = mock()
+    private val modelsDir: File = Files.createTempDirectory("models").toFile()
+
+    init {
+        whenever(context.filesDir).thenReturn(modelsDir)
+    }
+
+    @After
+    fun tearDown() {
+        modelsDir.deleteRecursively()
+    }
 
     @Test
     fun fallbackSummaryReturnsFirstTwoSentences() {
@@ -23,7 +38,13 @@ class SummarizerTest {
     }
 
     @Test
-    fun summarizeUsesModelWhenAvailable() = runBlocking {
+    fun summarizeDownloadsAndUsesLatestModels() = runBlocking {
+        ModelFetcher.ensureModels(context)
+
+        assertTrue(File(modelsDir, ModelFetcher.ENCODER_NAME).exists())
+        assertTrue(File(modelsDir, ModelFetcher.DECODER_NAME).exists())
+        assertTrue(File(modelsDir, ModelFetcher.SPIECE_NAME).exists())
+
         val summarizer = Summarizer(context)
 
         val encoder = mock<Interpreter>()
@@ -73,3 +94,4 @@ class SummarizerTest {
         field.set(target, value)
     }
 }
+
