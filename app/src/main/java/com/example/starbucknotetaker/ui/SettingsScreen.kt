@@ -21,7 +21,9 @@ import java.util.Locale
 fun SettingsScreen(
     onBack: () -> Unit,
     onImport: (Uri, String, Boolean) -> Unit,
-    onExport: (Uri) -> Unit
+    onExport: (Uri) -> Unit,
+    onDisablePinCheck: () -> Unit,
+    onEnablePinCheck: () -> Unit
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
@@ -32,6 +34,7 @@ fun SettingsScreen(
             selectedUri = uri
             showDialog = true
         }
+        onEnablePinCheck()
     }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -39,6 +42,11 @@ fun SettingsScreen(
         if (uri != null) {
             onExport(uri)
         }
+        onEnablePinCheck()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onEnablePinCheck() }
     }
 
     if (showDialog && selectedUri != null) {
@@ -106,11 +114,15 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text("Import saved archive file (.snarchive), the original user PIN is required to import.")
-            Button(onClick = { importLauncher.launch("*/*") }) {
+            Button(onClick = {
+                onDisablePinCheck()
+                importLauncher.launch("*/*")
+            }) {
                 Text("Import archived notes file")
             }
             Text("Export content to an archive file (.snarchive), the original user PIN will be required to import later.")
             Button(onClick = {
+                onDisablePinCheck()
                 val formatter = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.getDefault())
                 val name = "notes-${formatter.format(Date())}.snarchive"
                 exportLauncher.launch(name)
