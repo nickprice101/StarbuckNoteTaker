@@ -24,7 +24,7 @@ fun SettingsScreen(
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val archivePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             selectedUri = uri
             showDialog = true
@@ -103,7 +103,7 @@ fun SettingsScreen(
             Text("Import saved archive file (.snarchive), the original user PIN is required to import.")
             Button(onClick = {
                 onDisablePinCheck()
-                launcher.launch("*/*")
+                archivePicker.launch("*/*")
             }) {
                 Text("Import archived notes file")
             }
