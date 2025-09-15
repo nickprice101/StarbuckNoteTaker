@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,6 +34,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
+import androidx.core.content.FileProvider
+import java.io.File
 
 @Composable
 fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
@@ -65,49 +68,79 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
             val lines = remember(note.content) { note.content.lines() }
             lines.forEach { line ->
                 val trimmed = line.trim()
-                val placeholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
-                if (placeholder != null) {
-                    val index = placeholder.groupValues[1].toInt()
-                    note.images.getOrNull(index)?.let { base64 ->
-                        val bytes = remember(base64) { Base64.decode(base64, Base64.DEFAULT) }
-                        val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
-                        Image(
-                            bitmap.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 8.dp)
-                                .clickable { fullImage = base64 }
-                        )
-                    }
-                } else {
-                    val annotated = buildAnnotatedString {
-                        var lastIndex = 0
-                        val matcher = Patterns.WEB_URL.matcher(trimmed)
-                        while (matcher.find()) {
-                                val start = matcher.start()
-                                val end = matcher.end()
-                                append(trimmed.substring(lastIndex, start))
-                                val url = trimmed.substring(start, end)
-                                pushStringAnnotation(tag = "URL", annotation = url)
-                                pushStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline))
-                                append(url)
-                                pop()
-                                pop()
-                                lastIndex = end
-                            }
-                            append(trimmed.substring(lastIndex))
+                val imagePlaceholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
+                val filePlaceholder = Regex("\\[\\[file:(\\d+)]]").matchEntire(trimmed)
+                when {
+                    imagePlaceholder != null -> {
+                        val index = imagePlaceholder.groupValues[1].toInt()
+                        note.images.getOrNull(index)?.let { base64 ->
+                            val bytes = remember(base64) { Base64.decode(base64, Base64.DEFAULT) }
+                            val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
+                            Image(
+                                bitmap.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .clickable { fullImage = base64 }
+                            )
                         }
-                        ClickableText(
-                            text = annotated,
-                            onClick = { offset ->
-                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))
-                                    context.startActivity(intent)
+                    }
+                    filePlaceholder != null -> {
+                        val index = filePlaceholder.groupValues[1].toInt()
+                        note.files.getOrNull(index)?.let { file ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .clickable {
+                                        val bytes = Base64.decode(file.data, Base64.DEFAULT)
+                                        val temp = File(context.cacheDir, file.name)
+                                        temp.writeBytes(bytes)
+                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", temp)
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(uri, file.mime)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(intent)
+                                    },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.InsertDriveFile, contentDescription = file.name)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(file.name)
+                            }
+                        }
+                    }
+                    else -> {
+                        val annotated = buildAnnotatedString {
+                            var lastIndex = 0
+                            val matcher = Patterns.WEB_URL.matcher(trimmed)
+                            while (matcher.find()) {
+                                    val start = matcher.start()
+                                    val end = matcher.end()
+                                    append(trimmed.substring(lastIndex, start))
+                                    val url = trimmed.substring(start, end)
+                                    pushStringAnnotation(tag = "URL", annotation = url)
+                                    pushStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline))
+                                    append(url)
+                                    pop()
+                                    pop()
+                                    lastIndex = end
                                 }
-                            },
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
+                                append(trimmed.substring(lastIndex))
+                            }
+                            ClickableText(
+                                text = annotated,
+                                onClick = { offset ->
+                                    annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))
+                                        context.startActivity(intent)
+                                    }
+                                },
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                    }
                 }
             }
         }
