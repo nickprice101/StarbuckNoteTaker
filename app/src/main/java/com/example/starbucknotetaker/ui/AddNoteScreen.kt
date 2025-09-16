@@ -76,8 +76,6 @@ fun AddNoteScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            hideKeyboard()
-            focusManager.clearFocus(force = true)
             onEnablePinCheck()
         }
     }
@@ -89,6 +87,7 @@ fun AddNoteScreen(
                 navigationIcon = {
                     IconButton(onClick = {
                         hideKeyboard()
+                        focusManager.clearFocus(force = true)
                         onBack()
                     }) {
                         Icon(
@@ -128,6 +127,7 @@ fun AddNoteScreen(
                             }
                         }.trim()
                         hideKeyboard()
+                        focusManager.clearFocus(force = true)
                         onSave(title, content, imageList, fileList)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")

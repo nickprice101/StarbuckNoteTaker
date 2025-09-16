@@ -167,8 +167,6 @@ fun EditNoteScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            hideKeyboard()
-            focusManager.clearFocus(force = true)
             onEnablePinCheck()
         }
     }
@@ -181,6 +179,7 @@ fun EditNoteScreen(
                 navigationIcon = {
                     IconButton(onClick = {
                         hideKeyboard()
+                        focusManager.clearFocus(force = true)
                         scope.launch {
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes discarded",
@@ -219,6 +218,7 @@ fun EditNoteScreen(
                             }
                         }.trim()
                         hideKeyboard()
+                        focusManager.clearFocus(force = true)
                         scope.launch {
                             onSave(title, content, images, files)
                             scaffoldState.snackbarHostState.showSnackbar(

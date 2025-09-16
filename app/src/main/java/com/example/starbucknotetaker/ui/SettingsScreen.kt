@@ -50,8 +50,6 @@ fun SettingsScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            hideKeyboard()
-            focusManager.clearFocus(force = true)
             onEnablePinCheck()
         }
     }
@@ -62,6 +60,7 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = {
                 hideKeyboard()
+                focusManager.clearFocus(force = true)
                 showDialog = false
             },
             title = { Text("Import Archive") },
@@ -95,6 +94,7 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     hideKeyboard()
+                    focusManager.clearFocus(force = true)
                     selectedUri?.let { onImport(it, pin, overwrite) }
                     showDialog = false
                 }) { Text("Import") }
@@ -102,6 +102,7 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = {
                     hideKeyboard()
+                    focusManager.clearFocus(force = true)
                     showDialog = false
                 }) { Text("Cancel") }
             }
@@ -115,6 +116,7 @@ fun SettingsScreen(
                 navigationIcon = {
                     IconButton(onClick = {
                         hideKeyboard()
+                        focusManager.clearFocus(force = true)
                         onBack()
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
