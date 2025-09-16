@@ -9,18 +9,32 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import android.content.pm.ServiceInfo
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 
 class ModelDownloadWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .callTimeout(2, TimeUnit.MINUTES)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.MINUTES)
+        .writeTimeout(2, TimeUnit.MINUTES)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    companion object {
+        private const val MAX_ATTEMPTS = 3
+        private const val RETRY_BASE_DELAY_MS = 1_000L
+    }
 
     override suspend fun doWork(): Result {
         val baseUrl = inputData.getString("baseUrl") ?: return Result.failure()
@@ -46,7 +60,12 @@ class ModelDownloadWorker(
                 Log.d("Summarizer", "summarizer: downloaded ${'$'}name")
             } catch (t: Throwable) {
                 Log.e("Summarizer", "summarizer: failed downloading ${'$'}name", t)
-                return Result.failure()
+                return Result.failure(
+                    workDataOf(
+                        "error" to (t.message ?: t::class.java.simpleName ?: "download failed"),
+                        "file" to name
+                    )
+                )
             }
         }
         setForeground(createForegroundInfo(100))
@@ -54,21 +73,47 @@ class ModelDownloadWorker(
         return Result.success()
     }
 
-    private fun download(url: String, dest: File) {
-        val req = Request.Builder().url(url).get().build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) error("HTTP ${'$'}{resp.code}: ${'$'}url")
-            resp.body?.byteStream().use { ins ->
-                FileOutputStream(dest).use { out ->
-                    val buf = ByteArray(DEFAULT_BUFFER_SIZE)
-                    while (true) {
-                        val read = ins?.read(buf) ?: -1
-                        if (read == -1) break
-                        out.write(buf, 0, read)
+    private suspend fun download(url: String, dest: File) {
+        var lastError: Throwable? = null
+        repeat(MAX_ATTEMPTS) { attempt ->
+            try {
+                val request = Request.Builder().url(url).get().build()
+                dest.parentFile?.mkdirs()
+                val tmp = File(dest.parentFile, "${'$'}{dest.name}.download")
+                if (tmp.exists()) tmp.delete()
+                client.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) error("HTTP ${'$'}{resp.code}: ${'$'}url")
+                    val body = resp.body ?: error("Empty body: ${'$'}url")
+                    body.use { responseBody ->
+                        FileOutputStream(tmp).use { out ->
+                            responseBody.byteStream().use { ins ->
+                                ins.copyTo(out)
+                            }
+                        }
                     }
+                }
+                if (!tmp.renameTo(dest)) {
+                    tmp.copyTo(dest, overwrite = true)
+                    tmp.delete()
+                }
+                return
+            } catch (t: Throwable) {
+                lastError = t
+                dest.delete()
+                val tmp = File(dest.parentFile, "${'$'}{dest.name}.download")
+                tmp.delete()
+                if (attempt < MAX_ATTEMPTS - 1) {
+                    val delayMs = RETRY_BASE_DELAY_MS shl attempt
+                    Log.w(
+                        "Summarizer",
+                        "summarizer: retrying download ${'$'}url in ${'$'}delayMs ms (attempt ${'$'}{attempt + 2} of ${'$'}MAX_ATTEMPTS)",
+                        t
+                    )
+                    delay(delayMs)
                 }
             }
         }
+        throw lastError ?: IllegalStateException("Failed to download ${'$'}url")
     }
 
     private fun createForegroundInfo(progress: Int): ForegroundInfo {

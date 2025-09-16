@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
@@ -63,18 +64,27 @@ class ModelFetcher(
             // getWorkInfoByIdFlow occasionally emits a null item before the
             // underlying WorkSpec is created. Cast to a nullable Flow and wait
             // until we have a finished WorkInfo to avoid a NPE.
-            @Suppress("UNCHECKED_CAST")
+            val finalInfo = @Suppress("UNCHECKED_CAST")
             (wm.getWorkInfoByIdFlow(work.id) as kotlinx.coroutines.flow.Flow<androidx.work.WorkInfo?>)
                 .first { info -> info?.state?.isFinished == true }
 
-            return@withContext if (
-                encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
-            ) {
+            if (finalInfo == null || finalInfo.state != WorkInfo.State.SUCCEEDED) {
+                val message = finalInfo?.outputData?.getString("error")
+                    ?: "Failed to download model files"
+                Log.e("Summarizer", "summarizer: model download failed: ${'$'}message")
+                return@withContext Result.Failure(message)
+            }
+
+            val downloadedValid =
+                encoderFile.exists() && decoderFile.exists() && spieceFile.exists() &&
+                    isValidTflite(encoderFile) && isValidTflite(decoderFile) && spieceFile.length() > 0L
+
+            return@withContext if (downloadedValid) {
                 Log.d("Summarizer", "summarizer: model download complete")
                 Result.Success(encoderFile, decoderFile, spieceFile)
             } else {
-                Log.e("Summarizer", "summarizer: model download failed")
-                Result.Failure("Failed to download model files")
+                Log.e("Summarizer", "summarizer: downloaded model files failed validation")
+                Result.Failure("Downloaded model files failed validation")
             }
         }
 
