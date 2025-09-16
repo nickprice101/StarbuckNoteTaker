@@ -5,6 +5,40 @@ plugins {
 
 def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
 def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
+def abiToLibcxxTriple = [
+        'arm64-v8a': 'aarch64-linux-android',
+        'armeabi-v7a': 'arm-linux-androideabi',
+        'x86'      : 'i686-linux-android',
+        'x86_64'   : 'x86_64-linux-android'
+]
+def libcxxNativeLibsDir = "${buildDir}/generated/libcxxJniLibs"
+
+def resolveNdkHostTag(File ndkDir) {
+    def prebuiltDir = new File(ndkDir, 'toolchains/llvm/prebuilt')
+    def osName = System.properties['os.name']?.toLowerCase(java.util.Locale.US)
+    def archName = System.properties['os.arch']?.toLowerCase(java.util.Locale.US)
+    def candidateTag
+    if (osName?.contains('mac')) {
+        candidateTag = (archName?.contains('arm') || archName?.contains('aarch64')) ? 'darwin-arm64' : 'darwin-x86_64'
+    } else if (osName?.contains('win')) {
+        candidateTag = 'windows-x86_64'
+    } else if (osName?.contains('linux')) {
+        candidateTag = (archName?.contains('aarch64') || archName?.contains('arm64')) ? 'linux-arm64' : 'linux-x86_64'
+    }
+
+    if (candidateTag) {
+        def candidateDir = new File(prebuiltDir, candidateTag)
+        if (candidateDir.exists()) {
+            return candidateTag
+        }
+    }
+
+    def fallback = prebuiltDir.listFiles()?.find { it.isDirectory() }
+    if (fallback == null) {
+        throw new GradleException("Unable to locate an NDK prebuilt directory under ${prebuiltDir}")
+    }
+    return fallback.name
+}
 
 android {
     namespace 'com.example.starbucknotetaker'
@@ -85,7 +119,7 @@ android {
 
     sourceSets {
         main {
-            jniLibs.srcDirs += penguinNativeLibsDir
+            jniLibs.srcDirs += [penguinNativeLibsDir, libcxxNativeLibsDir]
         }
     }
 }
@@ -159,10 +193,31 @@ def preparePenguinNativeLibs = tasks.register('preparePenguinNativeLibs', Sync) 
     into(penguinNativeLibsDir)
 }
 
+def prepareLibcxxShared = tasks.register('prepareLibcxxShared', Sync) {
+    into(libcxxNativeLibsDir)
+    penguinSupportedAbis.each { abi ->
+        from({
+            def ndkDir = android.ndkDirectory
+            if (ndkDir == null || !ndkDir.exists()) {
+                throw new GradleException('android.ndkDirectory is not available; ensure ndkVersion is configured')
+            }
+            def hostTag = resolveNdkHostTag(ndkDir)
+            def triple = abiToLibcxxTriple[abi]
+            def libcxxFile = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/sysroot/usr/lib/${triple}/libc++_shared.so")
+            if (!libcxxFile.exists()) {
+                throw new GradleException("Unable to find libc++_shared.so for ABI ${abi} at ${libcxxFile}")
+            }
+            return libcxxFile
+        }) {
+            into(abi)
+        }
+    }
+}
+
 tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.configureEach {
-    dependsOn(preparePenguinNativeLibs)
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
 }
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
-    dependsOn(preparePenguinNativeLibs)
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
 }
