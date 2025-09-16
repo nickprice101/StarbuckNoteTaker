@@ -4,15 +4,14 @@ import android.content.Context
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
-import org.mockito.kotlin.doAnswer
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.Tensor
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
 
 class SummarizerTest {
     private val context: Context = mock()
@@ -25,6 +24,7 @@ class SummarizerTest {
     @After
     fun tearDown() {
         modelsDir.deleteRecursively()
+        resetPenguinLoader()
     }
 
     @Test
@@ -72,10 +72,92 @@ class SummarizerTest {
         assertEquals(Summarizer.SummarizerState.Fallback, state)
     }
 
-    private fun setField(target: Any, fieldName: String, value: Any?) {
-        val field = target.javaClass.getDeclaredField(fieldName)
+    @Test
+    fun warmUpIsReadyWhenNativeTokenizerLoads() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, spFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+
+        NativeLibraryLoader.setLoadLibraryOverrideForTesting { _ -> }
+
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(
+                FakeInterpreter(
+                    inputTensorCount = 2,
+                    outputTensors = mapOf(0 to FakeTensor(intArrayOf(1, 1, 1))),
+                    inputTensors = emptyMap()
+                )
+            )
+            add(
+                FakeInterpreter(
+                    inputTensorCount = 4,
+                    outputTensors = mapOf(1 to FakeTensor(intArrayOf(1), 1)),
+                    inputTensors = mapOf(3 to FakeTensor(intArrayOf(1), 1))
+                )
+            )
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { NativeLibraryLoader.ensurePenguin(it) },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val state = summarizer.warmUp()
+        assertEquals(Summarizer.SummarizerState.Ready, state)
+        summarizer.close()
+
+        assertTrue(isPenguinLoaded())
+    }
+
+    private fun resetPenguinLoader() {
+        val field = NativeLibraryLoader::class.java.getDeclaredField("penguinLoaded")
         field.isAccessible = true
-        field.set(target, value)
+        val flag = field.get(NativeLibraryLoader) as AtomicBoolean
+        flag.set(false)
+        NativeLibraryLoader.setLoadLibraryOverrideForTesting(null)
+    }
+
+    private fun isPenguinLoaded(): Boolean {
+        val field = NativeLibraryLoader::class.java.getDeclaredField("penguinLoaded")
+        field.isAccessible = true
+        val flag = field.get(NativeLibraryLoader) as AtomicBoolean
+        return flag.get()
+    }
+
+    private class FakeInterpreter(
+        override val inputTensorCount: Int,
+        private val outputTensors: Map<Int, LiteTensor>,
+        private val inputTensors: Map<Int, LiteTensor>
+    ) : LiteInterpreter {
+        override fun getOutputTensor(index: Int): LiteTensor = outputTensors[index] ?: FakeTensor()
+
+        override fun getInputTensor(index: Int): LiteTensor = inputTensors[index] ?: FakeTensor()
+
+        override fun run(inputs: Array<Any>, outputs: Array<Any>) {}
+
+        override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {}
+
+        override fun close() {}
+    }
+
+    private class FakeTensor(
+        private val shapeValues: IntArray = intArrayOf(1),
+        private val elements: Int = 1
+    ) : LiteTensor {
+        override fun shape(): IntArray = shapeValues
+        override fun numElements(): Int = elements
     }
 }
 

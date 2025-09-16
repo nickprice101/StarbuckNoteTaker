@@ -3,12 +3,13 @@ package com.example.starbucknotetaker
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import com.getkeepsafe.relinker.ReLinker
-import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.zip.ZipFile
+import java.util.concurrent.atomic.AtomicBoolean
+import com.getkeepsafe.relinker.ReLinker
+import kotlin.jvm.Volatile
 
 /**
  * Utility responsible for loading native libraries that ship with the app.
@@ -21,26 +22,32 @@ import java.util.zip.ZipFile
 object NativeLibraryLoader {
 
     private val penguinLoaded = AtomicBoolean(false)
+    @Volatile
+    private var loadLibraryOverride: ((String) -> Unit)? = null
 
     /** Ensures the SentencePiece JNI bridge is available in the current process. */
     fun ensurePenguin(context: Context): Boolean {
         if (penguinLoaded.get()) return true
-        if (loadLibrary(context, "penguin")) {
+        val loaded = loadLibrary(context, "penguin")
+        if (loaded) {
             penguinLoaded.set(true)
-            return true
         }
-        // Fall back to the original DJL name in case the repackaging step
-        // failed and the dependency only contributed libdjl_tokenizer.so.
-        if (loadLibrary(context, "djl_tokenizer")) {
-            penguinLoaded.set(true)
-            return true
-        }
-        return false
+        return loaded
+    }
+
+    /** Overrides the system loadLibrary call for tests. */
+    internal fun setLoadLibraryOverrideForTesting(loader: ((String) -> Unit)?) {
+        loadLibraryOverride = loader
     }
 
     private fun loadLibrary(context: Context, name: String): Boolean {
         return try {
-            System.loadLibrary(name)
+            val loader = loadLibraryOverride
+            if (loader != null) {
+                loader(name)
+            } else {
+                System.loadLibrary(name)
+            }
             true
         } catch (first: UnsatisfiedLinkError) {
             if (loadLibraryFromApk(context, name)) {
