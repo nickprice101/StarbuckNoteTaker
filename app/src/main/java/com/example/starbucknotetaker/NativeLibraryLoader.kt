@@ -1,9 +1,14 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.getkeepsafe.relinker.ReLinker
 import java.util.concurrent.atomic.AtomicBoolean
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.util.zip.ZipFile
 
 /**
  * Utility responsible for loading native libraries that ship with the app.
@@ -38,14 +43,75 @@ object NativeLibraryLoader {
             System.loadLibrary(name)
             true
         } catch (first: UnsatisfiedLinkError) {
-            try {
-                ReLinker.loadLibrary(context, name)
+            if (loadLibraryFromApk(context, name)) {
                 true
-            } catch (second: UnsatisfiedLinkError) {
-                Log.e("NativeLibraryLoader", "Failed to load native library $name", second)
-                false
+            } else {
+                try {
+                    ReLinker.loadLibrary(context, name)
+                    true
+                } catch (second: UnsatisfiedLinkError) {
+                    Log.e("NativeLibraryLoader", "Failed to load native library $name", second)
+                    false
+                }
             }
         }
+    }
+
+    private fun loadLibraryFromApk(context: Context, name: String): Boolean {
+        val extracted = try {
+            extractLibraryFromApk(context, name)
+        } catch (t: Throwable) {
+            Log.e("NativeLibraryLoader", "Failed extracting native library $name", t)
+            null
+        }
+        if (extracted == null) return false
+        return try {
+            System.load(extracted.absolutePath)
+            true
+        } catch (t: Throwable) {
+            Log.e("NativeLibraryLoader", "Failed to load native library $name from extracted copy", t)
+            extracted.delete()
+            false
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun extractLibraryFromApk(context: Context, name: String): File? {
+        val libFileName = "lib${name}.so"
+        val appInfo = context.applicationInfo
+        val apkPaths = buildList {
+            appInfo.sourceDir?.let { add(it) }
+            appInfo.splitSourceDirs?.let { addAll(it) }
+        }.distinct()
+        if (apkPaths.isEmpty()) return null
+
+        val supportedAbis = Build.SUPPORTED_ABIS
+        if (supportedAbis.isEmpty()) return null
+        for (apkPath in apkPaths) {
+            ZipFile(apkPath).use { zip ->
+                for (abi in supportedAbis) {
+                    val entryName = "lib/${abi}/${libFileName}"
+                    val entry = zip.getEntry(entryName) ?: continue
+                    val libDir = File(context.noBackupFilesDir, "native/${name}/${abi}")
+                    if (!libDir.exists() && !libDir.mkdirs() && !libDir.exists()) continue
+                    val dest = File(libDir, libFileName)
+                    val expectedSize = entry.size
+                    if (dest.exists() && expectedSize > 0 && dest.length() == expectedSize) {
+                        return dest
+                    }
+                    zip.getInputStream(entry).use { ins ->
+                        FileOutputStream(dest).use { out ->
+                            ins.copyTo(out)
+                        }
+                    }
+                    dest.setReadable(true, false)
+                    dest.setExecutable(true, false)
+                    dest.setWritable(true, true)
+                    return dest
+                }
+            }
+        }
+        return null
     }
 }
 
