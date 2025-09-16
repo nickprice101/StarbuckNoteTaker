@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +44,11 @@ fun NoteListScreen(
                 it.summary.contains(query, true)
     }
     var openIndex by remember { mutableStateOf<Int?>(null) }
+    val focusManager = LocalFocusManager.current
+
+    DisposableEffect(Unit) {
+        onDispose { focusManager.clearFocus(force = true) }
+    }
     Scaffold(
         floatingActionButton = {
             Row(

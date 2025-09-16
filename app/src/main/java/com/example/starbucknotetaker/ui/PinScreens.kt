@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
@@ -43,6 +44,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     var reveal by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val hideKeyboard = rememberKeyboardHider()
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(pin) {
         if (reveal) {
@@ -53,7 +55,10 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     DisposableEffect(Unit) {
-        onDispose { hideKeyboard() }
+        onDispose {
+            hideKeyboard()
+            focusManager.clearFocus(force = true)
+        }
     }
 
     val message = if (firstPin == null) {
@@ -134,6 +139,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     val focusRequester = remember { FocusRequester() }
     val storedPinLength = remember { pinManager.getPinLength() }
     val hideKeyboard = rememberKeyboardHider()
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(pin) {
         if (reveal) {
@@ -144,7 +150,10 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     DisposableEffect(Unit) {
-        onDispose { hideKeyboard() }
+        onDispose {
+            hideKeyboard()
+            focusManager.clearFocus(force = true)
+        }
     }
 
     Box(
