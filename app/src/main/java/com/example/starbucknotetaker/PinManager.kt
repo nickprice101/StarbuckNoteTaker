@@ -15,4 +15,18 @@ class PinManager(context: Context) {
     fun checkPin(pin: String): Boolean = prefs.getString("pin", null) == pin
 
     fun getPinLength(): Int = prefs.getString("pin", null)?.length ?: 0
+
+    fun updatePin(oldPin: String, newPin: String): Boolean {
+        val stored = prefs.getString("pin", null) ?: return false
+        return if (stored == oldPin) {
+            prefs.edit().putString("pin", newPin).apply()
+            true
+        } else {
+            false
+        }
+    }
+
+    fun clearPin() {
+        prefs.edit().remove("pin").apply()
+    }
 }
