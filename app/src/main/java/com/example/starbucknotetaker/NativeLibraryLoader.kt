@@ -21,6 +21,21 @@ import kotlin.jvm.Volatile
  */
 object NativeLibraryLoader {
 
+    private const val TAG = "NativeLibraryLoader"
+
+    private data class ExtractionAttempt(
+        val apkPath: String,
+        val abi: String,
+        val destination: File
+    )
+
+    private data class LoadFromApkResult(
+        val success: Boolean,
+        val extractedFile: File?,
+        val attempts: List<ExtractionAttempt>,
+        val failureReason: Throwable?
+    )
+
     private val penguinLoaded = AtomicBoolean(false)
     @Volatile
     private var loadLibraryOverride: ((String) -> Unit)? = null
@@ -50,40 +65,87 @@ object NativeLibraryLoader {
             }
             true
         } catch (first: UnsatisfiedLinkError) {
-            if (loadLibraryFromApk(context, name)) {
+            Log.w(TAG, "System.loadLibrary failed for $name: ${first.message}")
+            val apkResult = loadLibraryFromApk(context, name)
+            apkResult.attempts.forEach { attempt ->
+                Log.d(
+                    TAG,
+                    "[loadLibrary] Tested APK ${attempt.apkPath} for ABI ${attempt.abi} -> ${attempt.destination.absolutePath}"
+                )
+            }
+            if (apkResult.success) {
                 true
             } else {
+                val extractedPath = apkResult.extractedFile?.absolutePath
+                val apkFailureMessage = apkResult.failureReason?.message ?: "unknown"
+                Log.w(
+                    TAG,
+                    "loadLibraryFromApk failed for $name: $apkFailureMessage (extractedPath=$extractedPath)"
+                )
                 try {
                     ReLinker.loadLibrary(context, name)
                     true
                 } catch (second: UnsatisfiedLinkError) {
-                    Log.e("NativeLibraryLoader", "Failed to load native library $name", second)
+                    Log.e(
+                        TAG,
+                        "Failed to load native library $name. Final failure: ${second.message}; " +
+                            "system failure: ${first.message}; extractedPath=$extractedPath",
+                        second
+                    )
                     false
                 }
             }
         }
     }
 
-    private fun loadLibraryFromApk(context: Context, name: String): Boolean {
+    private fun loadLibraryFromApk(context: Context, name: String): LoadFromApkResult {
+        val attempts = mutableListOf<ExtractionAttempt>()
         val extracted = try {
-            extractLibraryFromApk(context, name)
+            extractLibraryFromApk(context, name, attempts)
         } catch (t: Throwable) {
-            Log.e("NativeLibraryLoader", "Failed extracting native library $name", t)
-            null
+            attempts.forEach { attempt ->
+                Log.d(
+                    TAG,
+                    "[loadLibraryFromApk] Tested APK ${attempt.apkPath} for ABI ${attempt.abi} -> ${attempt.destination.absolutePath}"
+                )
+            }
+            Log.e(TAG, "Failed extracting native library $name", t)
+            Log.w(TAG, "[loadLibraryFromApk] Final failure reason: ${t.message}; extractedPath=null")
+            return LoadFromApkResult(false, null, attempts, t)
         }
-        if (extracted == null) return false
+        attempts.forEach { attempt ->
+            Log.d(
+                TAG,
+                "[loadLibraryFromApk] Tested APK ${attempt.apkPath} for ABI ${attempt.abi} -> ${attempt.destination.absolutePath}"
+            )
+        }
+        if (extracted == null) {
+            val failure = IllegalStateException("Library $name not found in tested APKs")
+            Log.w(TAG, "[loadLibraryFromApk] Final failure reason: ${failure.message}; extractedPath=null")
+            return LoadFromApkResult(false, null, attempts, failure)
+        }
         return try {
             System.load(extracted.absolutePath)
-            true
+            Log.i(TAG, "Successfully loaded native library $name from ${extracted.absolutePath}")
+            LoadFromApkResult(true, extracted, attempts, null)
         } catch (t: Throwable) {
-            Log.e("NativeLibraryLoader", "Failed to load native library $name from extracted copy", t)
+            Log.e(
+                TAG,
+                "Failed to load native library $name from extracted copy at ${extracted.absolutePath}",
+                t
+            )
             extracted.delete()
-            false
+            Log.w(TAG, "[loadLibraryFromApk] Final failure reason: ${t.message}; extractedPath=${extracted.absolutePath}")
+            LoadFromApkResult(false, extracted, attempts, t)
         }
     }
 
     @Throws(IOException::class)
-    private fun extractLibraryFromApk(context: Context, name: String): File? {
+    private fun extractLibraryFromApk(
+        context: Context,
+        name: String,
+        attempts: MutableList<ExtractionAttempt>
+    ): File? {
         val libFileName = "lib${name}.so"
         val appInfo = context.applicationInfo
         val apkPaths = buildList {
@@ -102,6 +164,7 @@ object NativeLibraryLoader {
                     val libDir = File(context.noBackupFilesDir, "native/${name}/${abi}")
                     if (!libDir.exists() && !libDir.mkdirs() && !libDir.exists()) continue
                     val dest = File(libDir, libFileName)
+                    attempts.add(ExtractionAttempt(apkPath, abi, dest))
                     val expectedSize = entry.size
                     if (dest.exists() && expectedSize > 0 && dest.length() == expectedSize) {
                         return dest
