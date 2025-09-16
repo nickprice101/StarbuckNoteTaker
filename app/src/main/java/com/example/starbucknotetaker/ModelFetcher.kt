@@ -60,7 +60,12 @@ class ModelFetcher(
                 .build()
             val wm = WorkManager.getInstance(context)
             wm.enqueueUniqueWork("summarizer-model-download", ExistingWorkPolicy.KEEP, work)
-            wm.getWorkInfoByIdFlow(work.id).first { it.state.isFinished }
+            // getWorkInfoByIdFlow occasionally emits a null item before the
+            // underlying WorkSpec is created. Cast to a nullable Flow and wait
+            // until we have a finished WorkInfo to avoid a NPE.
+            @Suppress("UNCHECKED_CAST")
+            (wm.getWorkInfoByIdFlow(work.id) as kotlinx.coroutines.flow.Flow<androidx.work.WorkInfo?>)
+                .first { info -> info?.state?.isFinished == true }
 
             return@withContext if (
                 encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
