@@ -40,10 +40,32 @@ object NativeLibraryLoader {
     @Volatile
     private var loadLibraryOverride: ((String) -> Unit)? = null
 
+    private fun loadNativeLibrary(name: String) {
+        val loader = loadLibraryOverride
+        if (loader != null) {
+            loader(name)
+        } else {
+            System.loadLibrary(name)
+        }
+    }
+
     /** Ensures the SentencePiece JNI bridge is available in the current process. */
     fun ensurePenguin(context: Context): Boolean {
         if (penguinLoaded.get()) return true
-        val loaded = loadLibrary(context, "penguin")
+        var loaded = loadLibrary(context, "penguin")
+        if (!loaded) {
+            Log.w(
+                TAG,
+                "Falling back to loading djl_tokenizer after penguin failed; packaging may be missing libpenguin.so"
+            )
+            loaded = try {
+                loadNativeLibrary("djl_tokenizer")
+                true
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to load fallback native library djl_tokenizer", t)
+                false
+            }
+        }
         if (loaded) {
             penguinLoaded.set(true)
         }
@@ -57,12 +79,7 @@ object NativeLibraryLoader {
 
     private fun loadLibrary(context: Context, name: String): Boolean {
         return try {
-            val loader = loadLibraryOverride
-            if (loader != null) {
-                loader(name)
-            } else {
-                System.loadLibrary(name)
-            }
+            loadNativeLibrary(name)
             true
         } catch (first: UnsatisfiedLinkError) {
             Log.w(TAG, "System.loadLibrary failed for $name: ${first.message}")
