@@ -11,9 +11,9 @@ import androidx.compose.material.FractionalThreshold
 import androidx.compose.material.rememberSwipeableState
 import androidx.compose.material.swipeable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
+import com.example.starbucknotetaker.Summarizer
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.launch
@@ -35,7 +36,8 @@ fun NoteListScreen(
     onAddNote: () -> Unit,
     onOpenNote: (Int) -> Unit,
     onDeleteNote: (Int) -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    summarizerState: Summarizer.SummarizerState
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = notes.filter {
@@ -87,6 +89,7 @@ fun NoteListScreen(
                 .padding(padding)
                 .fillMaxSize()
         ) {
+            SummarizerStatusBanner(state = summarizerState)
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },

@@ -37,7 +37,7 @@ object NativeLibraryLoader {
         val failureReason: Throwable?
     )
 
-    private val penguinLoaded = AtomicBoolean(false)
+    private val tokenizerLoaded = AtomicBoolean(false)
     @Volatile
     private var loadLibraryOverride: ((String) -> Unit)? = null
 
@@ -50,28 +50,25 @@ object NativeLibraryLoader {
         }
     }
 
-    /** Ensures the SentencePiece JNI bridge is available in the current process. */
-    fun ensurePenguin(context: Context): Boolean {
-        if (penguinLoaded.get()) return true
-        var loaded = loadLibrary(context, "penguin")
+    /** Ensures the tokenizer JNI bridge is available in the current process. */
+    fun ensureTokenizer(context: Context): Boolean {
+        if (tokenizerLoaded.get()) return true
+        var loaded = loadLibrary(context, "djl_tokenizer")
         if (!loaded) {
             Log.w(
                 TAG,
-                "Falling back to loading djl_tokenizer after penguin failed; packaging may be missing libpenguin.so"
+                "Falling back to legacy penguin library name; packaging may still ship libpenguin.so"
             )
-            loaded = try {
-                loadNativeLibrary("djl_tokenizer")
-                true
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to load fallback native library djl_tokenizer", t)
-                false
-            }
+            loaded = loadLibrary(context, "penguin")
         }
         if (loaded) {
-            penguinLoaded.set(true)
+            tokenizerLoaded.set(true)
         }
         return loaded
     }
+
+    /** Backwards compatible alias for older callers. */
+    fun ensurePenguin(context: Context): Boolean = ensureTokenizer(context)
 
     /** Overrides the system loadLibrary call for tests. */
     internal fun setLoadLibraryOverrideForTesting(loader: ((String) -> Unit)?) {

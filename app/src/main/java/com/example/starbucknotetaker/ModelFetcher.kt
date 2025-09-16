@@ -25,11 +25,11 @@ class ModelFetcher(
 
         const val ENCODER_REMOTE = "encoder_int8_dynamic.tflite"
         const val DECODER_REMOTE = "decoder_step_int8_dynamic.tflite"
-        const val SPIECE_REMOTE = "spiece.model"
+        const val TOKENIZER_REMOTE = "https://huggingface.co/t5-small/resolve/main/tokenizer.json"
 
         const val ENCODER_NAME = ENCODER_REMOTE
         const val DECODER_NAME = DECODER_REMOTE
-        const val SPIECE_NAME = SPIECE_REMOTE
+        const val TOKENIZER_NAME = "tokenizer.json"
 
         internal fun hasTfliteMagic(file: File): Boolean {
             if (!file.exists() || file.length() < 8) return false
@@ -51,7 +51,7 @@ class ModelFetcher(
     }
 
     sealed class Result {
-        data class Success(val encoder: File, val decoder: File, val spiece: File) : Result()
+        data class Success(val encoder: File, val decoder: File, val tokenizer: File) : Result()
         data class Failure(val message: String, val throwable: Throwable? = null) : Result()
     }
 
@@ -64,13 +64,13 @@ class ModelFetcher(
             val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
             val encoderFile = File(modelsDir, ENCODER_NAME)
             val decoderFile = File(modelsDir, DECODER_NAME)
-            val spieceFile = File(modelsDir, SPIECE_NAME)
+            val tokenizerFile = File(modelsDir, TOKENIZER_NAME)
 
-            val haveModels = encoderFile.exists() && decoderFile.exists() && spieceFile.exists()
-            val valid = haveModels && isValidTflite(encoderFile) && isValidTflite(decoderFile) && spieceFile.length() > 0L
+            val haveModels = encoderFile.exists() && decoderFile.exists() && tokenizerFile.exists()
+            val valid = haveModels && isValidTflite(encoderFile) && isValidTflite(decoderFile) && tokenizerFile.length() > 0L
             if (valid) {
                 Log.d("Summarizer", "summarizer: model files already present")
-                return@withContext Result.Success(encoderFile, decoderFile, spieceFile)
+                return@withContext Result.Success(encoderFile, decoderFile, tokenizerFile)
             }
 
             Log.d("Summarizer", "summarizer: scheduling model download")
@@ -94,12 +94,12 @@ class ModelFetcher(
             }
 
             val downloadedValid =
-                encoderFile.exists() && decoderFile.exists() && spieceFile.exists() &&
-                    isValidTflite(encoderFile) && isValidTflite(decoderFile) && spieceFile.length() > 0L
+                encoderFile.exists() && decoderFile.exists() && tokenizerFile.exists() &&
+                    isValidTflite(encoderFile) && isValidTflite(decoderFile) && tokenizerFile.length() > 0L
 
             return@withContext if (downloadedValid) {
                 Log.d("Summarizer", "summarizer: model download complete")
-                Result.Success(encoderFile, decoderFile, spieceFile)
+                Result.Success(encoderFile, decoderFile, tokenizerFile)
             } else {
                 Log.e("Summarizer", "summarizer: downloaded model files failed validation")
                 Result.Failure("Downloaded model files failed validation")

@@ -24,13 +24,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
+import com.example.starbucknotetaker.Summarizer
 
 @Composable
 fun AddNoteScreen(
     onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
-    onEnablePinCheck: () -> Unit
+    onEnablePinCheck: () -> Unit,
+    summarizerState: Summarizer.SummarizerState
 ) {
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
@@ -142,6 +144,9 @@ fun AddNoteScreen(
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
+            item {
+                SummarizerStatusBanner(state = summarizerState)
+            }
             item {
                 OutlinedTextField(
                     value = title,

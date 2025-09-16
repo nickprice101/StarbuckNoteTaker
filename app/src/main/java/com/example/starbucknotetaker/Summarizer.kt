@@ -22,7 +22,7 @@ class Summarizer(
     private val context: Context,
     private val fetcher: ModelFetcher = ModelFetcher(),
     private val spFactory: (Context) -> SentencePieceProcessor = { SentencePieceProcessor() },
-    private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensurePenguin(it) },
+    private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensureTokenizer(it) },
     private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debug: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
@@ -51,14 +51,14 @@ class Summarizer(
                     if (!ensureNativeTokenizerLib()) {
                         logger(
                             "summarizer missing native tokenizer lib",
-                            UnsatisfiedLinkError("libpenguin.so not found")
+                            UnsatisfiedLinkError("libdjl_tokenizer.so not found")
                         )
                         _state.emit(SummarizerState.Fallback)
                         return
                     }
                     encoder = interpreterFactory(mapFile(result.encoder))
                     decoder = interpreterFactory(mapFile(result.decoder))
-                    tokenizer = spFactory(context).apply { load(context, result.spiece.absolutePath) }
+                    tokenizer = spFactory(context).apply { load(context, result.tokenizer.absolutePath) }
                     debug("summarizer models ready")
                     _state.emit(SummarizerState.Ready)
                 } catch (e: Throwable) {

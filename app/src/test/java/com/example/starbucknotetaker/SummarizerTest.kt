@@ -24,7 +24,7 @@ class SummarizerTest {
     @After
     fun tearDown() {
         modelsDir.deleteRecursively()
-        resetPenguinLoader()
+        resetTokenizerLoader()
     }
 
     @Test
@@ -41,11 +41,11 @@ class SummarizerTest {
         // Create dummy model files so fetcher doesn't attempt network
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(byteArrayOf()) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(byteArrayOf()) }
-        val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(byteArrayOf()) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(byteArrayOf()) }
 
         val fetcher = mock<ModelFetcher>()
         whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, spFile)
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
         )
 
         val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debug = { })
@@ -59,11 +59,11 @@ class SummarizerTest {
     fun warmUpReportsFallbackWhenNativeTokenizerMissing() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(byteArrayOf()) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(byteArrayOf()) }
-        val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(byteArrayOf()) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(byteArrayOf()) }
 
         val fetcher = mock<ModelFetcher>()
         whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, spFile)
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
         )
 
         val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debug = { })
@@ -76,11 +76,11 @@ class SummarizerTest {
     fun warmUpIsReadyWhenNativeTokenizerLoads() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
 
         val fetcher = mock<ModelFetcher>()
         whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, spFile)
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
         )
 
         val tokenizer = mock<SentencePieceProcessor>()
@@ -108,7 +108,7 @@ class SummarizerTest {
             context,
             fetcher = fetcher,
             spFactory = { _ -> tokenizer },
-            nativeLoader = { NativeLibraryLoader.ensurePenguin(it) },
+            nativeLoader = { NativeLibraryLoader.ensureTokenizer(it) },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
             debug = { }
@@ -118,19 +118,19 @@ class SummarizerTest {
         assertEquals(Summarizer.SummarizerState.Ready, state)
         summarizer.close()
 
-        assertTrue(isPenguinLoaded())
+        assertTrue(isTokenizerLoaded())
     }
 
-    private fun resetPenguinLoader() {
-        val field = NativeLibraryLoader::class.java.getDeclaredField("penguinLoaded")
+    private fun resetTokenizerLoader() {
+        val field = NativeLibraryLoader::class.java.getDeclaredField("tokenizerLoaded")
         field.isAccessible = true
         val flag = field.get(NativeLibraryLoader) as AtomicBoolean
         flag.set(false)
         NativeLibraryLoader.setLoadLibraryOverrideForTesting(null)
     }
 
-    private fun isPenguinLoaded(): Boolean {
-        val field = NativeLibraryLoader::class.java.getDeclaredField("penguinLoaded")
+    private fun isTokenizerLoaded(): Boolean {
+        val field = NativeLibraryLoader::class.java.getDeclaredField("tokenizerLoaded")
         field.isAccessible = true
         val flag = field.get(NativeLibraryLoader) as AtomicBoolean
         return flag.get()

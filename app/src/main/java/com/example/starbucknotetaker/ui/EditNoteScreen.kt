@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteFile
+import com.example.starbucknotetaker.Summarizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,7 +44,8 @@ fun EditNoteScreen(
     onSave: (String?, String, List<String>, List<NoteFile>) -> Unit,
     onCancel: () -> Unit,
     onDisablePinCheck: () -> Unit,
-    onEnablePinCheck: () -> Unit
+    onEnablePinCheck: () -> Unit,
+    summarizerState: Summarizer.SummarizerState
 ) {
     var title by remember { mutableStateOf(note.title) }
     val blocks = remember {
@@ -240,6 +242,9 @@ fun EditNoteScreen(
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
+            item {
+                SummarizerStatusBanner(state = summarizerState)
+            }
             item {
                 OutlinedTextField(
                     value = title,
