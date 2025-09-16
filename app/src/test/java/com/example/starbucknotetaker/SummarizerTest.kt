@@ -107,7 +107,7 @@ class SummarizerTest {
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
-            spFactory = { tokenizer },
+            spFactory = { _ -> tokenizer },
             nativeLoader = { NativeLibraryLoader.ensurePenguin(it) },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },

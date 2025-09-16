@@ -21,7 +21,7 @@ import java.nio.channels.FileChannel
 class Summarizer(
     private val context: Context,
     private val fetcher: ModelFetcher = ModelFetcher(),
-    private val spFactory: () -> SentencePieceProcessor = { SentencePieceProcessor() },
+    private val spFactory: (Context) -> SentencePieceProcessor = { SentencePieceProcessor() },
     private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensurePenguin(it) },
     private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
@@ -58,7 +58,7 @@ class Summarizer(
                     }
                     encoder = interpreterFactory(mapFile(result.encoder))
                     decoder = interpreterFactory(mapFile(result.decoder))
-                    tokenizer = spFactory().apply { load(result.spiece.absolutePath) }
+                    tokenizer = spFactory(context).apply { load(context, result.spiece.absolutePath) }
                     debug("summarizer models ready")
                     _state.emit(SummarizerState.Ready)
                 } catch (e: Throwable) {

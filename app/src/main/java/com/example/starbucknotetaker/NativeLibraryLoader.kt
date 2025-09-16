@@ -6,8 +6,9 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.zip.ZipFile
+import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.zip.ZipFile
 import com.getkeepsafe.relinker.ReLinker
 import kotlin.jvm.Volatile
 
@@ -113,6 +114,53 @@ object NativeLibraryLoader {
                 }
             }
         }
+    }
+
+    internal fun findLibraryOnDisk(context: Context, name: String): File? {
+        val libFileName = System.mapLibraryName(name)
+        val searchRoots = mutableListOf<File>()
+        context.applicationInfo.nativeLibraryDir?.let { searchRoots.add(File(it)) }
+        searchRoots.add(File(context.noBackupFilesDir, "native/$name"))
+        searchRoots.add(File(context.filesDir, "lib"))
+        context.codeCacheDir?.let { searchRoots.add(File(it, "lib")) }
+
+        searchRoots.forEach { root ->
+            val found = locateInDirectory(root, libFileName)
+            if (found != null) {
+                return found
+            }
+        }
+        return null
+    }
+
+    private fun locateInDirectory(root: File, libFileName: String): File? {
+        if (!root.exists()) return null
+        if (root.isFile) {
+            return if (root.name == libFileName) root else null
+        }
+
+        val queue: ArrayDeque<File> = ArrayDeque()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (!current.exists()) continue
+            if (current.isFile) {
+                if (current.name == libFileName) {
+                    return current
+                }
+            } else {
+                current.listFiles()?.forEach { child ->
+                    if (child.isFile) {
+                        if (child.name == libFileName) {
+                            return child
+                        }
+                    } else if (child.isDirectory) {
+                        queue.add(child)
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun loadLibraryFromApk(context: Context, name: String): LoadFromApkResult {
