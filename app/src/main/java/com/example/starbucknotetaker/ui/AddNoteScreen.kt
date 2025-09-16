@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 
@@ -35,6 +36,7 @@ fun AddNoteScreen(
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
     val context = LocalContext.current
     val hideKeyboard = rememberKeyboardHider()
+    val focusManager = LocalFocusManager.current
 
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -75,6 +77,7 @@ fun AddNoteScreen(
     DisposableEffect(Unit) {
         onDispose {
             hideKeyboard()
+            focusManager.clearFocus(force = true)
             onEnablePinCheck()
         }
     }
