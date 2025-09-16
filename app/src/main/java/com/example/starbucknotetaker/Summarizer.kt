@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import org.tensorflow.lite.Interpreter
-import com.example.starbucknotetaker.SentencePieceProcessor
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.MappedByteBuffer
@@ -25,11 +23,12 @@ class Summarizer(
     private val fetcher: ModelFetcher = ModelFetcher(),
     private val spFactory: () -> SentencePieceProcessor = { SentencePieceProcessor() },
     private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensurePenguin(it) },
+    private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debug: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
 ) {
-    private var encoder: Interpreter? = null
-    private var decoder: Interpreter? = null
+    private var encoder: LiteInterpreter? = null
+    private var decoder: LiteInterpreter? = null
     private var tokenizer: SentencePieceProcessor? = null
 
     sealed class SummarizerState {
@@ -57,8 +56,8 @@ class Summarizer(
                         _state.emit(SummarizerState.Fallback)
                         return
                     }
-                    encoder = Interpreter(mapFile(result.encoder))
-                    decoder = Interpreter(mapFile(result.decoder))
+                    encoder = interpreterFactory(mapFile(result.encoder))
+                    decoder = interpreterFactory(mapFile(result.decoder))
                     tokenizer = spFactory().apply { load(result.spiece.absolutePath) }
                     debug("summarizer models ready")
                     _state.emit(SummarizerState.Ready)
