@@ -55,6 +55,23 @@ class SummarizerTest {
         assertEquals("One. Two", result)
     }
 
+    @Test
+    fun warmUpReportsFallbackWhenNativeTokenizerMissing() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(byteArrayOf()) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(byteArrayOf()) }
+        val spFile = File(modelsDir, ModelFetcher.SPIECE_NAME).apply { writeBytes(byteArrayOf()) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, spFile)
+        )
+
+        val summarizer = Summarizer(context, fetcher, logger = { _, _ -> }, debug = { })
+
+        val state = summarizer.warmUp()
+        assertEquals(Summarizer.SummarizerState.Fallback, state)
+    }
+
     private fun setField(target: Any, fieldName: String, value: Any?) {
         val field = target.javaClass.getDeclaredField(fieldName)
         field.isAccessible = true

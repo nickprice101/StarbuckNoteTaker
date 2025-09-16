@@ -103,6 +103,16 @@ class Summarizer(
     }
 
     /**
+     * Ensures the TensorFlow models and tokenizer are ready for inference.
+     * Returns the resulting [SummarizerState] so callers can react to fallbacks
+     * or failures when using the service through IPC.
+     */
+    suspend fun warmUp(): SummarizerState = withContext(Dispatchers.Default) {
+        loadModelsIfNeeded()
+        state.value
+    }
+
+    /**
      * Generates a summary for the given [text]. Model inference runs on a background
      * dispatcher. If the models cannot be loaded, this falls back to a simple extractive
      * summary using the first couple of sentences.
