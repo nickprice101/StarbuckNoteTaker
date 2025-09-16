@@ -178,9 +178,9 @@ fun EditNoteScreen(
                 title = { Text("Edit Note") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        hideKeyboard()
-                        focusManager.clearFocus(force = true)
                         scope.launch {
+                            hideKeyboard()
+                            focusManager.clearFocus(force = true)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes discarded",
                                 duration = SnackbarDuration.Short
@@ -217,9 +217,9 @@ fun EditNoteScreen(
                                 }
                             }
                         }.trim()
-                        hideKeyboard()
-                        focusManager.clearFocus(force = true)
                         scope.launch {
+                            hideKeyboard()
+                            focusManager.clearFocus(force = true)
                             onSave(title, content, images, files)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes saved",
