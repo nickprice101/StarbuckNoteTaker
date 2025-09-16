@@ -48,7 +48,7 @@ class Summarizer(
         when (val result = fetcher.ensureModels(context)) {
             is ModelFetcher.Result.Success -> {
                 try {
-                    if (!hasNativeTokenizerLib()) {
+                    if (!ensureNativeTokenizerLib()) {
                         logger(
                             "summarizer missing native tokenizer lib",
                             UnsatisfiedLinkError("libpenguin.so not found")
@@ -80,9 +80,26 @@ class Summarizer(
         }
     }
 
-    private fun hasNativeTokenizerLib(): Boolean {
-        val libDir = context.applicationInfo.nativeLibraryDir ?: return false
-        return File(libDir, "libpenguin.so").exists()
+    private var nativeTokenizerLoaded = false
+
+    /**
+     * Attempts to load the native SentencePiece tokenizer library.
+     * Returns true if the library was loaded successfully.
+     */
+    private fun ensureNativeTokenizerLib(): Boolean {
+        if (nativeTokenizerLoaded) return true
+        return try {
+            // The SentencePiece implementation packaged with the app exposes
+            // its JNI bindings through the "penguin" library. Loading it here
+            // ensures we fail fast with a controlled fallback when the library
+            // isn't bundled with the APK instead of throwing an uncaught
+            // UnsatisfiedLinkError from within DJL.
+            System.loadLibrary("penguin")
+            nativeTokenizerLoaded = true
+            true
+        } catch (e: UnsatisfiedLinkError) {
+            false
+        }
     }
 
     /**

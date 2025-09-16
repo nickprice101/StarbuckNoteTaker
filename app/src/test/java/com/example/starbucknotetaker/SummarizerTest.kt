@@ -11,7 +11,6 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.Tensor
-import com.example.starbucknotetaker.SentencePieceProcessor
 import java.io.File
 import java.nio.file.Files
 
@@ -49,10 +48,7 @@ class SummarizerTest {
             ModelFetcher.Result.Success(encFile, decFile, spFile)
         )
 
-        val tokenizer = mock<SentencePieceProcessor>()
-        whenever(tokenizer.load(any())).thenThrow(UnsatisfiedLinkError("missing lib"))
-
-        val summarizer = Summarizer(context, fetcher, spFactory = { tokenizer }, logger = { _, _ -> }, debug = { })
+        val summarizer = Summarizer(context, fetcher, logger = { _, _ -> }, debug = { })
 
         val text = "One. Two. Three."
         val result = summarizer.summarize(text)
