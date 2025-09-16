@@ -47,10 +47,10 @@ class ModelDownloadWorker(
                 sizeBytes = 59_264_176L,
                 sha256 = "34a39fac38e371888f3a2bf79ce37c938e226252f37f41ff6ab79ce09922c4df"
             ),
-            ModelFetcher.SPIECE_NAME to ExpectedFile(
-                kind = FileKind.SENTENCE_PIECE,
-                sizeBytes = 791_656L,
-                sha256 = "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86"
+            ModelFetcher.TOKENIZER_NAME to ExpectedFile(
+                kind = FileKind.TOKENIZER,
+                sizeBytes = 1_389_353L,
+                sha256 = "d2acde0d8d71dd30a711834b07781b9c89feaac33fd332f60507699282740066"
             )
         )
     }
@@ -61,7 +61,7 @@ class ModelDownloadWorker(
         val sha256: String
     )
 
-    private enum class FileKind { TFLITE, SENTENCE_PIECE }
+    private enum class FileKind { TFLITE, TOKENIZER }
 
     override suspend fun doWork(): Result {
         val baseUrl = inputData.getString("baseUrl") ?: return Result.failure()
@@ -71,13 +71,13 @@ class ModelDownloadWorker(
         val tasks = listOf(
             ModelFetcher.ENCODER_NAME to ModelFetcher.ENCODER_REMOTE,
             ModelFetcher.DECODER_NAME to ModelFetcher.DECODER_REMOTE,
-            ModelFetcher.SPIECE_NAME to ModelFetcher.SPIECE_REMOTE
+            ModelFetcher.TOKENIZER_NAME to ModelFetcher.TOKENIZER_REMOTE
         )
 
         var progress = 0
         setForeground(createForegroundInfo(progress))
         for ((name, remote) in tasks) {
-            val url = baseUrl + remote
+            val url = if (remote.startsWith("http", ignoreCase = true)) remote else baseUrl + remote
             val dest = File(modelsDir, name)
             try {
                 Log.d("Summarizer", "summarizer: downloading $name")
@@ -201,7 +201,11 @@ class ModelDownloadWorker(
     }
 
     private fun inferKind(name: String): FileKind =
-        if (name.endsWith(".tflite", ignoreCase = true)) FileKind.TFLITE else FileKind.SENTENCE_PIECE
+        if (name.endsWith(".tflite", ignoreCase = true)) {
+            FileKind.TFLITE
+        } else {
+            FileKind.TOKENIZER
+        }
 
     private fun headerPreview(file: File, byteCount: Int = 8): String {
         val header = ByteArray(byteCount)

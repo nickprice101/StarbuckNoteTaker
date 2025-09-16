@@ -50,6 +50,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     var pinCheckEnabled by remember { mutableStateOf(true) }
     var lastRoute by rememberSaveable { mutableStateOf<String?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val summarizerState by noteViewModel.summarizerState.collectAsState()
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -114,7 +115,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onAddNote = { navController.navigate("add") },
                 onOpenNote = { index -> navController.navigate("detail/$index") },
                 onDeleteNote = { index -> noteViewModel.deleteNote(index) },
-                onSettings = { navController.navigate("settings") }
+                onSettings = { navController.navigate("settings") },
+                summarizerState = summarizerState
             )
         }
         composable("add") {
@@ -125,7 +127,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 },
                 onBack = { navController.popBackStack() },
                 onDisablePinCheck = { pinCheckEnabled = false },
-                onEnablePinCheck = { pinCheckEnabled = true }
+                onEnablePinCheck = { pinCheckEnabled = true },
+                summarizerState = summarizerState
             )
         }
         composable("detail/{index}") { backStackEntry ->
@@ -151,7 +154,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     },
                     onCancel = { navController.popBackStack() },
                     onDisablePinCheck = { pinCheckEnabled = false },
-                    onEnablePinCheck = { pinCheckEnabled = true }
+                    onEnablePinCheck = { pinCheckEnabled = true },
+                    summarizerState = summarizerState
                 )
             }
         }
