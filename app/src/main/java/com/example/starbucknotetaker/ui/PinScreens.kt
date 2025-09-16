@@ -54,13 +54,6 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            hideKeyboard()
-            focusManager.clearFocus(force = true)
-        }
-    }
-
     val message = if (firstPin == null) {
         "Create a custom PIN"
     } else {
@@ -116,6 +109,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
                 } else {
                     if (pin == firstPin) {
                         hideKeyboard()
+                        focusManager.clearFocus(force = true)
                         pinManager.setPin(pin)
                         onDone(pin)
                     } else {
@@ -149,13 +143,6 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            hideKeyboard()
-            focusManager.clearFocus(force = true)
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -181,6 +168,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
                         if (input.length == storedPinLength) {
                             if (pinManager.checkPin(input)) {
                                 hideKeyboard()
+                                focusManager.clearFocus(force = true)
                                 onSuccess(input)
                             } else {
                                 error = true
