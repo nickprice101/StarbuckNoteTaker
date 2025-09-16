@@ -45,17 +45,18 @@ fun NoteListScreen(
     }
     var openIndex by remember { mutableStateOf<Int?>(null) }
     val focusManager = LocalFocusManager.current
-
-    DisposableEffect(Unit) {
-        onDispose { focusManager.clearFocus(force = true) }
-    }
+    val hideKeyboard = rememberKeyboardHider()
     Scaffold(
         floatingActionButton = {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 FloatingActionButton(
-                    onClick = onSettings,
+                    onClick = {
+                        hideKeyboard()
+                        focusManager.clearFocus(force = true)
+                        onSettings()
+                    },
                     backgroundColor = MaterialTheme.colors.primary
                 ) {
                     Icon(
@@ -65,7 +66,11 @@ fun NoteListScreen(
                     )
                 }
                 FloatingActionButton(
-                    onClick = onAddNote,
+                    onClick = {
+                        hideKeyboard()
+                        focusManager.clearFocus(force = true)
+                        onAddNote()
+                    },
                     backgroundColor = MaterialTheme.colors.primary
                 ) {
                     Icon(
@@ -102,7 +107,11 @@ fun NoteListScreen(
                         isOpen = openIndex == originalIndex,
                         onOpen = { openIndex = originalIndex },
                         onClose = { if (openIndex == originalIndex) openIndex = null },
-                        onClick = { onOpenNote(originalIndex) },
+                        onClick = {
+                            hideKeyboard()
+                            focusManager.clearFocus(force = true)
+                            onOpenNote(originalIndex)
+                        },
                         onDelete = {
                             onDeleteNote(originalIndex)
                             if (openIndex == originalIndex) openIndex = null
