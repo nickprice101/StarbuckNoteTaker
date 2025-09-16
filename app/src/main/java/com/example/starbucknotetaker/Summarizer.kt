@@ -24,6 +24,7 @@ class Summarizer(
     private val context: Context,
     private val fetcher: ModelFetcher = ModelFetcher(),
     private val spFactory: () -> SentencePieceProcessor = { SentencePieceProcessor() },
+    private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensurePenguin(it) },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debug: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
 ) {
@@ -88,18 +89,9 @@ class Summarizer(
      */
     private fun ensureNativeTokenizerLib(): Boolean {
         if (nativeTokenizerLoaded) return true
-        return try {
-            // The SentencePiece implementation packaged with the app exposes
-            // its JNI bindings through the "penguin" library. Loading it here
-            // ensures we fail fast with a controlled fallback when the library
-            // isn't bundled with the APK instead of throwing an uncaught
-            // UnsatisfiedLinkError from within DJL.
-            System.loadLibrary("penguin")
-            nativeTokenizerLoaded = true
-            true
-        } catch (e: UnsatisfiedLinkError) {
-            false
-        }
+        val loaded = nativeLoader(context)
+        nativeTokenizerLoaded = loaded
+        return loaded
     }
 
     /**

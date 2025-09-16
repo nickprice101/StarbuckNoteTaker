@@ -34,6 +34,7 @@ fun AddNoteScreen(
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
     val context = LocalContext.current
+    val hideKeyboard = rememberKeyboardHider()
 
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -72,7 +73,10 @@ fun AddNoteScreen(
     }
 
     DisposableEffect(Unit) {
-        onDispose { onEnablePinCheck() }
+        onDispose {
+            hideKeyboard()
+            onEnablePinCheck()
+        }
     }
 
     Scaffold(
@@ -80,7 +84,10 @@ fun AddNoteScreen(
             TopAppBar(
                 title = { Text("New Note") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        hideKeyboard()
+                        onBack()
+                    }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -117,6 +124,7 @@ fun AddNoteScreen(
                                 }
                             }
                         }.trim()
+                        hideKeyboard()
                         onSave(title, content, imageList, fileList)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")

@@ -27,6 +27,7 @@ fun SettingsScreen(
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    val hideKeyboard = rememberKeyboardHider()
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -46,14 +47,20 @@ fun SettingsScreen(
     }
 
     DisposableEffect(Unit) {
-        onDispose { onEnablePinCheck() }
+        onDispose {
+            hideKeyboard()
+            onEnablePinCheck()
+        }
     }
 
     if (showDialog && selectedUri != null) {
         var pin by remember { mutableStateOf("") }
         var overwrite by remember { mutableStateOf(false) }
         AlertDialog(
-            onDismissRequest = { showDialog = false },
+            onDismissRequest = {
+                hideKeyboard()
+                showDialog = false
+            },
             title = { Text("Import Archive") },
             text = {
                 Column {
@@ -84,12 +91,16 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
+                    hideKeyboard()
                     selectedUri?.let { onImport(it, pin, overwrite) }
                     showDialog = false
                 }) { Text("Import") }
             },
             dismissButton = {
-                TextButton(onClick = { showDialog = false }) { Text("Cancel") }
+                TextButton(onClick = {
+                    hideKeyboard()
+                    showDialog = false
+                }) { Text("Cancel") }
             }
         )
     }
@@ -99,7 +110,10 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text("Settings") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        hideKeyboard()
+                        onBack()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }

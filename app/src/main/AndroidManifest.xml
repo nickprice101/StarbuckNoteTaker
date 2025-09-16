@@ -36,10 +36,15 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Stub QSPM service to avoid lookup failures on devices expecting it -->
+        <!-- QSPM binder implementation for compatibility with vendor GPU drivers -->
         <service
             android:name=".QspmService"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.starbucknotetaker.IQspmService" />
+                <action android:name="com.qualcomm.qspm.IQspmService" />
+            </intent-filter>
+        </service>
 
         <!-- Make WorkManager's foreground service type explicit for Android 14+ -->
         <service

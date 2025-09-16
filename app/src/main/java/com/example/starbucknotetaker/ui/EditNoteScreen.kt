@@ -85,6 +85,7 @@ fun EditNoteScreen(
     val context = LocalContext.current
     val scaffoldState = rememberScaffoldState()
     val scope = rememberCoroutineScope()
+    val hideKeyboard = rememberKeyboardHider()
 
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         onEnablePinCheck()
@@ -163,7 +164,10 @@ fun EditNoteScreen(
     }
 
     DisposableEffect(Unit) {
-        onDispose { onEnablePinCheck() }
+        onDispose {
+            hideKeyboard()
+            onEnablePinCheck()
+        }
     }
 
     Scaffold(
@@ -173,6 +177,7 @@ fun EditNoteScreen(
                 title = { Text("Edit Note") },
                 navigationIcon = {
                     IconButton(onClick = {
+                        hideKeyboard()
                         scope.launch {
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes discarded",
@@ -210,6 +215,7 @@ fun EditNoteScreen(
                                 }
                             }
                         }.trim()
+                        hideKeyboard()
                         scope.launch {
                             onSave(title, content, images, files)
                             scaffoldState.snackbarHostState.showSnackbar(

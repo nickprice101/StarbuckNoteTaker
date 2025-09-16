@@ -42,6 +42,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var reveal by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val hideKeyboard = rememberKeyboardHider()
 
     LaunchedEffect(pin) {
         if (reveal) {
@@ -50,6 +51,10 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    DisposableEffect(Unit) {
+        onDispose { hideKeyboard() }
+    }
 
     val message = if (firstPin == null) {
         "Create a custom PIN"
@@ -105,6 +110,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
                     error = null
                 } else {
                     if (pin == firstPin) {
+                        hideKeyboard()
                         pinManager.setPin(pin)
                         onDone(pin)
                     } else {
@@ -127,6 +133,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
     var reveal by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val storedPinLength = remember { pinManager.getPinLength() }
+    val hideKeyboard = rememberKeyboardHider()
 
     LaunchedEffect(pin) {
         if (reveal) {
@@ -135,6 +142,10 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    DisposableEffect(Unit) {
+        onDispose { hideKeyboard() }
+    }
 
     Box(
         modifier = Modifier
@@ -160,6 +171,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
                         error = false
                         if (input.length == storedPinLength) {
                             if (pinManager.checkPin(input)) {
+                                hideKeyboard()
                                 onSuccess(input)
                             } else {
                                 error = true
