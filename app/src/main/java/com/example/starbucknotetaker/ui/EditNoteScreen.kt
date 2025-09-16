@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
 import com.example.starbucknotetaker.Note
@@ -86,6 +87,7 @@ fun EditNoteScreen(
     val scaffoldState = rememberScaffoldState()
     val scope = rememberCoroutineScope()
     val hideKeyboard = rememberKeyboardHider()
+    val focusManager = LocalFocusManager.current
 
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         onEnablePinCheck()
@@ -166,6 +168,7 @@ fun EditNoteScreen(
     DisposableEffect(Unit) {
         onDispose {
             hideKeyboard()
+            focusManager.clearFocus(force = true)
             onEnablePinCheck()
         }
     }

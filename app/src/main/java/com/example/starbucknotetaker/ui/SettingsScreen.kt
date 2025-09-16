@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -28,6 +29,7 @@ fun SettingsScreen(
     var showDialog by remember { mutableStateOf(false) }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     val hideKeyboard = rememberKeyboardHider()
+    val focusManager = LocalFocusManager.current
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -49,6 +51,7 @@ fun SettingsScreen(
     DisposableEffect(Unit) {
         onDispose {
             hideKeyboard()
+            focusManager.clearFocus(force = true)
             onEnablePinCheck()
         }
     }
