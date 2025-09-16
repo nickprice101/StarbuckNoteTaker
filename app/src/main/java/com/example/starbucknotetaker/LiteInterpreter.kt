@@ -17,6 +17,7 @@ interface LiteInterpreter {
 /** Simplified view of a TensorFlow Lite tensor. */
 interface LiteTensor {
     fun shape(): IntArray
+    fun shapeSignature(): IntArray
     fun numElements(): Int
 }
 
@@ -48,5 +49,6 @@ class TfLiteInterpreter private constructor(private val delegate: Interpreter) :
 
 private class TfLiteTensor(private val delegate: Tensor) : LiteTensor {
     override fun shape(): IntArray = delegate.shape()
+    override fun shapeSignature(): IntArray = delegate.shapeSignature()
     override fun numElements(): Int = delegate.numElements()
 }

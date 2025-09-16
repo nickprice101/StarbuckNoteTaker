@@ -122,12 +122,20 @@ class Summarizer(
 
         val prefix = "summarize: "
         val inputIds = tok.encodeAsIds(prefix + text)
-        val encLen = kotlin.math.min(inputIds.size, MAX_INPUT_TOKENS)
-        val encInput = Array(1) { IntArray(MAX_INPUT_TOKENS) }
+
+        val encoderTokenCapacity = enc.getInputTensor(0).dimensionOrElse(1, MAX_INPUT_TOKENS)
+        val encoderOutputTensor = enc.getOutputTensor(0)
+        val encoderHiddenBatch = encoderOutputTensor.dimensionOrElse(0, 1)
+        val encoderHiddenCapacity = encoderOutputTensor.dimensionOrElse(1, encoderTokenCapacity)
+        val encoderHiddenSize = encoderOutputTensor.dimensionOrElse(2, ENCODER_HIDDEN_SIZE)
+        val maxEncoderTokens = kotlin.math.min(encoderTokenCapacity, encoderHiddenCapacity)
+        val encLen = kotlin.math.min(inputIds.size, maxEncoderTokens)
+        val encInput = Array(1) { IntArray(encoderTokenCapacity) }
         for (i in 0 until encLen) encInput[0][i] = inputIds[i]
         val encLength = intArrayOf(encLen)
-        val encOutShape = enc.getOutputTensor(0).shape()
-        val encHidden = Array(encOutShape[0]) { Array(encOutShape[1]) { FloatArray(encOutShape[2]) } }
+        val encHidden = Array(encoderHiddenBatch) {
+            Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
+        }
         val encInputs = arrayOfNulls<Any>(2).apply {
             this[0] = encInput
             this[1] = encLength
@@ -136,7 +144,10 @@ class Summarizer(
         enc.runForMultipleInputsOutputs(encInputs, encOutputs)
 
         val numInputs = dec.inputTensorCount
-        val cache = Array(numInputs - 3) { FloatArray(dec.getInputTensor(it + 3).numElements()) }
+        val cache = Array(numInputs - 3) {
+            val tensor = dec.getInputTensor(it + 3)
+            FloatArray(tensor.effectiveNumElements())
+        }
         var token = START_TOKEN
         val result = mutableListOf<Int>()
         repeat(MAX_OUTPUT_TOKENS) {
@@ -149,7 +160,10 @@ class Summarizer(
             val logits = FloatArray(VOCAB_SIZE)
             val outputs = HashMap<Int, Any>()
             outputs[0] = logits
-            val newCache = Array(cache.size) { FloatArray(dec.getOutputTensor(it + 1).numElements()) }
+            val newCache = Array(cache.size) {
+                val tensor = dec.getOutputTensor(it + 1)
+                FloatArray(tensor.effectiveNumElements())
+            }
             for (i in newCache.indices) outputs[i + 1] = newCache[i]
             dec.runForMultipleInputsOutputs(inputs, outputs)
 
@@ -194,11 +208,39 @@ class Summarizer(
         return maxIdx
     }
 
+    private fun LiteTensor.dimensionOrElse(index: Int, fallback: Int): Int {
+        val shape = shape()
+        if (index in shape.indices && shape[index] > 0) return shape[index]
+        val signature = shapeSignature()
+        if (index in signature.indices && signature[index] > 0) return signature[index]
+        return fallback
+    }
+
+    private fun LiteTensor.effectiveNumElements(): Int {
+        val elements = numElements()
+        if (elements > 0) return elements
+        val shape = shape()
+        val signature = shapeSignature()
+        val dims = maxOf(shape.size, signature.size)
+        if (dims == 0) return 1
+        var total = 1
+        for (i in 0 until dims) {
+            val dim = when {
+                i < shape.size && shape[i] > 0 -> shape[i]
+                i < signature.size && signature[i] > 0 -> signature[i]
+                else -> 1
+            }
+            total *= dim
+        }
+        return total
+    }
+
     companion object {
         private const val MAX_INPUT_TOKENS = 256
         private const val MAX_OUTPUT_TOKENS = 64
         private const val START_TOKEN = 0
         private const val EOS_ID = 1
         private const val VOCAB_SIZE = 32128
+        private const val ENCODER_HIDDEN_SIZE = 512
     }
 }
