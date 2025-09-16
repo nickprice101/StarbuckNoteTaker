@@ -1,6 +1,7 @@
 package com.example.starbucknotetaker
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
@@ -203,9 +204,13 @@ class QspmService : Service() {
 
     companion object {
         private const val TAG = "QspmService"
-        private val ACCEPTED_ACTIONS = setOf(
-            "com.example.starbucknotetaker.IQspmService",
-            "com.qualcomm.qspm.IQspmService"
-        )
+
+        const val ACTION_APP_INTERFACE = "com.example.starbucknotetaker.IQspmService"
+        const val ACTION_VENDOR_INTERFACE = "com.qualcomm.qspm.IQspmService"
+
+        private val ACCEPTED_ACTIONS = setOf(ACTION_APP_INTERFACE, ACTION_VENDOR_INTERFACE)
+
+        fun createBindIntent(context: Context, action: String = ACTION_VENDOR_INTERFACE): Intent =
+            Intent(action).setClass(context, QspmService::class.java)
     }
 }
