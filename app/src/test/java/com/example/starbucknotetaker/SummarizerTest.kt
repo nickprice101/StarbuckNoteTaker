@@ -29,7 +29,7 @@ class SummarizerTest {
 
     @Test
     fun fallbackSummaryReturnsFirstTwoSentences() {
-        val summarizer = Summarizer(context)
+        val summarizer = Summarizer(context, nativeLoader = { false })
         val text = "Sentence one. Sentence two. Sentence three."
         val summary = summarizer.fallbackSummary(text)
         assertEquals("Sentence one. Sentence two", summary)
@@ -48,7 +48,7 @@ class SummarizerTest {
             ModelFetcher.Result.Success(encFile, decFile, spFile)
         )
 
-        val summarizer = Summarizer(context, fetcher, logger = { _, _ -> }, debug = { })
+        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debug = { })
 
         val text = "One. Two. Three."
         val result = summarizer.summarize(text)
@@ -66,7 +66,7 @@ class SummarizerTest {
             ModelFetcher.Result.Success(encFile, decFile, spFile)
         )
 
-        val summarizer = Summarizer(context, fetcher, logger = { _, _ -> }, debug = { })
+        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debug = { })
 
         val state = summarizer.warmUp()
         assertEquals(Summarizer.SummarizerState.Fallback, state)

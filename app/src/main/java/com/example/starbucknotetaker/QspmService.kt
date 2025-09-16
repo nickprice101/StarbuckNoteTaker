@@ -2,7 +2,9 @@ package com.example.starbucknotetaker
 
 import android.app.Service
 import android.content.Intent
+import android.os.Binder
 import android.os.IBinder
+import android.os.Process
 import android.os.RemoteException
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -33,13 +35,23 @@ class QspmService : Service() {
     private var warmUpJob: Job? = null
 
     private val binder = object : IQspmService.Stub() {
-        override fun isPinSet(): Boolean = pinManager.isPinSet()
+        override fun isPinSet(): Boolean {
+            enforceCaller()
+            return pinManager.isPinSet()
+        }
 
-        override fun getPinLength(): Int = pinManager.getPinLength()
+        override fun getPinLength(): Int {
+            enforceCaller()
+            return pinManager.getPinLength()
+        }
 
-        override fun verifyPin(pin: String?): Boolean = pin?.let { pinManager.checkPin(it) } ?: false
+        override fun verifyPin(pin: String?): Boolean {
+            enforceCaller()
+            return pin?.let { pinManager.checkPin(it) } ?: false
+        }
 
         override fun storePin(pin: String?): Boolean {
+            enforceCaller()
             val candidate = pin?.trim() ?: return false
             if (!isValidPin(candidate) || pinManager.isPinSet()) {
                 return false
@@ -49,6 +61,7 @@ class QspmService : Service() {
         }
 
         override fun updatePin(oldPin: String?, newPin: String?): Boolean {
+            enforceCaller()
             val newCandidate = newPin?.trim() ?: return false
             if (!isValidPin(newCandidate)) return false
             val current = pinManager.isPinSet()
@@ -62,12 +75,17 @@ class QspmService : Service() {
         }
 
         override fun clearPin() {
+            enforceCaller()
             pinManager.clearPin()
         }
 
-        override fun getSummarizerState(): Int = mapState(obtainSummarizer().state.value)
+        override fun getSummarizerState(): Int {
+            enforceCaller()
+            return mapState(obtainSummarizer().state.value)
+        }
 
         override fun warmUpSummarizer(): Int {
+            enforceCaller()
             val summarizer = obtainSummarizer()
             val current = summarizer.state.value
             if (current is Summarizer.SummarizerState.Ready) {
@@ -88,6 +106,7 @@ class QspmService : Service() {
         }
 
         override fun summarize(text: String?, callback: IQspmSummaryCallback?) {
+            enforceCaller()
             if (callback == null) {
                 Log.w(TAG, "summarize called without callback")
                 return
@@ -98,21 +117,31 @@ class QspmService : Service() {
                 return
             }
             val summarizer = obtainSummarizer()
-            serviceScope.launch {
-                try {
-                    val summary = summarizer.summarize(input)
-                    val fallback = summarizer.state.value is Summarizer.SummarizerState.Fallback
-                    deliverSuccess(callback, summary, fallback)
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Summarization failed", t)
-                    deliverError(callback, t.message ?: "Failed to summarize text")
+            val identity = Binder.clearCallingIdentity()
+            try {
+                serviceScope.launch {
+                    try {
+                        val summary = summarizer.summarize(input)
+                        val fallback = summarizer.state.value is Summarizer.SummarizerState.Fallback
+                        deliverSuccess(callback, summary, fallback)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Summarization failed", t)
+                        deliverError(callback, t.message ?: "Failed to summarize text")
+                    }
                 }
+            } finally {
+                Binder.restoreCallingIdentity(identity)
             }
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder {
-        Log.d(TAG, "QSPM binder connection established")
+    override fun onBind(intent: Intent?): IBinder? {
+        val action = intent?.action
+        if (action != null && action !in ACCEPTED_ACTIONS) {
+            Log.w(TAG, "Rejecting QSPM bind for unexpected action $action")
+            return null
+        }
+        Log.d(TAG, "QSPM binder connection established${action?.let { " for $it" } ?: ""}")
         return binder
     }
 
@@ -159,7 +188,24 @@ class QspmService : Service() {
         }
     }
 
+    private fun enforceCaller() {
+        val uid = Binder.getCallingUid()
+        if (uid == Process.myUid() || uid == Process.SYSTEM_UID || uid == Process.ROOT_UID) {
+            return
+        }
+        val packages = runCatching {
+            packageManager.getPackagesForUid(uid)?.toSet()
+        }.getOrNull()
+        if (packages.isNullOrEmpty() || !packages.contains(packageName)) {
+            throw SecurityException("Unauthorized caller (uid=$uid) for QSPM service")
+        }
+    }
+
     companion object {
         private const val TAG = "QspmService"
+        private val ACCEPTED_ACTIONS = setOf(
+            "com.example.starbucknotetaker.IQspmService",
+            "com.qualcomm.qspm.IQspmService"
+        )
     }
 }
