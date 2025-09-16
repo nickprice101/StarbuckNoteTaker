@@ -123,51 +123,123 @@ class Summarizer(
         val prefix = "summarize: "
         val inputIds = tok.encodeAsIds(prefix + text)
 
-        val encoderTokenCapacity = enc.getInputTensor(0).dimensionOrElse(1, MAX_INPUT_TOKENS)
+        suspend fun fallback(reason: String, throwable: Throwable? = null): String {
+            logger(reason, throwable ?: IllegalStateException(reason))
+            _state.emit(SummarizerState.Fallback)
+            return fallbackSummary(text)
+        }
+
+        if (enc.inputTensorCount != 2) {
+            return@withContext fallback("unexpected encoder input count: ${enc.inputTensorCount}")
+        }
+
+        val encoderAttentionTensor = enc.getInputTensor(0)
+        val encoderInputTensor = enc.getInputTensor(1)
+        val encoderBatch = encoderInputTensor.dimensionOrElse(0, 1)
+        val attentionBatch = encoderAttentionTensor.dimensionOrElse(0, encoderBatch)
+        if (encoderBatch != 1 || attentionBatch != 1) {
+            return@withContext fallback("unsupported encoder batch size: $encoderBatch/$attentionBatch")
+        }
+
+        val encoderTokenCapacity = encoderInputTensor.dimensionOrElse(1, MAX_INPUT_TOKENS)
+        val encoderAttentionCapacity = encoderAttentionTensor.dimensionOrElse(1, encoderTokenCapacity)
         val encoderOutputTensor = enc.getOutputTensor(0)
         val encoderHiddenBatch = encoderOutputTensor.dimensionOrElse(0, 1)
+        if (encoderHiddenBatch != 1) {
+            return@withContext fallback("unsupported encoder hidden batch size: $encoderHiddenBatch")
+        }
         val encoderHiddenCapacity = encoderOutputTensor.dimensionOrElse(1, encoderTokenCapacity)
         val encoderHiddenSize = encoderOutputTensor.dimensionOrElse(2, ENCODER_HIDDEN_SIZE)
-        val maxEncoderTokens = kotlin.math.min(encoderTokenCapacity, encoderHiddenCapacity)
+        val maxEncoderTokens = kotlin.math.min(
+            encoderTokenCapacity,
+            kotlin.math.min(encoderAttentionCapacity, encoderHiddenCapacity)
+        )
         val encLen = kotlin.math.min(inputIds.size, maxEncoderTokens)
-        val encInput = Array(1) { IntArray(encoderTokenCapacity) }
-        for (i in 0 until encLen) encInput[0][i] = inputIds[i]
-        val encLength = intArrayOf(encLen)
+        if (encLen == 0) {
+            debug("summarizer falling back due to empty encoder input")
+            return@withContext fallback("encoder received empty input")
+        }
+
+        val encoderInput = Array(1) { IntArray(encoderTokenCapacity) }
+        val encoderAttention = Array(1) { IntArray(encoderAttentionCapacity) }
+        for (i in 0 until encLen) {
+            encoderInput[0][i] = inputIds[i]
+            encoderAttention[0][i] = 1
+        }
+
         val encHidden = Array(encoderHiddenBatch) {
             Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
         }
-        val encInputs = arrayOfNulls<Any>(2).apply {
-            this[0] = encInput
-            this[1] = encLength
+        val encoderInputs = arrayOfNulls<Any>(2).apply {
+            this[0] = encoderAttention
+            this[1] = encoderInput
         }
         val encOutputs = hashMapOf<Int, Any>(0 to encHidden)
-        enc.runForMultipleInputsOutputs(encInputs, encOutputs)
+        enc.runForMultipleInputsOutputs(encoderInputs, encOutputs)
+
+        if (dec.inputTensorCount < 3) {
+            return@withContext fallback("unexpected decoder input count: ${dec.inputTensorCount}")
+        }
+
+        val decoderAttentionTensor = dec.getInputTensor(0)
+        val decoderTokenTensor = dec.getInputTensor(1)
+        val decoderHiddenTensor = dec.getInputTensor(2)
+        val decoderAttentionBatch = decoderAttentionTensor.dimensionOrElse(0, 1)
+        val decoderTokenBatch = decoderTokenTensor.dimensionOrElse(0, 1)
+        val decoderHiddenBatch = decoderHiddenTensor.dimensionOrElse(0, 1)
+        if (decoderAttentionBatch != 1 || decoderTokenBatch != 1 || decoderHiddenBatch != 1) {
+            return@withContext fallback(
+                "unsupported decoder batch sizes: $decoderAttentionBatch/$decoderTokenBatch/$decoderHiddenBatch"
+            )
+        }
+
+        val decoderAttentionCapacity = decoderAttentionTensor.dimensionOrElse(1, maxEncoderTokens)
+        val decoderTokenCapacity = decoderTokenTensor.dimensionOrElse(1, 1)
+        val decoderHiddenCapacity = decoderHiddenTensor.dimensionOrElse(1, encoderHiddenCapacity)
+        val decoderHiddenSize = decoderHiddenTensor.dimensionOrElse(2, encoderHiddenSize)
+        if (encoderHiddenCapacity > decoderHiddenCapacity || encoderHiddenSize > decoderHiddenSize) {
+            return@withContext fallback(
+                "decoder hidden state smaller than encoder output: ${encoderHiddenCapacity}x${encoderHiddenSize} vs ${decoderHiddenCapacity}x${decoderHiddenSize}"
+            )
+        }
+
+        val decoderAttention = Array(1) { IntArray(decoderAttentionCapacity) }
+        val attentionLimit = kotlin.math.min(encLen, decoderAttentionCapacity)
+        for (i in 0 until attentionLimit) decoderAttention[0][i] = 1
+
+        val decoderTokenInput = Array(1) { IntArray(decoderTokenCapacity) }
 
         val numInputs = dec.inputTensorCount
         val cache = Array(numInputs - 3) {
             val tensor = dec.getInputTensor(it + 3)
             FloatArray(tensor.effectiveNumElements())
         }
+
+        val decoderInputs = arrayOfNulls<Any>(numInputs).apply {
+            this[0] = decoderAttention
+            this[2] = encHidden
+        }
+
         var token = START_TOKEN
         val result = mutableListOf<Int>()
         repeat(MAX_OUTPUT_TOKENS) {
-            val inputs = arrayOfNulls<Any>(numInputs)
-            inputs[0] = intArrayOf(token)
-            inputs[1] = encHidden
-            inputs[2] = encLength
-            for (i in cache.indices) inputs[i + 3] = cache[i]
+            decoderTokenInput[0][0] = token
+            decoderInputs[1] = decoderTokenInput
+            for (i in cache.indices) decoderInputs[i + 3] = cache[i]
 
-            val logits = FloatArray(VOCAB_SIZE)
-            val outputs = HashMap<Int, Any>()
-            outputs[0] = logits
+            val logits = Array(1) { Array(1) { FloatArray(VOCAB_SIZE) } }
+            val outputs = HashMap<Int, Any>().apply {
+                this[0] = logits
+            }
             val newCache = Array(cache.size) {
                 val tensor = dec.getOutputTensor(it + 1)
                 FloatArray(tensor.effectiveNumElements())
             }
             for (i in newCache.indices) outputs[i + 1] = newCache[i]
-            dec.runForMultipleInputsOutputs(inputs, outputs)
 
-            val next = argmax(logits)
+            dec.runForMultipleInputsOutputs(decoderInputs, outputs)
+
+            val next = argmax(logits[0][0])
             if (next == EOS_ID) return@repeat
             result.add(next)
             token = next
