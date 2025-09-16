@@ -154,9 +154,11 @@ class SummarizerTest {
 
     private class FakeTensor(
         private val shapeValues: IntArray = intArrayOf(1),
-        private val elements: Int = 1
+        private val elements: Int = 1,
+        private val signatureValues: IntArray = shapeValues
     ) : LiteTensor {
         override fun shape(): IntArray = shapeValues
+        override fun shapeSignature(): IntArray = signatureValues
         override fun numElements(): Int = elements
     }
 }
