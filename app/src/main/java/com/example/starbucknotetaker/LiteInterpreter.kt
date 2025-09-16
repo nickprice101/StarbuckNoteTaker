@@ -9,7 +9,7 @@ interface LiteInterpreter {
     val inputTensorCount: Int
     fun getOutputTensor(index: Int): LiteTensor
     fun getInputTensor(index: Int): LiteTensor
-    fun run(inputs: Array<Any>, outputs: Array<Any>)
+    fun run(input: Any, output: Any)
     fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>)
     fun close()
 }
@@ -29,8 +29,8 @@ class TfLiteInterpreter private constructor(private val delegate: Interpreter) :
 
     override fun getInputTensor(index: Int): LiteTensor = TfLiteTensor(delegate.getInputTensor(index))
 
-    override fun run(inputs: Array<Any>, outputs: Array<Any>) {
-        delegate.run(inputs, outputs)
+    override fun run(input: Any, output: Any) {
+        delegate.run(input, output)
     }
 
     override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {

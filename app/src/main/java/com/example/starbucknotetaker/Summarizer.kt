@@ -128,7 +128,12 @@ class Summarizer(
         val encLength = intArrayOf(encLen)
         val encOutShape = enc.getOutputTensor(0).shape()
         val encHidden = Array(encOutShape[0]) { Array(encOutShape[1]) { FloatArray(encOutShape[2]) } }
-        enc.run(arrayOf(encInput, encLength), arrayOf(encHidden))
+        val encInputs = arrayOfNulls<Any>(2).apply {
+            this[0] = encInput
+            this[1] = encLength
+        }
+        val encOutputs = hashMapOf<Int, Any>(0 to encHidden)
+        enc.runForMultipleInputsOutputs(encInputs, encOutputs)
 
         val numInputs = dec.inputTensorCount
         val cache = Array(numInputs - 3) { FloatArray(dec.getInputTensor(it + 3).numElements()) }
