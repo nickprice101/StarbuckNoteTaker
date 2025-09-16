@@ -26,6 +26,16 @@ jobs:
             platform-tools
             platforms;android-34
             build-tools;34.0.0
+            ndk;26.1.10909125
+
+      - name: Configure local.properties
+        run: |
+          SDK_PATH="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [ -z "$SDK_PATH" ]; then
+            echo "Android SDK path not available" >&2
+            exit 1
+          fi
+          echo "sdk.dir=$SDK_PATH" > local.properties
 
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
