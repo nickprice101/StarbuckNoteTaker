@@ -30,6 +30,24 @@ class ModelFetcher(
         const val ENCODER_NAME = ENCODER_REMOTE
         const val DECODER_NAME = DECODER_REMOTE
         const val SPIECE_NAME = SPIECE_REMOTE
+
+        internal fun hasTfliteMagic(file: File): Boolean {
+            if (!file.exists() || file.length() < 8) return false
+            file.inputStream().use { ins ->
+                val header = ByteArray(8)
+                val read = ins.read(header)
+                if (read < 8) return false
+                return hasMagicAt(header, 0) || hasMagicAt(header, 4)
+            }
+        }
+
+        private fun hasMagicAt(header: ByteArray, offset: Int): Boolean {
+            if (offset + 4 > header.size) return false
+            return header[offset] == 'T'.code.toByte() &&
+                header[offset + 1] == 'F'.code.toByte() &&
+                header[offset + 2] == 'L'.code.toByte() &&
+                header[offset + 3] == '3'.code.toByte()
+        }
     }
 
     sealed class Result {
@@ -88,18 +106,7 @@ class ModelFetcher(
             }
         }
 
-    private fun isValidTflite(file: File): Boolean {
-        if (!file.exists() || file.length() < 4) return false
-        file.inputStream().use { ins ->
-            val header = ByteArray(4)
-            val read = ins.read(header)
-            return read == 4 &&
-                header[0] == 'T'.code.toByte() &&
-                header[1] == 'F'.code.toByte() &&
-                header[2] == 'L'.code.toByte() &&
-                header[3] == '3'.code.toByte()
-        }
-    }
+    private fun isValidTflite(file: File): Boolean = hasTfliteMagic(file)
 
     // Legacy functions kept for potential future integrity checks.
     @Suppress("unused")
