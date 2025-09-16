@@ -3,6 +3,9 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
+
 android {
     namespace 'com.example.starbucknotetaker'
     compileSdk 34
@@ -16,6 +19,9 @@ android {
         versionName System.getenv("ANDROID_VERSION_NAME") ?: '1.0'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        ndk {
+            abiFilters(*penguinSupportedAbis)
+        }
     }
 
     signingConfigs {
@@ -75,6 +81,12 @@ android {
     testOptions {
         unitTests.includeAndroidResources = true
     }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs += penguinNativeLibsDir
+        }
+    }
 }
 
 dependencies {
@@ -124,4 +136,31 @@ dependencies {
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
+}
+
+def penguinNativeConfiguration = configurations.detachedConfiguration(
+        dependencies.create('ai.djl.android:tokenizer-native:0.33.0')
+)
+penguinNativeConfiguration.transitive = false
+
+def preparePenguinNativeLibs = tasks.register('preparePenguinNativeLibs', Sync) {
+    from {
+        penguinNativeConfiguration.files.collect { zipTree(it) }
+    }
+    include(*penguinSupportedAbis.collect { "jni/${it}/libdjl_tokenizer.so" })
+    eachFile { file ->
+        file.path = file.path
+                .replaceFirst('jni/', '')
+                .replace('libdjl_tokenizer.so', 'libpenguin.so')
+    }
+    includeEmptyDirs = false
+    into(penguinNativeLibsDir)
+}
+
+tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.configureEach {
+    dependsOn(preparePenguinNativeLibs)
+}
+
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
+    dependsOn(preparePenguinNativeLibs)
 }
