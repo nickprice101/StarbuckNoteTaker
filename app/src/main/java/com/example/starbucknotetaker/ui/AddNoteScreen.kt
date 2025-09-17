@@ -2,6 +2,7 @@ package com.example.starbucknotetaker.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,7 +41,10 @@ fun AddNoteScreen(
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
 
-    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val imagePickerContract = remember {
+        OpenDocumentWithInitialUri(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+    }
+    val imageLauncher = rememberLauncherForActivityResult(imagePickerContract) { uri: Uri? ->
         uri?.let {
             context.contentResolver.takePersistableUriPermission(
                 it,
