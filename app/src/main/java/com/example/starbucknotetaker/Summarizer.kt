@@ -10,6 +10,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
+import java.util.Locale
 
 /**
  * Simple on-device text summarizer.
@@ -272,7 +273,7 @@ class Summarizer(
 
             dec.runForMultipleInputsOutputs(decoderInputs, outputs)
 
-            val next = argmax(logits[0][0])
+            val next = selectNextToken(logits[0][0], generatedTokens, tok)
             if (next == EOS_ID) break
 
             if (!usesCache) {
@@ -290,9 +291,13 @@ class Summarizer(
             currentToken = next
             for (i in cache.indices) cache[i] = newCache[i]
         }
-        val summary = tok.decodeIds(result.toIntArray())
+        val decoded = tok.decodeIds(result.toIntArray())
+        val cleaned = cleanSummary(decoded)
+        if (cleaned.isEmpty()) {
+            return@withContext fallback("empty summary output")
+        }
         debug("summarizer inference complete")
-        return@withContext summary
+        return@withContext cleaned
     }
 
     fun fallbackSummary(text: String): String {
@@ -301,6 +306,116 @@ class Summarizer(
             .filter { it.isNotEmpty() }
         val candidate = sentences.take(2).joinToString(". ")
         return if (candidate.isNotEmpty()) candidate else text.take(200)
+    }
+
+    private fun selectNextToken(
+        logits: FloatArray,
+        generatedTokens: MutableList<Int>,
+        tokenizer: SentencePieceProcessor
+    ): Int {
+        val ranked = topKIndices(logits, MAX_TOKEN_CHOICES)
+        if (ranked.isEmpty()) return argmax(logits)
+
+        if (generatedTokens.isEmpty()) {
+            return ranked[0]
+        }
+
+        val preview = IntArray(generatedTokens.size + 1)
+        for (i in generatedTokens.indices) preview[i] = generatedTokens[i]
+
+        for (candidate in ranked) {
+            if (candidate == EOS_ID) {
+                return candidate
+            }
+            preview[preview.lastIndex] = candidate
+            val previewText = tokenizer.decodeIds(preview)
+            val words = tokenizeWords(previewText)
+            if (words.isEmpty()) {
+                return candidate
+            }
+            if (!isDegenerate(words)) {
+                return candidate
+            }
+            debug("skipping token $candidate due to degeneracy")
+        }
+
+        return ranked[0]
+    }
+
+    private fun cleanSummary(rawSummary: String): String {
+        val trimmed = rawSummary.trim()
+        if (trimmed.isEmpty()) return ""
+        val words = tokenizeWords(trimmed)
+        if (words.isEmpty()) return trimmed
+
+        val cleanedWords = mutableListOf<String>()
+        var lastWord: String? = null
+        var runLength = 0
+        for (word in words) {
+            if (lastWord != null && word.equals(lastWord, ignoreCase = true)) {
+                runLength++
+                if (runLength >= MAX_REPEAT_WORD_RUN) {
+                    continue
+                }
+            } else {
+                lastWord = word
+                runLength = 1
+            }
+            cleanedWords.add(word)
+        }
+        return cleanedWords.joinToString(" ")
+    }
+
+    private fun tokenizeWords(text: String): List<String> {
+        if (text.isEmpty()) return emptyList()
+        return WORD_SPLIT_REGEX.split(text)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
+    private fun isDegenerate(words: List<String>): Boolean {
+        if (words.isEmpty()) return false
+        var runLength = 1
+        for (i in 1 until words.size) {
+            if (words[i].equals(words[i - 1], ignoreCase = true)) {
+                runLength++
+                if (runLength >= MAX_REPEAT_WORD_RUN) {
+                    return true
+                }
+            } else {
+                runLength = 1
+            }
+        }
+
+        if (words.size >= MIN_WORDS_FOR_UNIQUENESS) {
+            val uniqueWords = words.map { it.lowercase(Locale.US) }.toSet()
+            if (uniqueWords.size <= MIN_UNIQUE_WORDS) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun topKIndices(values: FloatArray, k: Int): IntArray {
+        if (k <= 0) return intArrayOf()
+        val limit = kotlin.math.min(k, values.size)
+        val indices = IntArray(limit) { -1 }
+        val scores = FloatArray(limit) { Float.NEGATIVE_INFINITY }
+        for (i in values.indices) {
+            val value = values[i]
+            for (pos in 0 until limit) {
+                if (value > scores[pos]) {
+                    for (shift in limit - 1 downTo pos + 1) {
+                        scores[shift] = scores[shift - 1]
+                        indices[shift] = indices[shift - 1]
+                    }
+                    scores[pos] = value
+                    indices[pos] = i
+                    break
+                }
+            }
+        }
+        return indices.filter { it >= 0 }.toIntArray()
     }
 
     /** Releases model and tokenizer resources. */
@@ -358,6 +473,11 @@ class Summarizer(
         private const val START_TOKEN = 0
         private const val EOS_ID = 1
         private const val VOCAB_SIZE = 32128
+        private const val MAX_TOKEN_CHOICES = 8
+        private val WORD_SPLIT_REGEX = Regex("\\s+")
+        private const val MAX_REPEAT_WORD_RUN = 2
+        private const val MIN_WORDS_FOR_UNIQUENESS = 6
+        private const val MIN_UNIQUE_WORDS = 3
         private const val ENCODER_HIDDEN_SIZE = 512
     }
 }
