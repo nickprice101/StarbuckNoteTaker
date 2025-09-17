@@ -13,28 +13,28 @@ class NativeLibraryLoaderTest {
     @After
     fun tearDown() {
         NativeLibraryLoader.setLoadLibraryOverrideForTesting(null)
-        resetPenguinFlag()
+        resetTokenizerFlag()
     }
 
     @Test
     fun ensurePenguinReturnsTrueWhenLibraryLoads() {
+        resetTokenizerFlag()
         NativeLibraryLoader.setLoadLibraryOverrideForTesting { }
         val loaded = NativeLibraryLoader.ensurePenguin(context)
+
         assertTrue(loaded)
-        assertTrue(isPenguinLoaded())
+        assertTrue(isTokenizerLoaded())
     }
 
-    private fun resetPenguinFlag() {
-        val field = NativeLibraryLoader::class.java.getDeclaredField("penguinLoaded")
-        field.isAccessible = true
-        val flag = field.get(NativeLibraryLoader) as AtomicBoolean
-        flag.set(false)
+    private fun resetTokenizerFlag() {
+        tokenizerFlag().set(false)
     }
 
-    private fun isPenguinLoaded(): Boolean {
-        val field = NativeLibraryLoader::class.java.getDeclaredField("penguinLoaded")
+    private fun isTokenizerLoaded(): Boolean = tokenizerFlag().get()
+
+    private fun tokenizerFlag(): AtomicBoolean {
+        val field = NativeLibraryLoader::class.java.getDeclaredField("tokenizerLoaded")
         field.isAccessible = true
-        val flag = field.get(NativeLibraryLoader) as AtomicBoolean
-        return flag.get()
+        return field.get(NativeLibraryLoader) as AtomicBoolean
     }
 }
