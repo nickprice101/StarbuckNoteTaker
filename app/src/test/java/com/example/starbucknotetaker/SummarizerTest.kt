@@ -35,7 +35,6 @@ class SummarizerTest {
         assertEquals("Sentence one. Sentence two", summary)
     }
 
-
     @Test
     fun summarizeFallsBackWhenTokenizerNativeMissing() = runBlocking {
         // Create dummy model files so fetcher doesn't attempt network
@@ -145,7 +144,7 @@ class SummarizerTest {
 
         override fun getInputTensor(index: Int): LiteTensor = inputTensors[index] ?: FakeTensor()
 
-        override fun run(inputs: Array<Any>, outputs: Array<Any>) {}
+        override fun run(input: Any, output: Any) {}
 
         override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {}
 
@@ -162,4 +161,3 @@ class SummarizerTest {
         override fun numElements(): Int = elements
     }
 }
-
