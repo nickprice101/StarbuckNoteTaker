@@ -204,26 +204,59 @@ class Summarizer(
         }
 
         val decoderAttention = Array(1) { IntArray(decoderAttentionCapacity) }
-        val attentionLimit = kotlin.math.min(encLen, decoderAttentionCapacity)
-        for (i in 0 until attentionLimit) decoderAttention[0][i] = 1
-
         val decoderTokenInput = Array(1) { IntArray(decoderTokenCapacity) }
-
+        val generatedTokens = mutableListOf<Int>()
+        var currentToken = START_TOKEN
         val numInputs = dec.inputTensorCount
         val cache = Array(numInputs - 3) {
             val tensor = dec.getInputTensor(it + 3)
             FloatArray(tensor.effectiveNumElements())
         }
+        val usesCache = cache.isNotEmpty() || decoderTokenCapacity == 1
 
         val decoderInputs = arrayOfNulls<Any>(numInputs).apply {
             this[0] = decoderAttention
             this[2] = encHidden
         }
 
-        var token = START_TOKEN
+        fun prepareDecoderInputs() {
+            if (usesCache) {
+                decoderTokenInput[0].fill(0)
+                if (decoderTokenCapacity > 0) {
+                    decoderTokenInput[0][0] = currentToken
+                }
+                val active = (generatedTokens.size + 1).coerceAtMost(decoderAttentionCapacity)
+                for (i in 0 until decoderAttentionCapacity) {
+                    decoderAttention[0][i] = if (i < active) 1 else 0
+                }
+            } else {
+                decoderTokenInput[0].fill(0)
+                decoderAttention[0].fill(0)
+                val totalTokens = 1 + generatedTokens.size
+                val copyLength = kotlin.math.min(totalTokens, decoderTokenCapacity)
+                if (decoderTokenCapacity > 0) {
+                    decoderTokenInput[0][0] = START_TOKEN
+                }
+                for (i in 1 until copyLength) {
+                    decoderTokenInput[0][i] = generatedTokens[i - 1]
+                }
+                val maskLength = kotlin.math.min(totalTokens, decoderAttentionCapacity)
+                for (i in 0 until maskLength) {
+                    decoderAttention[0][i] = 1
+                }
+            }
+        }
+
+        if (decoderTokenCapacity <= 0) {
+            return@withContext fallback("decoder token tensor has no capacity")
+        }
+        if (decoderAttentionCapacity <= 0) {
+            return@withContext fallback("decoder attention tensor has no capacity")
+        }
+
         val result = mutableListOf<Int>()
         for (ignored in 0 until MAX_OUTPUT_TOKENS) {
-            decoderTokenInput[0][0] = token
+            prepareDecoderInputs()
             decoderInputs[1] = decoderTokenInput
             for (i in cache.indices) decoderInputs[i + 3] = cache[i]
 
@@ -241,8 +274,20 @@ class Summarizer(
 
             val next = argmax(logits[0][0])
             if (next == EOS_ID) break
+
+            if (!usesCache) {
+                val requiredTokens = generatedTokens.size + 2
+                if (requiredTokens > decoderTokenCapacity) {
+                    return@withContext fallback("decoder token buffer full")
+                }
+                if (requiredTokens > decoderAttentionCapacity) {
+                    return@withContext fallback("decoder attention buffer full")
+                }
+            }
+
             result.add(next)
-            token = next
+            generatedTokens.add(next)
+            currentToken = next
             for (i in cache.indices) cache[i] = newCache[i]
         }
         val summary = tok.decodeIds(result.toIntArray())
