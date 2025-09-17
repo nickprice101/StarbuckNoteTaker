@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
@@ -12,6 +13,7 @@ import org.mockito.kotlin.whenever
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.max
 
 class SummarizerTest {
     private val context: Context = mock()
@@ -52,6 +54,52 @@ class SummarizerTest {
         val text = "One. Two. Three."
         val result = summarizer.summarize(text)
         assertEquals("One. Two", result)
+    }
+
+    @Test
+    fun summarizeStopsDecodingWhenEosTokenAppears() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val encodedIds = intArrayOf(7, 8, 9)
+        whenever(tokenizer.encodeAsIds(any())).thenReturn(encodedIds)
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.joinToString(",")
+        }
+
+        val generatedTokens = intArrayOf(21, 22)
+        val attentionCapacity = max(encodedIds.size, generatedTokens.size + 1)
+        val decoder = DecoderStub(generatedTokens, attentionCapacity)
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(EncoderStub(attentionCapacity))
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val summary = summarizer.summarize("Input text")
+
+        assertEquals("21,22", summary)
+        assertEquals(decoder.expectedCalls, decoder.callCount)
+        assertFalse("decoder should not run after EOS", decoder.extraInvocation)
+
+        summarizer.close()
     }
 
     @Test
@@ -149,6 +197,74 @@ class SummarizerTest {
         override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {}
 
         override fun close() {}
+    }
+
+    private class EncoderStub(
+        private val tokenCapacity: Int,
+        private val hiddenSize: Int = 4
+    ) : LiteInterpreter {
+        override val inputTensorCount: Int = 2
+
+        override fun getOutputTensor(index: Int): LiteTensor =
+            FakeTensor(intArrayOf(1, tokenCapacity, hiddenSize), tokenCapacity * hiddenSize)
+
+        override fun getInputTensor(index: Int): LiteTensor = when (index) {
+            0, 1 -> FakeTensor(intArrayOf(1, tokenCapacity), tokenCapacity)
+            else -> FakeTensor()
+        }
+
+        override fun run(input: Any, output: Any) {}
+
+        override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {}
+
+        override fun close() {}
+    }
+
+    private class DecoderStub(
+        private val tokens: IntArray,
+        private val attentionCapacity: Int,
+        private val hiddenSize: Int = 4
+    ) : LiteInterpreter {
+        override val inputTensorCount: Int = 3
+
+        val expectedCalls: Int = tokens.size + 1
+        var callCount: Int = 0
+            private set
+        var extraInvocation: Boolean = false
+            private set
+
+        override fun getOutputTensor(index: Int): LiteTensor = FakeTensor(intArrayOf(1, 1, 1), 1)
+
+        override fun getInputTensor(index: Int): LiteTensor = when (index) {
+            0 -> FakeTensor(intArrayOf(1, attentionCapacity), attentionCapacity)
+            1 -> FakeTensor(intArrayOf(1, 1), 1)
+            2 -> FakeTensor(intArrayOf(1, attentionCapacity, hiddenSize), attentionCapacity * hiddenSize)
+            else -> FakeTensor()
+        }
+
+        override fun run(input: Any, output: Any) {}
+
+        override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {
+            val logits = outputs[0] as Array<Array<FloatArray>>
+            val scores = logits[0][0]
+            scores.fill(0f)
+            val nextToken = when {
+                callCount < tokens.size -> tokens[callCount]
+                callCount == tokens.size -> EOS_ID
+                else -> {
+                    extraInvocation = true
+                    tokens.last()
+                }
+            }
+            scores[nextToken] = 1f
+            callCount++
+        }
+
+        override fun close() {}
+
+        private companion object {
+            private const val EOS_ID = 1
+        }
     }
 
     private class FakeTensor(
