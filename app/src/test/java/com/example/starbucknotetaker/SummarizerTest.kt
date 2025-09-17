@@ -103,6 +103,71 @@ class SummarizerTest {
     }
 
     @Test
+    fun summarizeAvoidsDegenerateOutput() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
+        whenever(tokenizer.encodeAsIds(any())).thenReturn(encodedIds)
+        val tokenMap = mapOf(
+            200 to "Labour",
+            201 to "MPs",
+            202 to "pressure",
+            203 to "Starmer",
+            204 to "over",
+            205 to "Mandelson",
+            206 to "sacking"
+        )
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.joinToString(" ") { tokenMap[it] ?: "[$it]" }.trim()
+        }
+
+        val attentionCapacity = max(encodedIds.size, tokenMap.size + 1)
+        val decoder = PreferenceDecoderStub(
+            listOf(
+                listOf(200, 201),
+                listOf(200, 201),
+                listOf(201, 202),
+                listOf(203),
+                listOf(204),
+                listOf(205),
+                listOf(206)
+            ),
+            attentionCapacity
+        )
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(EncoderStub(attentionCapacity))
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val input = "Sir Keir Starmer faces pressure over the Mandelson sacking."
+        val summary = summarizer.summarize(input)
+
+        assertEquals("Labour MPs pressure Starmer over Mandelson sacking", summary)
+        assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
+
+        summarizer.close()
+    }
+
+    @Test
     fun summarizeFeedsFullHistoryWhenDecoderLacksCache() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
@@ -302,6 +367,53 @@ class SummarizerTest {
                 }
             }
             scores[nextToken] = 1f
+            callCount++
+        }
+
+        override fun close() {}
+
+        private companion object {
+            private const val EOS_ID = 1
+        }
+    }
+
+    private class PreferenceDecoderStub(
+        private val preferences: List<List<Int>>,
+        private val attentionCapacity: Int,
+        private val hiddenSize: Int = 4
+    ) : LiteInterpreter {
+        override val inputTensorCount: Int = 3
+
+        private var callCount: Int = 0
+
+        override fun getOutputTensor(index: Int): LiteTensor = FakeTensor(intArrayOf(1, 1, 1), 1)
+
+        override fun getInputTensor(index: Int): LiteTensor = when (index) {
+            0 -> FakeTensor(intArrayOf(1, attentionCapacity), attentionCapacity)
+            1 -> FakeTensor(intArrayOf(1, 1), 1)
+            2 -> FakeTensor(intArrayOf(1, attentionCapacity, hiddenSize), attentionCapacity * hiddenSize)
+            else -> FakeTensor()
+        }
+
+        override fun run(input: Any, output: Any) {}
+
+        override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {
+            val logits = outputs[0] as Array<Array<FloatArray>>
+            val scores = logits[0][0]
+            scores.fill(-100f)
+
+            if (callCount < preferences.size) {
+                val options = preferences[callCount]
+                var weight = options.size.toFloat()
+                for (candidate in options) {
+                    scores[candidate] = weight
+                    weight -= 1f
+                }
+                scores[EOS_ID] = -100f
+            } else {
+                scores[EOS_ID] = 100f
+            }
+
             callCount++
         }
 
