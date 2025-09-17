@@ -222,7 +222,7 @@ class Summarizer(
 
         var token = START_TOKEN
         val result = mutableListOf<Int>()
-        repeat(MAX_OUTPUT_TOKENS) {
+        for (ignored in 0 until MAX_OUTPUT_TOKENS) {
             decoderTokenInput[0][0] = token
             decoderInputs[1] = decoderTokenInput
             for (i in cache.indices) decoderInputs[i + 3] = cache[i]
@@ -240,7 +240,7 @@ class Summarizer(
             dec.runForMultipleInputsOutputs(decoderInputs, outputs)
 
             val next = argmax(logits[0][0])
-            if (next == EOS_ID) return@repeat
+            if (next == EOS_ID) break
             result.add(next)
             token = next
             for (i in cache.indices) cache[i] = newCache[i]
