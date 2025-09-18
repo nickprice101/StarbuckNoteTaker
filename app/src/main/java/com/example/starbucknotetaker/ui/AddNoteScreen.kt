@@ -26,11 +26,17 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import java.util.concurrent.atomic.AtomicLong
+import com.example.starbucknotetaker.LinkPreviewFetcher
+import com.example.starbucknotetaker.LinkPreviewResult
+import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.Summarizer
+import com.example.starbucknotetaker.extractUrls
+import com.example.starbucknotetaker.normalizeUrl
+import com.example.starbucknotetaker.ui.LinkPreviewCard
 
 @Composable
 fun AddNoteScreen(
-    onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>) -> Unit,
+    onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>, List<NoteLinkPreview>) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
@@ -38,9 +44,42 @@ fun AddNoteScreen(
 ) {
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
+    val dismissedPreviewUrls = remember { mutableStateMapOf<Long, MutableSet<String>>() }
+    val linkPreviewFetcher = remember { LinkPreviewFetcher() }
     val context = LocalContext.current
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
+
+    fun syncLinkPreviews(index: Int, textBlock: NoteBlock.Text) {
+        val normalizedUrls = extractUrls(textBlock.text).map { normalizeUrl(it) }.distinct()
+        val existingBlocks = mutableMapOf<String, NoteBlock.LinkPreview>()
+        var cursor = index + 1
+        while (cursor < blocks.size) {
+            val block = blocks[cursor]
+            if (block is NoteBlock.LinkPreview && block.sourceId == textBlock.id) {
+                existingBlocks[block.preview.url] = block
+                blocks.removeAt(cursor)
+            } else {
+                break
+            }
+        }
+        if (normalizedUrls.isEmpty()) {
+            dismissedPreviewUrls.remove(textBlock.id)
+            return
+        }
+        val dismissed = dismissedPreviewUrls.getOrPut(textBlock.id) { mutableSetOf() }
+        dismissed.retainAll(normalizedUrls.toSet())
+        val filteredUrls = normalizedUrls.filterNot { dismissed.contains(it) }
+        var insertionIndex = index + 1
+        filteredUrls.forEach { url ->
+            val block = existingBlocks[url] ?: NoteBlock.LinkPreview(
+                sourceId = textBlock.id,
+                preview = NoteLinkPreview(url = url)
+            )
+            blocks.add(insertionIndex, block)
+            insertionIndex++
+        }
+    }
 
     val imagePickerContract = remember {
         OpenDocumentWithInitialUri(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
@@ -107,9 +146,11 @@ fun AddNoteScreen(
                     IconButton(onClick = {
                         val imageList = mutableListOf<Pair<Uri, Int>>()
                         val fileList = mutableListOf<Uri>()
+                        val linkPreviewList = mutableListOf<NoteLinkPreview>()
                         val content = buildString {
                             var imageIndex = 0
                             var fileIndex = 0
+                            var linkIndex = 0
                             blocks.forEach { block ->
                                 when (block) {
                                     is NoteBlock.Text -> {
@@ -130,12 +171,19 @@ fun AddNoteScreen(
                                         fileList.add(block.uri)
                                         fileIndex++
                                     }
+                                    is NoteBlock.LinkPreview -> {
+                                        append("[[link:")
+                                        append(linkIndex)
+                                        append("]]\n")
+                                        linkPreviewList.add(block.preview)
+                                        linkIndex++
+                                    }
                                 }
                             }
                         }.trim()
                         hideKeyboard()
                         focusManager.clearFocus(force = true)
-                        onSave(title, content, imageList, fileList)
+                        onSave(title, content, imageList, fileList, linkPreviewList)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")
                     }
@@ -168,7 +216,9 @@ fun AddNoteScreen(
                         OutlinedTextField(
                             value = block.text,
                             onValueChange = { newText ->
-                                blocks[index] = block.copy(text = newText)
+                                val updated = block.copy(text = newText)
+                                blocks[index] = updated
+                                syncLinkPreviews(index, updated)
                             },
                             label = if (index == 0) {
                                 { Text("Content") }
@@ -225,6 +275,47 @@ fun AddNoteScreen(
                             Text(name)
                         }
                     }
+                    is NoteBlock.LinkPreview -> {
+                        val previewBlock = block
+                        LaunchedEffect(previewBlock.id, previewBlock.hasAttempted, previewBlock.preview.url) {
+                            if (!previewBlock.hasAttempted) {
+                                when (val result = linkPreviewFetcher.fetch(previewBlock.preview.url)) {
+                                    is LinkPreviewResult.Success -> {
+                                        blocks[index] = previewBlock.copy(
+                                            preview = result.preview,
+                                            isLoading = false,
+                                            errorMessage = null,
+                                            hasAttempted = true,
+                                        )
+                                    }
+                                    is LinkPreviewResult.Failure -> {
+                                        blocks[index] = previewBlock.copy(
+                                            isLoading = false,
+                                            errorMessage = result.message ?: "Unable to load preview",
+                                            hasAttempted = true,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        LinkPreviewCard(
+                            preview = previewBlock.preview,
+                            isLoading = previewBlock.isLoading,
+                            errorMessage = previewBlock.errorMessage,
+                            onRemove = {
+                                dismissedPreviewUrls.getOrPut(previewBlock.sourceId) { mutableSetOf() }
+                                    .add(previewBlock.preview.url)
+                                blocks.removeAt(index)
+                            },
+                            onOpen = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(previewBlock.preview.url))
+                                    )
+                                }
+                            }
+                        )
+                    }
                 }
             }
             item {
@@ -272,6 +363,14 @@ private sealed class NoteBlock {
     data class Text(val text: String, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class Image(val uri: Uri, val rotation: Int, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class File(val uri: Uri, override val id: Long = nextNoteBlockId()) : NoteBlock()
+    data class LinkPreview(
+        val sourceId: Long,
+        val preview: NoteLinkPreview,
+        val isLoading: Boolean = true,
+        val errorMessage: String? = null,
+        val hasAttempted: Boolean = false,
+        override val id: Long = nextNoteBlockId()
+    ) : NoteBlock()
 }
 
 private val noteBlockIdGenerator = AtomicLong(0L)

@@ -70,6 +70,7 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                 val trimmed = line.trim()
                 val imagePlaceholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
                 val filePlaceholder = Regex("\\[\\[file:(\\d+)]]").matchEntire(trimmed)
+                val linkPlaceholder = Regex("\\[\\[link:(\\d+)]]").matchEntire(trimmed)
                 when {
                     imagePlaceholder != null -> {
                         val index = imagePlaceholder.groupValues[1].toInt()
@@ -110,6 +111,21 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(file.name)
                             }
+                        }
+                    }
+                    linkPlaceholder != null -> {
+                        val index = linkPlaceholder.groupValues[1].toInt()
+                        note.linkPreviews.getOrNull(index)?.let { preview ->
+                            LinkPreviewCard(
+                                preview = preview,
+                                isLoading = false,
+                                errorMessage = null,
+                                onOpen = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(preview.url)))
+                                    }
+                                }
+                            )
                         }
                     }
                     else -> {

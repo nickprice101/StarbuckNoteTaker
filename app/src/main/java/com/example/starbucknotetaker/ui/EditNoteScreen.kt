@@ -32,7 +32,13 @@ import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteFile
+import com.example.starbucknotetaker.LinkPreviewFetcher
+import com.example.starbucknotetaker.LinkPreviewResult
+import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.Summarizer
+import com.example.starbucknotetaker.extractUrls
+import com.example.starbucknotetaker.normalizeUrl
+import com.example.starbucknotetaker.ui.LinkPreviewCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,7 +49,7 @@ import java.io.ByteArrayOutputStream
 @Composable
 fun EditNoteScreen(
     note: Note,
-    onSave: (String?, String, List<String>, List<NoteFile>) -> Unit,
+    onSave: (String?, String, List<String>, List<NoteFile>, List<NoteLinkPreview>) -> Unit,
     onCancel: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
@@ -53,23 +59,52 @@ fun EditNoteScreen(
     val blocks = remember {
         mutableStateListOf<EditBlock>().apply {
             val lines = note.content.lines()
+            var lastTextId: Long? = null
             lines.forEach { line ->
                 val trimmed = line.trim()
                 val imgPlaceholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
                 val filePlaceholder = Regex("\\[\\[file:(\\d+)]]").matchEntire(trimmed)
+                val linkPlaceholder = Regex("\\[\\[link:(\\d+)]]").matchEntire(trimmed)
                 when {
                     imgPlaceholder != null -> {
                         val idx = imgPlaceholder.groupValues[1].toInt()
                         note.images.getOrNull(idx)?.let { data ->
                             add(EditBlock.Image(data))
-                            add(EditBlock.Text(""))
+                            val textBlock = EditBlock.Text("")
+                            add(textBlock)
+                            lastTextId = textBlock.id
                         }
                     }
                     filePlaceholder != null -> {
                         val idx = filePlaceholder.groupValues[1].toInt()
                         note.files.getOrNull(idx)?.let { file ->
                             add(EditBlock.File(file))
-                            add(EditBlock.Text(""))
+                            val textBlock = EditBlock.Text("")
+                            add(textBlock)
+                            lastTextId = textBlock.id
+                        }
+                    }
+                    linkPlaceholder != null -> {
+                        val idx = linkPlaceholder.groupValues[1].toInt()
+                        note.linkPreviews.getOrNull(idx)?.let { preview ->
+                            val sourceId = lastTextId ?: run {
+                                val textBlock = EditBlock.Text("")
+                                add(textBlock)
+                                lastTextId = textBlock.id
+                                textBlock.id
+                            }
+                            add(
+                                EditBlock.LinkPreview(
+                                    sourceId = sourceId,
+                                    preview = preview,
+                                    isLoading = false,
+                                    errorMessage = null,
+                                    hasAttempted = true,
+                                )
+                            )
+                            val textBlock = EditBlock.Text("")
+                            add(textBlock)
+                            lastTextId = textBlock.id
                         }
                     }
                     else -> {
@@ -77,24 +112,77 @@ fun EditNoteScreen(
                         if (last is EditBlock.Text) {
                             val lastIndex = size - 1
                             val newText = if (last.text.isEmpty()) line else last.text + "\n" + line
-                            this[lastIndex] = last.copy(text = newText)
+                            val updated = last.copy(text = newText)
+                            this[lastIndex] = updated
+                            lastTextId = updated.id
                         } else {
-                            add(EditBlock.Text(line))
+                            val textBlock = EditBlock.Text(line)
+                            add(textBlock)
+                            lastTextId = textBlock.id
                         }
                     }
                 }
             }
-            if (isEmpty()) add(EditBlock.Text(""))
+            if (isEmpty()) {
+                add(EditBlock.Text(""))
+            } else if (lastOrNull() !is EditBlock.Text) {
+                val textBlock = EditBlock.Text("")
+                add(textBlock)
+            }
         }
     }
+    val dismissedPreviewUrls = remember { mutableStateMapOf<Long, MutableSet<String>>() }
+    val linkPreviewFetcher = remember { LinkPreviewFetcher() }
     val context = LocalContext.current
     val scaffoldState = rememberScaffoldState()
     val scope = rememberCoroutineScope()
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
 
+    fun syncLinkPreviews(index: Int, textBlock: EditBlock.Text) {
+        val normalizedUrls = extractUrls(textBlock.text).map { normalizeUrl(it) }.distinct()
+        val existingBlocks = mutableMapOf<String, EditBlock.LinkPreview>()
+        var cursor = index + 1
+        while (cursor < blocks.size) {
+            val block = blocks[cursor]
+            if (block is EditBlock.LinkPreview && block.sourceId == textBlock.id) {
+                existingBlocks[block.preview.url] = block
+                blocks.removeAt(cursor)
+            } else {
+                break
+            }
+        }
+        if (normalizedUrls.isEmpty()) {
+            dismissedPreviewUrls.remove(textBlock.id)
+            return
+        }
+        val dismissed = dismissedPreviewUrls.getOrPut(textBlock.id) { mutableSetOf() }
+        dismissed.retainAll(normalizedUrls.toSet())
+        val filteredUrls = normalizedUrls.filterNot { dismissed.contains(it) }
+        var insertionIndex = index + 1
+        filteredUrls.forEach { url ->
+            val block = existingBlocks[url] ?: EditBlock.LinkPreview(
+                sourceId = textBlock.id,
+                preview = NoteLinkPreview(url = url)
+            )
+            blocks.add(insertionIndex, block)
+            insertionIndex++
+        }
+    }
+
     val imagePickerContract = remember {
         OpenDocumentWithInitialUri(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+    }
+
+    LaunchedEffect(note.id) {
+        var idx = 0
+        while (idx < blocks.size) {
+            val block = blocks.getOrNull(idx)
+            if (block is EditBlock.Text) {
+                syncLinkPreviews(idx, block)
+            }
+            idx++
+        }
     }
     val imageLauncher = rememberLauncherForActivityResult(imagePickerContract) { uri: Uri? ->
         onEnablePinCheck()
@@ -202,7 +290,9 @@ fun EditNoteScreen(
                     IconButton(onClick = {
                         val images = mutableListOf<String>()
                         val files = mutableListOf<NoteFile>()
+                        val linkPreviews = mutableListOf<NoteLinkPreview>()
                         val content = buildString {
+                            var linkIndex = 0
                             blocks.forEach { block ->
                                 when (block) {
                                     is EditBlock.Text -> {
@@ -221,13 +311,20 @@ fun EditNoteScreen(
                                         append("]]\n")
                                         files.add(block.file)
                                     }
+                                    is EditBlock.LinkPreview -> {
+                                        append("[[link:")
+                                        append(linkIndex)
+                                        append("]]\n")
+                                        linkPreviews.add(block.preview)
+                                        linkIndex++
+                                    }
                                 }
                             }
                         }.trim()
                         scope.launch {
                             hideKeyboard()
                             focusManager.clearFocus(force = true)
-                            onSave(title, content, images, files)
+                            onSave(title, content, images, files, linkPreviews)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes saved",
                                 duration = SnackbarDuration.Short
@@ -265,7 +362,11 @@ fun EditNoteScreen(
                     is EditBlock.Text -> {
                         OutlinedTextField(
                             value = block.text,
-                            onValueChange = { newText -> blocks[index] = block.copy(text = newText) },
+                            onValueChange = { newText ->
+                                val updated = block.copy(text = newText)
+                                blocks[index] = updated
+                                syncLinkPreviews(index, updated)
+                            },
                             label = if (index == 0) { { Text("Content") } } else null,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -363,6 +464,56 @@ fun EditNoteScreen(
                             }
                         }
                     }
+                    is EditBlock.LinkPreview -> {
+                        val previewBlock = block
+                        LaunchedEffect(previewBlock.id, previewBlock.hasAttempted, previewBlock.preview.url) {
+                            if (!previewBlock.hasAttempted) {
+                                when (val result = linkPreviewFetcher.fetch(previewBlock.preview.url)) {
+                                    is LinkPreviewResult.Success -> {
+                                        blocks[index] = previewBlock.copy(
+                                            preview = result.preview,
+                                            isLoading = false,
+                                            errorMessage = null,
+                                            hasAttempted = true,
+                                        )
+                                    }
+                                    is LinkPreviewResult.Failure -> {
+                                        blocks[index] = previewBlock.copy(
+                                            isLoading = false,
+                                            errorMessage = result.message ?: "Unable to load preview",
+                                            hasAttempted = true,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        LinkPreviewCard(
+                            preview = previewBlock.preview,
+                            isLoading = previewBlock.isLoading,
+                            errorMessage = previewBlock.errorMessage,
+                            onRemove = {
+                                dismissedPreviewUrls.getOrPut(previewBlock.sourceId) { mutableSetOf() }
+                                    .add(previewBlock.preview.url)
+                                blocks.removeAt(index)
+                                val prevIndex = index - 1
+                                if (prevIndex >= 0 && prevIndex < blocks.size) {
+                                    val prev = blocks[prevIndex]
+                                    val next = blocks.getOrNull(prevIndex + 1)
+                                    if (prev is EditBlock.Text && next is EditBlock.Text) {
+                                        blocks[prevIndex] = prev.copy(text = prev.text + "\n" + next.text)
+                                        blocks.removeAt(prevIndex + 1)
+                                    }
+                                }
+                            },
+                            onOpen = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(previewBlock.preview.url))
+                                    )
+                                }
+                            }
+                        )
+                    }
                 }
             }
             item {
@@ -414,6 +565,14 @@ private sealed class EditBlock {
     data class Text(val text: String, override val id: Long = nextEditBlockId()) : EditBlock()
     data class Image(val data: String, override val id: Long = nextEditBlockId()) : EditBlock()
     data class File(val file: NoteFile, override val id: Long = nextEditBlockId()) : EditBlock()
+    data class LinkPreview(
+        val sourceId: Long,
+        val preview: NoteLinkPreview,
+        val isLoading: Boolean = true,
+        val errorMessage: String? = null,
+        val hasAttempted: Boolean = false,
+        override val id: Long = nextEditBlockId()
+    ) : EditBlock()
 }
 
 private val editBlockIdGenerator = AtomicLong(0L)

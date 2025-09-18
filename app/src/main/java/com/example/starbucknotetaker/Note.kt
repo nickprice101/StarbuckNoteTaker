@@ -10,6 +10,7 @@ data class Note(
     val date: Long = System.currentTimeMillis(),
     val images: List<String> = emptyList(),
     val files: List<NoteFile> = emptyList(),
+    val linkPreviews: List<NoteLinkPreview> = emptyList(),
     val summary: String = "",
 )
 
@@ -22,5 +23,15 @@ data class NoteFile(
     val name: String,
     val mime: String,
     val data: String,
+)
+
+/**
+ * Metadata describing a rich preview for a URL embedded in a note.
+ */
+data class NoteLinkPreview(
+    val url: String,
+    val title: String? = null,
+    val description: String? = null,
+    val imageUrl: String? = null,
 )
 

@@ -59,6 +59,19 @@ class EncryptedNoteStore(private val context: Context) {
                     )
                 )
             }
+            val linksJson = obj.optJSONArray("linkPreviews") ?: JSONArray()
+            val linkPreviews = mutableListOf<NoteLinkPreview>()
+            for (j in 0 until linksJson.length()) {
+                val l = linksJson.getJSONObject(j)
+                linkPreviews.add(
+                    NoteLinkPreview(
+                        url = l.getString("url"),
+                        title = l.optString("title", null),
+                        description = l.optString("description", null),
+                        imageUrl = l.optString("imageUrl", null)
+                    )
+                )
+            }
             notes.add(
                 Note(
                     id = obj.getLong("id"),
@@ -67,6 +80,7 @@ class EncryptedNoteStore(private val context: Context) {
                     date = obj.getLong("date"),
                     images = images,
                     files = files,
+                    linkPreviews = linkPreviews,
                     summary = obj.optString("summary", "")
                 )
             )
@@ -94,6 +108,16 @@ class EncryptedNoteStore(private val context: Context) {
                 filesArray.put(fo)
             }
             obj.put("files", filesArray)
+            val linksArray = JSONArray()
+            note.linkPreviews.forEach { link ->
+                val lo = JSONObject()
+                lo.put("url", link.url)
+                link.title?.let { lo.put("title", it) }
+                link.description?.let { lo.put("description", it) }
+                link.imageUrl?.let { lo.put("imageUrl", it) }
+                linksArray.put(lo)
+            }
+            obj.put("linkPreviews", linksArray)
             obj.put("summary", note.summary)
             arr.put(obj)
         }
