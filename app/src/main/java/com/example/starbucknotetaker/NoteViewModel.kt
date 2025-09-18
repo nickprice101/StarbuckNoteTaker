@@ -64,7 +64,13 @@ class NoteViewModel : ViewModel() {
         }
     }
 
-    fun addNote(title: String?, content: String, images: List<Pair<Uri, Int>>, files: List<Uri>) {
+    fun addNote(
+        title: String?,
+        content: String,
+        images: List<Pair<Uri, Int>>,
+        files: List<Uri>,
+        linkPreviews: List<NoteLinkPreview>
+    ) {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
         } else {
@@ -138,6 +144,7 @@ class NoteViewModel : ViewModel() {
             date = System.currentTimeMillis(),
             images = embeddedImages,
             files = embeddedFiles,
+            linkPreviews = linkPreviews,
             summary = summarizer?.let { it.fallbackSummary(finalContent) } ?: finalContent.take(200)
         )
         _notes.add(0, note) // newest first
@@ -158,7 +165,14 @@ class NoteViewModel : ViewModel() {
         }
     }
 
-    fun updateNote(index: Int, title: String?, content: String, images: List<String>, files: List<NoteFile>) {
+    fun updateNote(
+        index: Int,
+        title: String?,
+        content: String,
+        images: List<String>,
+        files: List<NoteFile>,
+        linkPreviews: List<NoteLinkPreview>
+    ) {
         if (index in _notes.indices) {
             val note = _notes[index]
             val finalTitle = if (title.isNullOrBlank()) note.title else title
@@ -167,6 +181,7 @@ class NoteViewModel : ViewModel() {
                 content = content.trim(),
                 images = images,
                 files = files,
+                linkPreviews = linkPreviews,
                 summary = summarizer?.let { it.fallbackSummary(content) } ?: content.take(200)
             )
             _notes[index] = updated

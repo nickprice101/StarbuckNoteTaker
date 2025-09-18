@@ -38,7 +38,7 @@ class NoteViewModelTest {
         val viewModel = NoteViewModel()
         setField(viewModel, "summarizer", summarizer)
 
-        viewModel.addNote("Title", "Content", emptyList(), emptyList())
+        viewModel.addNote("Title", "Content", emptyList(), emptyList(), emptyList())
 
         advanceUntilIdle()
 
