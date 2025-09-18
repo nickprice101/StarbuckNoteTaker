@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
+import java.util.concurrent.atomic.AtomicLong
 import com.example.starbucknotetaker.Summarizer
 
 @Composable
@@ -161,7 +162,7 @@ fun AddNoteScreen(
                         .padding(bottom = 12.dp)
                 )
             }
-            itemsIndexed(blocks) { index, block ->
+            itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
                 when (block) {
                     is NoteBlock.Text -> {
                         OutlinedTextField(
@@ -266,8 +267,14 @@ fun AddNoteScreen(
 }
 
 private sealed class NoteBlock {
-    data class Text(val text: String) : NoteBlock()
-    data class Image(val uri: Uri, val rotation: Int) : NoteBlock()
-    data class File(val uri: Uri) : NoteBlock()
+    abstract val id: Long
+
+    data class Text(val text: String, override val id: Long = nextNoteBlockId()) : NoteBlock()
+    data class Image(val uri: Uri, val rotation: Int, override val id: Long = nextNoteBlockId()) : NoteBlock()
+    data class File(val uri: Uri, override val id: Long = nextNoteBlockId()) : NoteBlock()
 }
+
+private val noteBlockIdGenerator = AtomicLong(0L)
+
+private fun nextNoteBlockId(): Long = noteBlockIdGenerator.getAndIncrement()
 
