@@ -36,6 +36,7 @@ import com.example.starbucknotetaker.Summarizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
@@ -76,7 +77,7 @@ fun EditNoteScreen(
                         if (last is EditBlock.Text) {
                             val lastIndex = size - 1
                             val newText = if (last.text.isEmpty()) line else last.text + "\n" + line
-                            this[lastIndex] = EditBlock.Text(newText)
+                            this[lastIndex] = last.copy(text = newText)
                         } else {
                             add(EditBlock.Text(line))
                         }
@@ -259,7 +260,7 @@ fun EditNoteScreen(
                         .padding(bottom = 12.dp)
                 )
             }
-            itemsIndexed(blocks) { index, block ->
+            itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
                 when (block) {
                     is EditBlock.Text -> {
                         OutlinedTextField(
@@ -302,7 +303,7 @@ fun EditNoteScreen(
                                                 r to Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
                                             }
                                             bitmap = rotated
-                                            blocks[index] = EditBlock.Image(encoded)
+                                            blocks[index] = block.copy(data = encoded)
                                         }
                                     },
                                     modifier = Modifier.align(Alignment.BottomStart)
@@ -322,7 +323,7 @@ fun EditNoteScreen(
                                         val prev = blocks[prevIndex]
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                            blocks[prevIndex] = EditBlock.Text(prev.text + "\n" + next.text)
+                                            blocks[prevIndex] = prev.copy(text = prev.text + "\n" + next.text)
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -351,7 +352,7 @@ fun EditNoteScreen(
                                         val prev = blocks[prevIndex]
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                            blocks[prevIndex] = EditBlock.Text(prev.text + "\n" + next.text)
+                                            blocks[prevIndex] = prev.copy(text = prev.text + "\n" + next.text)
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -408,8 +409,14 @@ fun EditNoteScreen(
 }
 
 private sealed class EditBlock {
-    data class Text(val text: String) : EditBlock()
-    data class Image(val data: String) : EditBlock()
-    data class File(val file: NoteFile) : EditBlock()
+    abstract val id: Long
+
+    data class Text(val text: String, override val id: Long = nextEditBlockId()) : EditBlock()
+    data class Image(val data: String, override val id: Long = nextEditBlockId()) : EditBlock()
+    data class File(val file: NoteFile, override val id: Long = nextEditBlockId()) : EditBlock()
 }
+
+private val editBlockIdGenerator = AtomicLong(0L)
+
+private fun nextEditBlockId(): Long = editBlockIdGenerator.getAndIncrement()
 
