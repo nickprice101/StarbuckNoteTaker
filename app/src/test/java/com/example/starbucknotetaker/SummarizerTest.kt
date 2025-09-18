@@ -168,6 +168,76 @@ class SummarizerTest {
     }
 
     @Test
+    fun summarizePrefersNoteKeywordsOverGenericOpeners() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
+        whenever(tokenizer.encodeAsIds(any())).thenReturn(encodedIds)
+        val tokenMap = mapOf(
+            300 to "Summary",
+            301 to "Report",
+            302 to "Tweet",
+            303 to "project",
+            304 to "meeting",
+            305 to "notes",
+            306 to "timeline",
+            307 to "updates",
+            308 to "budget",
+            309 to "discussion"
+        )
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.joinToString(" ") { tokenMap[it] ?: "[$it]" }.trim()
+        }
+
+        val attentionCapacity = max(encodedIds.size, tokenMap.size + 1)
+        val decoder = PreferenceDecoderStub(
+            listOf(
+                listOf(300, 303, 304),
+                listOf(301, 304, 305),
+                listOf(302, 304, 306),
+                listOf(306, 307, 308),
+                listOf(308, 309),
+                listOf(309)
+            ),
+            attentionCapacity
+        )
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(EncoderStub(attentionCapacity))
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val note = "Project meeting notes include timeline updates and budget discussion."
+        val summary = summarizer.summarize(note)
+        val lowerSummary = summary.lowercase()
+
+        assertFalse("summary should not echo generic tweet opener", lowerSummary.contains("tweet"))
+        assertTrue("summary should include meeting keyword", lowerSummary.contains("meeting"))
+        assertTrue("summary should include budget keyword", lowerSummary.contains("budget"))
+        assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
+
+        summarizer.close()
+    }
+
+    @Test
     fun summarizeFeedsFullHistoryWhenDecoderLacksCache() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }

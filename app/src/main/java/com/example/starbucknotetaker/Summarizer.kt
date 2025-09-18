@@ -123,6 +123,7 @@ class Summarizer(
 
         val prefix = "summarize: "
         val inputIds = tok.encodeAsIds(prefix + text)
+        val sourceKeywords = buildKeywordStats(text)
 
         suspend fun fallback(reason: String, throwable: Throwable? = null): String {
             logger(reason, throwable ?: IllegalStateException(reason))
@@ -273,7 +274,7 @@ class Summarizer(
 
             dec.runForMultipleInputsOutputs(decoderInputs, outputs)
 
-            val next = selectNextToken(logits[0][0], generatedTokens, tok)
+            val next = selectNextToken(logits[0][0], generatedTokens, tok, sourceKeywords)
             if (next == EOS_ID) break
 
             if (!usesCache) {
@@ -311,35 +312,102 @@ class Summarizer(
     private fun selectNextToken(
         logits: FloatArray,
         generatedTokens: MutableList<Int>,
-        tokenizer: SentencePieceProcessor
+        tokenizer: SentencePieceProcessor,
+        sourceKeywords: KeywordStats
     ): Int {
         val ranked = topKIndices(logits, MAX_TOKEN_CHOICES)
         if (ranked.isEmpty()) return argmax(logits)
 
-        if (generatedTokens.isEmpty()) {
-            return ranked[0]
-        }
-
         val preview = IntArray(generatedTokens.size + 1)
         for (i in generatedTokens.indices) preview[i] = generatedTokens[i]
 
-        for (candidate in ranked) {
+        val useKeywordBias = generatedTokens.size >= MIN_TOKENS_FOR_KEYWORD_BIAS && !sourceKeywords.isEmpty()
+        val existingWordSet: Set<String> = if (generatedTokens.isEmpty()) {
+            emptySet()
+        } else {
+            val existingText = tokenizer.decodeIds(generatedTokens.toIntArray())
+            tokenizeWords(existingText)
+                .map { normalizeWord(it) }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }
+
+        var firstValid: Int? = null
+        var bestCandidate: Int? = null
+        var bestScore = Int.MIN_VALUE
+        var bestRank = Int.MAX_VALUE
+        var eosCandidate: Int? = null
+        var bestCandidateAddsLetters = false
+
+        for ((rankIndex, candidate) in ranked.withIndex()) {
             if (candidate == EOS_ID) {
-                return candidate
+                if (!useKeywordBias) {
+                    return candidate
+                }
+                eosCandidate = candidate
+                continue
             }
             preview[preview.lastIndex] = candidate
             val previewText = tokenizer.decodeIds(preview)
             val words = tokenizeWords(previewText)
             if (words.isEmpty()) {
+                if (firstValid == null) firstValid = candidate
+                if (!useKeywordBias) {
+                    return candidate
+                }
+                if (bestCandidate == null || rankIndex < bestRank) {
+                    bestCandidate = candidate
+                    bestScore = 0
+                    bestRank = rankIndex
+                }
+                continue
+            }
+            if (isDegenerate(words)) {
+                debug("skipping token $candidate due to degeneracy")
+                continue
+            }
+            val normalizedWords = words.map { normalizeWord(it) }.filter { it.isNotEmpty() }
+            if (firstValid == null) firstValid = candidate
+            if (!useKeywordBias) {
                 return candidate
             }
-            if (!isDegenerate(words)) {
-                return candidate
+            if (normalizedWords.isEmpty()) {
+                if (bestCandidate == null || rankIndex < bestRank) {
+                    bestCandidate = candidate
+                    bestScore = 0
+                    bestRank = rankIndex
+                    bestCandidateAddsLetters = false
+                }
+                continue
             }
-            debug("skipping token $candidate due to degeneracy")
+            val newWords = normalizedWords.filter { it !in existingWordSet }
+            val overlapScore = sourceKeywords.scoreNewWords(newWords)
+            val candidateAddsLetters = newWords.any { containsLetter(it) }
+            if (
+                overlapScore > bestScore ||
+                (overlapScore == bestScore && !bestCandidateAddsLetters && candidateAddsLetters) ||
+                (overlapScore == bestScore && candidateAddsLetters == bestCandidateAddsLetters && rankIndex < bestRank)
+            ) {
+                bestScore = overlapScore
+                bestRank = rankIndex
+                bestCandidate = candidate
+                bestCandidateAddsLetters = candidateAddsLetters
+            }
         }
 
-        return ranked[0]
+        if (!useKeywordBias) {
+            return firstValid ?: eosCandidate ?: ranked[0]
+        }
+
+        if (bestCandidate == null) {
+            return firstValid ?: eosCandidate ?: ranked[0]
+        }
+
+        if (bestScore <= 0 && !bestCandidateAddsLetters && eosCandidate != null) {
+            return eosCandidate
+        }
+
+        return bestCandidate ?: firstValid ?: eosCandidate ?: ranked[0]
     }
 
     private fun cleanSummary(rawSummary: String): String {
@@ -364,6 +432,36 @@ class Summarizer(
             cleanedWords.add(word)
         }
         return cleanedWords.joinToString(" ")
+    }
+
+    private fun buildKeywordStats(text: String): KeywordStats {
+        if (text.isEmpty()) return KeywordStats.EMPTY
+        val counts = mutableMapOf<String, Int>()
+        val words = tokenizeWords(text)
+        for (word in words) {
+            val normalized = normalizeWord(word)
+            if (normalized.isEmpty() || STOP_WORDS.contains(normalized)) continue
+            counts[normalized] = counts.getOrDefault(normalized, 0) + 1
+        }
+        if (counts.isEmpty()) return KeywordStats.EMPTY
+        return KeywordStats(counts)
+    }
+
+    private fun normalizeWord(word: String): String {
+        if (word.isEmpty()) return ""
+        val trimmed = word.trim()
+        if (trimmed.isEmpty()) return ""
+        val stripped = trimmed.trim { !it.isLetterOrDigit() }
+        if (stripped.isEmpty()) return ""
+        return stripped.lowercase(Locale.US)
+    }
+
+    private fun containsLetter(word: String): Boolean {
+        if (word.isEmpty()) return false
+        for (ch in word) {
+            if (ch.isLetter()) return true
+        }
+        return false
     }
 
     private fun tokenizeWords(text: String): List<String> {
@@ -467,6 +565,29 @@ class Summarizer(
         return total
     }
 
+    private data class KeywordStats(val counts: Map<String, Int>) {
+        fun scoreNewWords(words: List<String>): Int {
+            if (counts.isEmpty()) return 0
+            var score = 0
+            val used = HashMap<String, Int>()
+            for (word in words) {
+                val limit = counts[word] ?: continue
+                val consumed = used.getOrElse(word) { 0 }
+                if (consumed < limit) {
+                    used[word] = consumed + 1
+                    score++
+                }
+            }
+            return score
+        }
+
+        fun isEmpty(): Boolean = counts.isEmpty()
+
+        companion object {
+            val EMPTY = KeywordStats(emptyMap())
+        }
+    }
+
     companion object {
         private const val MAX_INPUT_TOKENS = 256
         private const val MAX_OUTPUT_TOKENS = 64
@@ -479,5 +600,53 @@ class Summarizer(
         private const val MIN_WORDS_FOR_UNIQUENESS = 6
         private const val MIN_UNIQUE_WORDS = 3
         private const val ENCODER_HIDDEN_SIZE = 512
+        private const val MIN_TOKENS_FOR_KEYWORD_BIAS = 2
+        private val STOP_WORDS = setOf(
+            "a",
+            "an",
+            "the",
+            "and",
+            "or",
+            "but",
+            "if",
+            "in",
+            "on",
+            "with",
+            "for",
+            "to",
+            "of",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "its",
+            "as",
+            "at",
+            "by",
+            "from",
+            "about",
+            "into",
+            "over",
+            "after",
+            "before",
+            "up",
+            "down",
+            "out",
+            "so",
+            "than",
+            "too",
+            "very",
+            "can",
+            "will",
+            "just"
+        )
     }
 }
