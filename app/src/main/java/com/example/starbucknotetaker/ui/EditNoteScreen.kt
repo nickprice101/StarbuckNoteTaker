@@ -313,14 +313,14 @@ fun EditNoteScreen(
                 title = { Text("Edit Note") },
                 navigationIcon = {
                     IconButton(onClick = {
+                        hideKeyboard()
+                        focusManager.clearFocus(force = true)
+                        onCancel()
                         scope.launch {
-                            hideKeyboard()
-                            focusManager.clearFocus(force = true)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes discarded",
                                 duration = SnackbarDuration.Short
                             )
-                            onCancel()
                         }
                     }) {
                         Icon(Icons.Default.Close, contentDescription = "Discard")
