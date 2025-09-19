@@ -95,7 +95,7 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Input text")
 
-        assertEquals("Summary focuses on 21,22.", summary)
+        assertEquals("21,22.", summary)
         assertEquals(decoder.expectedCalls, decoder.callCount)
         assertFalse("decoder should not run after EOS", decoder.extraInvocation)
 
@@ -277,7 +277,7 @@ class SummarizerTest {
         val summary = summarizer.summarize(input)
 
         assertEquals(
-            "Summary highlights timeline, milestones, roadmap, deliverables, and updates.",
+            "Timeline milestones roadmap deliverables updates",
             summary
         )
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
@@ -465,7 +465,7 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Input text")
 
-        assertEquals("Summary focuses on 21,22.", summary)
+        assertEquals("21,22.", summary)
         assertEquals(decoder.expectedCalls, decoder.callCount)
 
         summarizer.close()

@@ -11,6 +11,7 @@ import java.io.RandomAccessFile
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import java.util.LinkedHashMap
+import java.util.LinkedHashSet
 import java.util.Locale
 
 /**
@@ -443,7 +444,7 @@ class Summarizer(
             return collapsed
         }
 
-        if (looksLikeConciseHeadline(cleanedWords)) {
+        if (looksLikeConciseHeadline(cleanedWords) || looksLikeKeywordList(cleanedWords)) {
             return collapsed
         }
 
@@ -495,6 +496,26 @@ class Summarizer(
         return false
     }
 
+    private fun looksLikeKeywordList(words: List<String>): Boolean {
+        if (words.size < 2 || words.size > MAX_HEADLINE_WORDS) return false
+
+        val uniqueNormalized = LinkedHashSet<String>()
+        var hasLetterWord = false
+
+        for (word in words) {
+            val normalized = normalizeWord(word)
+            if (normalized.isEmpty()) return false
+            if (normalized.any { it.isLetter() }) {
+                hasLetterWord = true
+            }
+            uniqueNormalized.add(normalized)
+        }
+
+        if (!hasLetterWord) return false
+
+        return uniqueNormalized.size >= 2
+    }
+
     private fun buildKeywordSentence(words: List<String>): String {
         if (words.isEmpty()) return ""
 
@@ -517,13 +538,8 @@ class Summarizer(
         val formattedKeywords = limited.mapNotNull { formatKeyword(it) }
         if (formattedKeywords.isEmpty()) return ""
 
-        val prefix = if (formattedKeywords.size == 1) {
-            "Summary focuses on "
-        } else {
-            "Summary highlights "
-        }
         val sentenceBody = formatWordList(formattedKeywords)
-        return ensureSentence(prefix + sentenceBody)
+        return ensureSentence(sentenceBody)
     }
 
     private fun trimEdgePunctuation(word: String): String {
