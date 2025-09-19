@@ -95,7 +95,7 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Input text")
 
-        assertEquals("21,22", summary)
+        assertEquals("Summary focuses on 21,22.", summary)
         assertEquals(decoder.expectedCalls, decoder.callCount)
         assertFalse("decoder should not run after EOS", decoder.extraInvocation)
 
@@ -162,6 +162,73 @@ class SummarizerTest {
         val summary = summarizer.summarize(input)
 
         assertEquals("Labour MPs pressure Starmer over Mandelson sacking", summary)
+        assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
+
+        summarizer.close()
+    }
+
+    @Test
+    fun summarizeTurnsKeywordListIntoReadableSentence() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val encodedIds = intArrayOf(7, 8, 9, 10)
+        whenever(tokenizer.encodeAsIds(any())).thenReturn(encodedIds)
+        val tokenMap = mapOf(
+            400 to "Timeline",
+            401 to "milestones",
+            402 to "roadmap",
+            403 to "deliverables",
+            404 to "updates",
+            405 to "timeline"
+        )
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.filter { tokenMap.containsKey(it) }
+                .joinToString(" ") { tokenMap[it] ?: "" }
+                .trim()
+        }
+
+        val attentionCapacity = max(encodedIds.size, tokenMap.size + 1)
+        val decoder = PreferenceDecoderStub(
+            listOf(
+                listOf(400, 401),
+                listOf(401, 402),
+                listOf(402, 403),
+                listOf(403, 404),
+                listOf(404, 405)
+            ),
+            attentionCapacity
+        )
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(EncoderStub(attentionCapacity))
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val input = "Project planning notes covering roadmap milestones"
+        val summary = summarizer.summarize(input)
+
+        assertEquals(
+            "Summary highlights timeline, milestones, roadmap, deliverables, and updates.",
+            summary
+        )
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
 
         summarizer.close()
@@ -276,7 +343,7 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Input text")
 
-        assertEquals("21,22", summary)
+        assertEquals("Summary focuses on 21,22.", summary)
         assertEquals(decoder.expectedCalls, decoder.callCount)
 
         summarizer.close()
