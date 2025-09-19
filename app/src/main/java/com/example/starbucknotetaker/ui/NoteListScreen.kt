@@ -13,6 +13,7 @@ import androidx.compose.material.swipeable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,15 +26,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
+import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.Summarizer
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 @Composable
 fun NoteListScreen(
     notes: List<Note>,
     onAddNote: () -> Unit,
+    onAddEvent: () -> Unit,
     onOpenNote: (Int) -> Unit,
     onDeleteNote: (Int) -> Unit,
     onSettings: () -> Unit,
@@ -43,11 +49,13 @@ fun NoteListScreen(
     val filtered = notes.filter {
         it.title.contains(query, true) ||
                 it.content.contains(query, true) ||
-                it.summary.contains(query, true)
+                it.summary.contains(query, true) ||
+                (it.event?.location?.contains(query, true) ?: false)
     }
     var openIndex by remember { mutableStateOf<Int?>(null) }
     val focusManager = LocalFocusManager.current
     val hideKeyboard = rememberKeyboardHider()
+    var creationMenuExpanded by remember { mutableStateOf(false) }
     Scaffold(
         floatingActionButton = {
             Row(
@@ -67,19 +75,45 @@ fun NoteListScreen(
                         tint = Color.White
                     )
                 }
-                FloatingActionButton(
-                    onClick = {
-                        hideKeyboard()
-                        focusManager.clearFocus(force = true)
-                        onAddNote()
-                    },
-                    backgroundColor = MaterialTheme.colors.primary
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.NoteAdd,
-                        contentDescription = "Add note",
-                        tint = Color.White
-                    )
+                Box {
+                    FloatingActionButton(
+                        onClick = {
+                            hideKeyboard()
+                            focusManager.clearFocus(force = true)
+                            creationMenuExpanded = true
+                        },
+                        backgroundColor = MaterialTheme.colors.primary
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.NoteAdd,
+                            contentDescription = "Add note",
+                            tint = Color.White
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = creationMenuExpanded,
+                        onDismissRequest = { creationMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(onClick = {
+                            creationMenuExpanded = false
+                            onAddNote()
+                        }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.NoteAdd,
+                                contentDescription = null
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("New Note")
+                        }
+                        DropdownMenuItem(onClick = {
+                            creationMenuExpanded = false
+                            onAddEvent()
+                        }) {
+                            Icon(Icons.Default.Event, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("New Event")
+                        }
+                    }
                 }
             }
         }
@@ -220,12 +254,31 @@ fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier)
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
-        Text(
-            text = note.summary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp)
-        )
+        note.event?.let { event ->
+            Text(
+                text = formatEventRange(event),
+                style = MaterialTheme.typography.body2,
+                color = MaterialTheme.colors.primary,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+            event.location?.takeIf { it.isNotBlank() }?.let { location ->
+                Text(
+                    text = location,
+                    style = MaterialTheme.typography.body2,
+                    modifier = Modifier.padding(top = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (note.summary.isNotBlank()) {
+            Text(
+                text = note.summary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
     }
 }
 
@@ -251,4 +304,32 @@ private fun DateHeader(date: Long) {
 private fun isSameDay(first: Long, second: Long): Boolean {
     val formatter = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
     return formatter.format(Date(first)) == formatter.format(Date(second))
+}
+
+private val eventDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
+private val eventTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+
+private fun formatEventRange(event: NoteEvent): String {
+    val zoneId = runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
+    val start = Instant.ofEpochMilli(event.start).atZone(zoneId)
+    val end = Instant.ofEpochMilli(event.end).atZone(zoneId)
+    return if (event.allDay) {
+        val startDate = start.toLocalDate()
+        val endDateExclusive = end.toLocalDate()
+        val lastDate = endDateExclusive.minusDays(1)
+        if (lastDate.isBefore(startDate)) {
+            "All-day • ${eventDateFormatter.format(start)}"
+        } else if (lastDate.isEqual(startDate)) {
+            "All-day • ${eventDateFormatter.format(start)}"
+        } else {
+            "All-day • ${eventDateFormatter.format(start)} – ${eventDateFormatter.format(lastDate)}"
+        }
+    } else {
+        val sameDay = start.toLocalDate() == end.toLocalDate()
+        if (sameDay) {
+            "${eventDateFormatter.format(start)} • ${eventTimeFormatter.format(start)} – ${eventTimeFormatter.format(end)}"
+        } else {
+            "${eventDateFormatter.format(start)} ${eventTimeFormatter.format(start)} – ${eventDateFormatter.format(end)} ${eventTimeFormatter.format(end)}"
+        }
+    }
 }

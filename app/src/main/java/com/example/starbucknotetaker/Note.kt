@@ -12,6 +12,7 @@ data class Note(
     val files: List<NoteFile> = emptyList(),
     val linkPreviews: List<NoteLinkPreview> = emptyList(),
     val summary: String = "",
+    val event: NoteEvent? = null,
 )
 
 /**
@@ -33,5 +34,16 @@ data class NoteLinkPreview(
     val title: String? = null,
     val description: String? = null,
     val imageUrl: String? = null,
+)
+
+/**
+ * Metadata describing an associated calendar event for a note entry.
+ */
+data class NoteEvent(
+    val start: Long,
+    val end: Long,
+    val allDay: Boolean,
+    val timeZone: String,
+    val location: String? = null,
 )
 

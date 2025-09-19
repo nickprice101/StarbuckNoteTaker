@@ -1,5 +1,7 @@
 package com.example.starbucknotetaker.ui
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
@@ -17,30 +19,39 @@ import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
-import java.util.concurrent.atomic.AtomicLong
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
+import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.Summarizer
 import com.example.starbucknotetaker.UrlDetection
 import com.example.starbucknotetaker.extractUrls
-import com.example.starbucknotetaker.ui.LinkPreviewCard
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
+import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 fun AddNoteScreen(
-    onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>, List<NoteLinkPreview>) -> Unit,
+    onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
-    summarizerState: Summarizer.SummarizerState
+    summarizerState: Summarizer.SummarizerState,
+    entryMode: NoteEntryMode = NoteEntryMode.Note,
+    initialEvent: NoteEvent? = null,
 ) {
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
@@ -49,6 +60,28 @@ fun AddNoteScreen(
     val context = LocalContext.current
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
+
+    val zoneId = remember(initialEvent) {
+        initialEvent?.let { runCatching { ZoneId.of(it.timeZone) }.getOrNull() } ?: ZoneId.systemDefault()
+    }
+    var eventLocation by remember(initialEvent) { mutableStateOf(initialEvent?.location ?: "") }
+    var eventAllDay by remember(initialEvent) { mutableStateOf(initialEvent?.allDay ?: false) }
+    var eventStart by remember(initialEvent) {
+        mutableStateOf(
+            initialEvent?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.start), zoneId) }
+                ?.truncatedTo(ChronoUnit.MINUTES)
+                ?: ZonedDateTime.now(zoneId).truncatedTo(ChronoUnit.MINUTES)
+        )
+    }
+    var eventEnd by remember(initialEvent) {
+        mutableStateOf(
+            initialEvent?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.end), zoneId) }
+                ?.truncatedTo(ChronoUnit.MINUTES)
+                ?: ZonedDateTime.now(zoneId).plusHours(1).truncatedTo(ChronoUnit.MINUTES)
+        )
+    }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
 
     fun syncLinkPreviews(
         index: Int,
@@ -161,15 +194,20 @@ fun AddNoteScreen(
     }
 
     DisposableEffect(Unit) {
-        onDispose {
-            onEnablePinCheck()
-        }
+        onDispose { onEnablePinCheck() }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("New Note") },
+                title = {
+                    Text(
+                        when (entryMode) {
+                            NoteEntryMode.Note -> "New Note"
+                            NoteEntryMode.Event -> "New Event"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = {
                         hideKeyboard()
@@ -231,7 +269,39 @@ fun AddNoteScreen(
                         }.trim()
                         hideKeyboard()
                         focusManager.clearFocus(force = true)
-                        onSave(title, content, imageList, fileList, linkPreviewList)
+                        val event = if (entryMode == NoteEntryMode.Event) {
+                            val normalizedStart = if (eventAllDay) {
+                                eventStart.withHour(0).withMinute(0)
+                            } else {
+                                eventStart
+                            }
+                            val normalizedEnd = if (eventAllDay) {
+                                val candidate = eventEnd.withHour(0).withMinute(0)
+                                if (candidate.toLocalDate().isBefore(normalizedStart.toLocalDate())) {
+                                    normalizedStart.plusDays(1)
+                                } else {
+                                    candidate
+                                }
+                            } else {
+                                if (eventEnd.isBefore(normalizedStart)) {
+                                    normalizedStart.plusHours(1)
+                                } else {
+                                    eventEnd
+                                }
+                            }
+                            eventStart = normalizedStart
+                            eventEnd = normalizedEnd
+                            NoteEvent(
+                                start = normalizedStart.toInstant().toEpochMilli(),
+                                end = normalizedEnd.toInstant().toEpochMilli(),
+                                allDay = eventAllDay,
+                                timeZone = zoneId.id,
+                                location = eventLocation.takeIf { it.isNotBlank() },
+                            )
+                        } else {
+                            null
+                        }
+                        onSave(title, content, imageList, fileList, linkPreviewList, event)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")
                     }
@@ -258,6 +328,105 @@ fun AddNoteScreen(
                         .padding(bottom = 12.dp)
                 )
             }
+            if (entryMode == NoteEntryMode.Event) {
+                item {
+                    Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                        OutlinedTextField(
+                            value = eventLocation,
+                            onValueChange = { eventLocation = it },
+                            label = { Text("Location") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("All-day")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(checked = eventAllDay, onCheckedChange = { checked ->
+                                eventAllDay = checked
+                                if (checked) {
+                                    eventStart = eventStart.withHour(0).withMinute(0)
+                                    eventEnd = if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                        eventStart.plusDays(1)
+                                    } else {
+                                        eventEnd.withHour(0).withMinute(0)
+                                    }
+                                } else {
+                                    if (eventEnd.isBefore(eventStart)) {
+                                        eventEnd = eventStart.plusHours(1)
+                                    }
+                                }
+                            })
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        EventDateTimePicker(
+                            label = "Starts",
+                            date = eventStart,
+                            onDateChange = { newDate ->
+                                eventStart = newDate
+                                if (eventAllDay) {
+                                    eventStart = eventStart.withHour(0).withMinute(0)
+                                    if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                        eventEnd = eventStart.plusDays(1)
+                                    }
+                                } else if (eventEnd.isBefore(eventStart)) {
+                                    eventEnd = eventStart.plusHours(1)
+                                }
+                            },
+                            onTimeChange = { newTime ->
+                                eventStart = newTime
+                                if (!eventAllDay && eventEnd.isBefore(eventStart)) {
+                                    eventEnd = eventStart.plusHours(1)
+                                }
+                            },
+                            allDay = eventAllDay,
+                            dateFormatter = dateFormatter,
+                            timeFormatter = timeFormatter,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        EventDateTimePicker(
+                            label = "Ends",
+                            date = eventEnd,
+                            onDateChange = { newDate ->
+                                eventEnd = if (eventAllDay) {
+                                    val normalized = newDate.withHour(0).withMinute(0)
+                                    if (normalized.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                        eventStart.plusDays(1)
+                                    } else {
+                                        normalized
+                                    }
+                                } else {
+                                    if (newDate.isBefore(eventStart)) {
+                                        eventStart.plusHours(1)
+                                    } else {
+                                        newDate
+                                    }
+                                }
+                            },
+                            onTimeChange = { newTime ->
+                                if (eventAllDay) {
+                                    eventEnd = eventStart.plusDays(1)
+                                } else {
+                                    eventEnd = if (newTime.isBefore(eventStart)) {
+                                        eventStart.plusHours(1)
+                                    } else {
+                                        newTime
+                                    }
+                                }
+                            },
+                            allDay = eventAllDay,
+                            dateFormatter = dateFormatter,
+                            timeFormatter = timeFormatter,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Time zone: ${zoneId.id}")
+                    }
+                }
+            }
             itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
                 when (block) {
                     is NoteBlock.Text -> {
@@ -268,7 +437,7 @@ fun AddNoteScreen(
                                 blocks[index] = updated
                                 syncLinkPreviews(index, updated)
                             },
-                            label = if (index == 0) {
+                            label = if (index == 0 && entryMode == NoteEntryMode.Note) {
                                 { Text("Content") }
                             } else null,
                             modifier = Modifier
@@ -371,7 +540,7 @@ fun AddNoteScreen(
                                         )
                                     }
                                 }
-                            }
+                            },
                         )
                     }
                 }
@@ -428,7 +597,7 @@ private sealed class NoteBlock {
         val errorMessage: String? = null,
         val hasAttempted: Boolean = false,
         val awaitingCompletion: Boolean = false,
-        override val id: Long = nextNoteBlockId()
+        override val id: Long = nextNoteBlockId(),
     ) : NoteBlock()
 }
 
@@ -436,3 +605,55 @@ private val noteBlockIdGenerator = AtomicLong(0L)
 
 private fun nextNoteBlockId(): Long = noteBlockIdGenerator.getAndIncrement()
 
+enum class NoteEntryMode {
+    Note,
+    Event,
+}
+
+@Composable
+private fun EventDateTimePicker(
+    label: String,
+    date: ZonedDateTime,
+    onDateChange: (ZonedDateTime) -> Unit,
+    onTimeChange: (ZonedDateTime) -> Unit,
+    allDay: Boolean,
+    dateFormatter: DateTimeFormatter,
+    timeFormatter: DateTimeFormatter,
+) {
+    val context = LocalContext.current
+    Column {
+        Text(label, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedButton(onClick = {
+            DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val updated = date.withYear(year).withMonth(month + 1).withDayOfMonth(dayOfMonth)
+                    onDateChange(updated)
+                },
+                date.year,
+                date.monthValue - 1,
+                date.dayOfMonth,
+            ).show()
+        }) {
+            Text(dateFormatter.format(date))
+        }
+        if (!allDay) {
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedButton(onClick = {
+                TimePickerDialog(
+                    context,
+                    { _, hourOfDay, minute ->
+                        val updated = date.withHour(hourOfDay).withMinute(minute)
+                        onTimeChange(updated)
+                    },
+                    date.hour,
+                    date.minute,
+                    false,
+                ).show()
+            }) {
+                Text(timeFormatter.format(date))
+            }
+        }
+    }
+}

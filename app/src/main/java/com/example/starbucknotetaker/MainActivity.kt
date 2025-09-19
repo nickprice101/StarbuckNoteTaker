@@ -16,6 +16,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.starbucknotetaker.ui.AddNoteScreen
+import com.example.starbucknotetaker.ui.NoteEntryMode
 import com.example.starbucknotetaker.ui.NoteDetailScreen
 import com.example.starbucknotetaker.ui.NoteListScreen
 import com.example.starbucknotetaker.ui.PinEnterScreen
@@ -113,6 +114,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             NoteListScreen(
                 notes = noteViewModel.notes,
                 onAddNote = { navController.navigate("add") },
+                onAddEvent = { navController.navigate("add_event") },
                 onOpenNote = { index -> navController.navigate("detail/$index") },
                 onDeleteNote = { index -> noteViewModel.deleteNote(index) },
                 onSettings = { navController.navigate("settings") },
@@ -121,14 +123,30 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
         composable("add") {
             AddNoteScreen(
-                onSave = { title, content, images, files, linkPreviews ->
-                    noteViewModel.addNote(title, content, images, files, linkPreviews)
+                onSave = { title, content, images, files, linkPreviews, event ->
+                    noteViewModel.addNote(title, content, images, files, linkPreviews, event)
                     navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() },
                 onDisablePinCheck = { pinCheckEnabled = false },
                 onEnablePinCheck = { pinCheckEnabled = true },
-                summarizerState = summarizerState
+                summarizerState = summarizerState,
+                entryMode = NoteEntryMode.Note,
+            )
+        }
+        composable("add_event") {
+            AddNoteScreen(
+                onSave = { title, content, images, files, linkPreviews, event ->
+                    if (event != null) {
+                        noteViewModel.addNote(title, content, images, files, linkPreviews, event)
+                    }
+                    navController.popBackStack()
+                },
+                onBack = { navController.popBackStack() },
+                onDisablePinCheck = { pinCheckEnabled = false },
+                onEnablePinCheck = { pinCheckEnabled = true },
+                summarizerState = summarizerState,
+                entryMode = NoteEntryMode.Event,
             )
         }
         composable("detail/{index}") { backStackEntry ->
@@ -148,8 +166,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             if (note != null) {
                 EditNoteScreen(
                     note = note,
-                    onSave = { title, content, images, files, linkPreviews ->
-                        noteViewModel.updateNote(index, title, content, images, files, linkPreviews)
+                    onSave = { title, content, images, files, linkPreviews, event ->
+                        noteViewModel.updateNote(index, title, content, images, files, linkPreviews, event)
                         navController.popBackStack()
                     },
                     onCancel = { navController.popBackStack() },

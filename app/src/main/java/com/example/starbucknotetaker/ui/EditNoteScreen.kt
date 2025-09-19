@@ -1,5 +1,7 @@
 package com.example.starbucknotetaker.ui
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -28,10 +30,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteFile
+import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
 import com.example.starbucknotetaker.NoteLinkPreview
@@ -45,11 +49,17 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import androidx.compose.material.icons.filled.Place
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @Composable
 fun EditNoteScreen(
     note: Note,
-    onSave: (String?, String, List<String>, List<NoteFile>, List<NoteLinkPreview>) -> Unit,
+    onSave: (String?, String, List<String>, List<NoteFile>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
     onCancel: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
@@ -138,6 +148,28 @@ fun EditNoteScreen(
     val scope = rememberCoroutineScope()
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
+    val isEvent = note.event != null
+    val zoneId = remember(note.event) {
+        note.event?.let { runCatching { ZoneId.of(it.timeZone) }.getOrNull() } ?: ZoneId.systemDefault()
+    }
+    var eventLocation by remember(note.event) { mutableStateOf(note.event?.location ?: "") }
+    var eventAllDay by remember(note.event) { mutableStateOf(note.event?.allDay ?: false) }
+    var eventStart by remember(note.event) {
+        mutableStateOf(
+            note.event?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.start), zoneId) }
+                ?.truncatedTo(ChronoUnit.MINUTES)
+                ?: ZonedDateTime.now(zoneId).truncatedTo(ChronoUnit.MINUTES)
+        )
+    }
+    var eventEnd by remember(note.event) {
+        mutableStateOf(
+            note.event?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.end), zoneId) }
+                ?.truncatedTo(ChronoUnit.MINUTES)
+                ?: ZonedDateTime.now(zoneId).plusHours(1).truncatedTo(ChronoUnit.MINUTES)
+        )
+    }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
 
     fun syncLinkPreviews(
         index: Int,
@@ -372,7 +404,39 @@ fun EditNoteScreen(
                         scope.launch {
                             hideKeyboard()
                             focusManager.clearFocus(force = true)
-                            onSave(title, content, images, files, linkPreviews)
+                            val eventForSave = if (isEvent) {
+                                val normalizedStart = if (eventAllDay) {
+                                    eventStart.withHour(0).withMinute(0)
+                                } else {
+                                    eventStart
+                                }
+                                val normalizedEnd = if (eventAllDay) {
+                                    val candidate = eventEnd.withHour(0).withMinute(0)
+                                    if (candidate.toLocalDate().isBefore(normalizedStart.toLocalDate())) {
+                                        normalizedStart.plusDays(1)
+                                    } else {
+                                        candidate
+                                    }
+                                } else {
+                                    if (eventEnd.isBefore(normalizedStart)) {
+                                        normalizedStart.plusHours(1)
+                                    } else {
+                                        eventEnd
+                                    }
+                                }
+                                eventStart = normalizedStart
+                                eventEnd = normalizedEnd
+                                NoteEvent(
+                                    start = normalizedStart.toInstant().toEpochMilli(),
+                                    end = normalizedEnd.toInstant().toEpochMilli(),
+                                    allDay = eventAllDay,
+                                    timeZone = zoneId.id,
+                                    location = eventLocation.takeIf { it.isNotBlank() },
+                                )
+                            } else {
+                                note.event
+                            }
+                            onSave(title, content, images, files, linkPreviews, eventForSave)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes saved",
                                 duration = SnackbarDuration.Short
@@ -405,6 +469,105 @@ fun EditNoteScreen(
                         .padding(bottom = 12.dp)
                 )
             }
+            if (isEvent) {
+                item {
+                    Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                        OutlinedTextField(
+                            value = eventLocation,
+                            onValueChange = { eventLocation = it },
+                            label = { Text("Location") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("All-day")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(checked = eventAllDay, onCheckedChange = { checked ->
+                                eventAllDay = checked
+                                if (checked) {
+                                    eventStart = eventStart.withHour(0).withMinute(0)
+                                    eventEnd = if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                        eventStart.plusDays(1)
+                                    } else {
+                                        eventEnd.withHour(0).withMinute(0)
+                                    }
+                                } else {
+                                    if (eventEnd.isBefore(eventStart)) {
+                                        eventEnd = eventStart.plusHours(1)
+                                    }
+                                }
+                            })
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        EventDateTimePickerEditable(
+                            label = "Starts",
+                            date = eventStart,
+                            onDateChange = { newDate ->
+                                eventStart = newDate
+                                if (eventAllDay) {
+                                    eventStart = eventStart.withHour(0).withMinute(0)
+                                    if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                        eventEnd = eventStart.plusDays(1)
+                                    }
+                                } else if (eventEnd.isBefore(eventStart)) {
+                                    eventEnd = eventStart.plusHours(1)
+                                }
+                            },
+                            onTimeChange = { newTime ->
+                                eventStart = newTime
+                                if (!eventAllDay && eventEnd.isBefore(eventStart)) {
+                                    eventEnd = eventStart.plusHours(1)
+                                }
+                            },
+                            allDay = eventAllDay,
+                            dateFormatter = dateFormatter,
+                            timeFormatter = timeFormatter,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        EventDateTimePickerEditable(
+                            label = "Ends",
+                            date = eventEnd,
+                            onDateChange = { newDate ->
+                                eventEnd = if (eventAllDay) {
+                                    val normalized = newDate.withHour(0).withMinute(0)
+                                    if (normalized.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                        eventStart.plusDays(1)
+                                    } else {
+                                        normalized
+                                    }
+                                } else {
+                                    if (newDate.isBefore(eventStart)) {
+                                        eventStart.plusHours(1)
+                                    } else {
+                                        newDate
+                                    }
+                                }
+                            },
+                            onTimeChange = { newTime ->
+                                if (eventAllDay) {
+                                    eventEnd = eventStart.plusDays(1)
+                                } else {
+                                    eventEnd = if (newTime.isBefore(eventStart)) {
+                                        eventStart.plusHours(1)
+                                    } else {
+                                        newTime
+                                    }
+                                }
+                            },
+                            allDay = eventAllDay,
+                            dateFormatter = dateFormatter,
+                            timeFormatter = timeFormatter,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Time zone: ${zoneId.id}")
+                    }
+                }
+            }
             itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
                 when (block) {
                     is EditBlock.Text -> {
@@ -415,7 +578,9 @@ fun EditNoteScreen(
                                 blocks[index] = updated
                                 syncLinkPreviews(index, updated)
                             },
-                            label = if (index == 0) { { Text("Content") } } else null,
+                            label = if (index == 0 && !isEvent) {
+                                { Text("Content") }
+                            } else null,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
@@ -612,6 +777,54 @@ fun EditNoteScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventDateTimePickerEditable(
+    label: String,
+    date: ZonedDateTime,
+    onDateChange: (ZonedDateTime) -> Unit,
+    onTimeChange: (ZonedDateTime) -> Unit,
+    allDay: Boolean,
+    dateFormatter: DateTimeFormatter,
+    timeFormatter: DateTimeFormatter,
+) {
+    val context = LocalContext.current
+    Column {
+        Text(label, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedButton(onClick = {
+            DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val updated = date.withYear(year).withMonth(month + 1).withDayOfMonth(dayOfMonth)
+                    onDateChange(updated)
+                },
+                date.year,
+                date.monthValue - 1,
+                date.dayOfMonth,
+            ).show()
+        }) {
+            Text(dateFormatter.format(date))
+        }
+        if (!allDay) {
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedButton(onClick = {
+                TimePickerDialog(
+                    context,
+                    { _, hourOfDay, minute ->
+                        val updated = date.withHour(hourOfDay).withMinute(minute)
+                        onTimeChange(updated)
+                    },
+                    date.hour,
+                    date.minute,
+                    false,
+                ).show()
+            }) {
+                Text(timeFormatter.format(date))
             }
         }
     }
