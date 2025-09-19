@@ -571,7 +571,9 @@ class Summarizer(
         for (word in words) {
             val normalized = normalizeWord(word)
             if (normalized.isEmpty() || STOP_WORDS.contains(normalized)) continue
-            counts[normalized] = counts.getOrDefault(normalized, 0) + 1
+            val canonical = KeywordStats.canonicalize(normalized)
+            if (canonical.isEmpty()) continue
+            counts[canonical] = counts.getOrDefault(canonical, 0) + 1
         }
         if (counts.isEmpty()) return KeywordStats.EMPTY
         return KeywordStats(counts)
@@ -701,10 +703,12 @@ class Summarizer(
             var score = 0
             val used = HashMap<String, Int>()
             for (word in words) {
-                val limit = counts[word] ?: continue
-                val consumed = used.getOrElse(word) { 0 }
+                val canonical = canonicalize(word)
+                if (canonical.isEmpty()) continue
+                val limit = counts[canonical] ?: continue
+                val consumed = used.getOrElse(canonical) { 0 }
                 if (consumed < limit) {
-                    used[word] = consumed + 1
+                    used[canonical] = consumed + 1
                     score++
                 }
             }
@@ -715,6 +719,47 @@ class Summarizer(
 
         companion object {
             val EMPTY = KeywordStats(emptyMap())
+
+            fun canonicalize(word: String): String {
+                if (word.isEmpty()) return ""
+                var result = word
+
+                if (result.length > 4 && result.endsWith("ies")) {
+                    result = result.dropLast(3) + "y"
+                } else {
+                    if (result.length > 5 && result.endsWith("ing")) {
+                        result = result.dropLast(3)
+                    }
+                    if (result.length > 4 && result.endsWith("ed")) {
+                        result = result.dropLast(2)
+                    }
+                }
+
+                if (result.length > 4 && result.endsWith("ly")) {
+                    result = result.dropLast(2)
+                }
+
+                if (result.length > 4 && result.endsWith("es")) {
+                    result = result.dropLast(2)
+                } else if (result.length > 4 && result.endsWith("s") && !result.endsWith("ss")) {
+                    result = result.dropLast(1)
+                }
+
+                if (result.length > 4 && result.endsWith("e") && !result.endsWith("ee")) {
+                    result = result.dropLast(1)
+                }
+
+                if (result.length > 3) {
+                    val last = result.last()
+                    val prev = result.getOrNull(result.lastIndex - 1)
+                    if (prev != null && prev == last && last.isLetter()) {
+                        result = result.dropLast(1)
+                    }
+                }
+
+                if (result.isEmpty()) return word
+                return result
+            }
         }
     }
 
