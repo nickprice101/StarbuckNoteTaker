@@ -298,6 +298,27 @@ class Summarizer(
         if (cleaned.isEmpty()) {
             return@withContext fallback("empty summary output")
         }
+
+        val summaryWords = tokenizeWords(cleaned)
+            .map { normalizeWord(it) }
+            .filter { it.isNotEmpty() }
+        val overlapHits = sourceKeywords.scoreNewWords(summaryWords)
+        val uniqueKeywords = sourceKeywords.uniqueCount()
+        val requiredOverlap = when {
+            uniqueKeywords == 0 -> 0
+            uniqueKeywords == 1 -> 1
+            uniqueKeywords <= 5 -> 1
+            else -> 2
+        }
+        val hasLetterWord = summaryWords.any { containsLetter(it) }
+        if (hasLetterWord && requiredOverlap > 0 && overlapHits < requiredOverlap) {
+            debug(
+                "abstractive summary missing keyword overlap: hits=$overlapHits required=$requiredOverlap"
+            )
+            return@withContext fallback(
+                "abstractive summary missing keyword overlap ($overlapHits/$requiredOverlap)"
+            )
+        }
         debug("summarizer inference complete")
         return@withContext cleaned
     }
@@ -537,10 +558,13 @@ class Summarizer(
         val words = tokenizeWords(text)
         for (word in words) {
             val normalized = normalizeWord(word)
-            if (normalized.isEmpty() || STOP_WORDS.contains(normalized)) continue
-            val canonical = KeywordStats.canonicalize(normalized)
-            if (canonical.isEmpty()) continue
-            counts[canonical] = counts.getOrDefault(canonical, 0) + 1
+            if (normalized.isEmpty()) continue
+            for (variant in KeywordStats.expandVariants(normalized)) {
+                if (variant.isEmpty() || STOP_WORDS.contains(variant)) continue
+                val canonical = KeywordStats.canonicalize(variant)
+                if (canonical.isEmpty()) continue
+                counts[canonical] = counts.getOrDefault(canonical, 0) + 1
+            }
         }
         if (counts.isEmpty()) return KeywordStats.EMPTY
         return KeywordStats(counts)
@@ -550,7 +574,10 @@ class Summarizer(
         if (word.isEmpty()) return ""
         val trimmed = word.trim()
         if (trimmed.isEmpty()) return ""
-        val stripped = trimmed.trim { !it.isLetterOrDigit() }
+        val normalizedQuotes = trimmed.replace('’', '\'')
+        val stripped = normalizedQuotes.trim {
+            !it.isLetterOrDigit() && it != '\'' && !KeywordStats.isDash(it)
+        }
         if (stripped.isEmpty()) return ""
         return stripped.lowercase(Locale.US)
     }
@@ -670,13 +697,18 @@ class Summarizer(
             var score = 0
             val used = HashMap<String, Int>()
             for (word in words) {
-                val canonical = canonicalize(word)
-                if (canonical.isEmpty()) continue
-                val limit = counts[canonical] ?: continue
-                val consumed = used.getOrElse(canonical) { 0 }
-                if (consumed < limit) {
-                    used[canonical] = consumed + 1
-                    score++
+                if (word.isEmpty()) continue
+                val variants = expandVariants(word)
+                for (variant in variants) {
+                    val canonical = canonicalize(variant)
+                    if (canonical.isEmpty()) continue
+                    val limit = counts[canonical] ?: continue
+                    val consumed = used.getOrElse(canonical) { 0 }
+                    if (consumed < limit) {
+                        used[canonical] = consumed + 1
+                        score++
+                        break
+                    }
                 }
             }
             return score
@@ -684,12 +716,20 @@ class Summarizer(
 
         fun isEmpty(): Boolean = counts.isEmpty()
 
+        fun uniqueCount(): Int = counts.size
+
         companion object {
             val EMPTY = KeywordStats(emptyMap())
+
+            private val DASH_REGEX = Regex("[-‐‑–—‒−]+")
 
             fun canonicalize(word: String): String {
                 if (word.isEmpty()) return ""
                 var result = word
+
+                result = result.replace('’', '\'')
+                result = DASH_REGEX.replace(result, "")
+                result = result.replace("'", "")
 
                 if (result.length > 4 && result.endsWith("ies")) {
                     result = result.dropLast(3) + "y"
@@ -726,6 +766,34 @@ class Summarizer(
 
                 if (result.isEmpty()) return word
                 return result
+            }
+
+            fun expandVariants(word: String): List<String> {
+                if (word.isEmpty()) return emptyList()
+                val normalized = word.replace('’', '\'')
+                val variants = LinkedHashSet<String>()
+                variants.add(normalized)
+
+                val pieces = DASH_REGEX.split(normalized)
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                if (pieces.size > 1) {
+                    for (piece in pieces) {
+                        variants.add(piece)
+                    }
+                    variants.add(pieces.joinToString(separator = ""))
+                }
+
+                val withoutApostrophes = normalized.replace("'", "")
+                if (withoutApostrophes.isNotEmpty()) {
+                    variants.add(withoutApostrophes)
+                }
+
+                return variants.toList()
+            }
+
+            fun isDash(char: Char): Boolean {
+                return DASH_REGEX.matches(char.toString())
             }
         }
     }

@@ -426,6 +426,71 @@ class SummarizerTest {
     }
 
     @Test
+    fun summarizeKeepsHyphenatedParaphrase() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
+        whenever(tokenizer.encodeAsIds(any())).thenReturn(encodedIds)
+        val tokenMap = mapOf(
+            700 to "Follow",
+            701 to "up",
+            702 to "handles",
+            703 to "handoffs",
+            704 to "signoffs"
+        )
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.filter { tokenMap.containsKey(it) }
+                .joinToString(" ") { tokenMap[it] ?: "" }
+                .trim()
+        }
+
+        val attentionCapacity = max(encodedIds.size, tokenMap.size + 1)
+        val decoder = PreferenceDecoderStub(
+            listOf(
+                listOf(700),
+                listOf(701),
+                listOf(702),
+                listOf(703),
+                listOf(704)
+            ),
+            attentionCapacity
+        )
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(EncoderStub(attentionCapacity))
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val note = "Follow-up addresses hand-offs and sign-offs."
+        val summary = summarizer.summarize(note)
+        val expected = listOf(700, 701, 702, 703, 704)
+            .joinToString(" ") { tokenMap[it] ?: "" }
+
+        assertEquals(expected, summary)
+        assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
+
+        summarizer.close()
+    }
+
+    @Test
     fun summarizeFeedsFullHistoryWhenDecoderLacksCache() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
