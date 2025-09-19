@@ -1,15 +1,19 @@
 package com.example.starbucknotetaker.ui
 
+import android.Manifest
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.speech.SpeechRecognizer
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -23,11 +27,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +52,7 @@ import com.example.starbucknotetaker.ui.LinkPreviewCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.core.content.ContextCompat
 import java.util.concurrent.atomic.AtomicLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -329,6 +336,41 @@ fun EditNoteScreen(
                     }
                 }
             }
+        }
+    }
+
+    fun appendTranscribedText(transcribed: String) {
+        val sanitized = transcribed.trim()
+        if (sanitized.isEmpty()) return
+        val lastIndex = blocks.lastIndex
+        val last = blocks.getOrNull(lastIndex)
+        if (last is EditBlock.Text && last.text.isBlank()) {
+            val updated = last.copy(text = sanitized)
+            blocks[lastIndex] = updated
+            syncLinkPreviews(lastIndex, updated, finalizePending = true)
+            blocks.add(EditBlock.Text(""))
+        } else {
+            val newBlock = EditBlock.Text(sanitized)
+            blocks.add(newBlock)
+            val index = blocks.lastIndex
+            syncLinkPreviews(index, newBlock, finalizePending = true)
+            blocks.add(EditBlock.Text(""))
+        }
+    }
+
+    var showTranscriptionDialog by remember { mutableStateOf(false) }
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            showTranscriptionDialog = true
+        } else {
+            Toast.makeText(
+                context,
+                "Microphone permission is required to transcribe audio",
+                Toast.LENGTH_LONG
+            ).show()
+            onEnablePinCheck()
         }
     }
 
@@ -770,45 +812,66 @@ fun EditNoteScreen(
                 }
             }
             item {
-                var menuExpanded by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(
-                        onClick = {
-                            menuExpanded = true
-                            onDisablePinCheck()
-                        },
-                        modifier = Modifier
-                            .padding(top = 8.dp)
-                            .fillMaxWidth(),
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AttachmentAction(
+                        icon = Icons.Default.InsertDriveFile,
+                        label = "Add File",
                     ) {
-                        Icon(Icons.Default.InsertDriveFile, contentDescription = "Add File")
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Add File")
+                        onDisablePinCheck()
+                        fileLauncher.launch(arrayOf("*/*"))
                     }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = {
-                        menuExpanded = false
-                        onEnablePinCheck()
-                    }) {
-                        DropdownMenuItem(onClick = {
-                            menuExpanded = false
-                            imageLauncher.launch(arrayOf("image/*"))
-                        }) {
-                            Icon(Icons.Default.Image, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Add Image")
+                    AttachmentAction(
+                        icon = Icons.Default.Image,
+                        label = "Add Image",
+                    ) {
+                        onDisablePinCheck()
+                        imageLauncher.launch(arrayOf("image/*"))
+                    }
+                    AttachmentAction(
+                        icon = Icons.Default.Mic,
+                        label = "Transcribe",
+                    ) {
+                        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                            Toast.makeText(
+                                context,
+                                "Speech recognition is not available on this device",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@AttachmentAction
                         }
-                        DropdownMenuItem(onClick = {
-                            menuExpanded = false
-                            fileLauncher.launch(arrayOf("*/*"))
-                        }) {
-                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Add File")
+                        val permissionGranted =
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                        onDisablePinCheck()
+                        if (permissionGranted) {
+                            showTranscriptionDialog = true
+                        } else {
+                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showTranscriptionDialog) {
+        AudioTranscriptionDialog(
+            onDismiss = {
+                showTranscriptionDialog = false
+                onEnablePinCheck()
+            },
+            onResult = { result ->
+                appendTranscribedText(result)
+            }
+        )
     }
 }
 
@@ -864,6 +927,20 @@ private fun EventDateTimePickerEditable(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AttachmentAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = onClick) {
+            Icon(icon, contentDescription = label)
+        }
+        Text(label, style = MaterialTheme.typography.caption)
     }
 }
 
