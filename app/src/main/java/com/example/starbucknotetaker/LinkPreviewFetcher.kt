@@ -3,6 +3,7 @@ package com.example.starbucknotetaker
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,12 +43,12 @@ class LinkPreviewFetcher {
                 val meta = parseMetadata(html, url)
                 val title = meta.title ?: url.host
                 val description = meta.description
-                val imageUrl = meta.imageUrl
+                val snapshotUrl = buildSnapshotUrl(urlString)
                 val preview = NoteLinkPreview(
                     url = urlString,
                     title = title,
                     description = description,
-                    imageUrl = imageUrl
+                    imageUrl = snapshotUrl
                 )
                 LinkPreviewResult.Success(preview)
             }
@@ -55,6 +56,11 @@ class LinkPreviewFetcher {
             connection.disconnect()
         }
     }
+}
+
+private fun buildSnapshotUrl(urlString: String): String {
+    val encoded = URLEncoder.encode(urlString, Charsets.UTF_8.name())
+    return "https://s.wordpress.com/mshots/v1/$encoded?w=1200"
 }
 
 private fun InputStreamReader.readLimited(maxChars: Int): String {
@@ -134,17 +140,40 @@ sealed class LinkPreviewResult {
     data class Failure(val message: String? = null) : LinkPreviewResult()
 }
 
-fun extractUrls(text: String): List<String> {
+data class UrlDetection(
+    val originalUrl: String,
+    val normalizedUrl: String,
+    val isComplete: Boolean,
+)
+
+fun extractUrls(text: String, treatUnterminatedAsComplete: Boolean = false): List<UrlDetection> {
     val matcher = android.util.Patterns.WEB_URL.matcher(text)
-    val results = mutableListOf<String>()
+    val detections = linkedMapOf<String, UrlDetection>()
     while (matcher.find()) {
         var url = text.substring(matcher.start(), matcher.end())
-        url = url.trimEnd('.', ',', ';', ')', ']', '}', '>', '"', '\'')
-        if (url.isNotBlank()) {
-            results.add(url)
+        val trimmed = url.trimEnd('.', ',', ';', ')', ']', '}', '>', '"', '\'')
+        if (trimmed.isNotBlank()) {
+            val trimmedTrailing = trimmed.length != url.length
+            val nextIndex = matcher.start() + trimmed.length
+            val nextChar = text.getOrNull(nextIndex)
+            val isComplete = when {
+                trimmedTrailing -> true
+                nextChar == null -> treatUnterminatedAsComplete
+                nextChar.isWhitespace() -> true
+                else -> false
+            }
+            val normalized = normalizeUrl(trimmed)
+            val existing = detections[normalized]
+            if (existing == null || (!existing.isComplete && isComplete)) {
+                detections[normalized] = UrlDetection(
+                    originalUrl = trimmed,
+                    normalizedUrl = normalized,
+                    isComplete = isComplete || (existing?.isComplete == true),
+                )
+            }
         }
     }
-    return results.distinct()
+    return detections.values.toList()
 }
 
 private fun String.cleanWhitespace(): String {

@@ -37,6 +37,7 @@ import com.example.starbucknotetaker.NoteLinkPreview
 @Composable
 fun LinkPreviewCard(
     preview: NoteLinkPreview,
+    awaitingCompletion: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
     onRemove: (() -> Unit)? = null,
@@ -58,6 +59,15 @@ fun LinkPreviewCard(
         Box(modifier = Modifier.background(MaterialTheme.colors.surface)) {
             Column(modifier = Modifier.padding(12.dp)) {
                 when {
+                    awaitingCompletion -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(text = "URL detected. Waiting for link completion...")
+                        }
+                    }
                     isLoading -> {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
