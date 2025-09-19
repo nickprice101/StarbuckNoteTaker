@@ -44,6 +44,7 @@ class NoteViewModel : ViewModel() {
         store = s
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
+        reorderNotes()
         summarizer = Summarizer(context.applicationContext).also { sum ->
             viewModelScope.launch {
                 sum.state.collect { state ->
@@ -92,26 +93,32 @@ class NoteViewModel : ViewModel() {
             summary = summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200),
             event = event,
         )
-        _notes.add(0, note) // newest first
+        _notes.add(note)
+        reorderNotes()
         pin?.let { store?.saveNotes(_notes, it) }
+        val noteId = note.id
         summarizer?.let { sum ->
             viewModelScope.launch {
                 val summary = sum.summarize(summarizerSource)
-                _notes[0] = _notes[0].copy(summary = summary)
-                pin?.let { store?.saveNotes(_notes, it) }
+                val index = _notes.indexOfFirst { it.id == noteId }
+                if (index != -1) {
+                    _notes[index] = _notes[index].copy(summary = summary)
+                    pin?.let { store?.saveNotes(_notes, it) }
+                }
             }
         }
     }
 
-    fun deleteNote(index: Int) {
-        if (index in _notes.indices) {
+    fun deleteNote(id: Long) {
+        val index = _notes.indexOfFirst { it.id == id }
+        if (index != -1) {
             _notes.removeAt(index)
             pin?.let { store?.saveNotes(_notes, it) }
         }
     }
 
     fun updateNote(
-        index: Int,
+        id: Long,
         title: String?,
         content: String,
         images: List<String>,
@@ -119,11 +126,13 @@ class NoteViewModel : ViewModel() {
         linkPreviews: List<NoteLinkPreview>,
         event: NoteEvent? = null,
     ) {
-        if (index in _notes.indices) {
+        val index = _notes.indexOfFirst { it.id == id }
+        if (index != -1) {
             val note = _notes[index]
             val finalTitle = if (title.isNullOrBlank()) note.title else title
             val finalEvent = event ?: note.event
             val summarizerSource = buildSummarizerSource(content, finalEvent)
+            val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
             val updated = note.copy(
                 title = finalTitle,
                 content = content.trim(),
@@ -132,19 +141,26 @@ class NoteViewModel : ViewModel() {
                 linkPreviews = linkPreviews,
                 summary = summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200),
                 event = finalEvent,
-                date = finalEvent?.start ?: note.date,
+                date = updatedDate,
             )
             _notes[index] = updated
+            reorderNotes()
             pin?.let { store?.saveNotes(_notes, it) }
+            val noteId = updated.id
             summarizer?.let { sum ->
                 viewModelScope.launch {
                     val summary = sum.summarize(summarizerSource)
-                    _notes[index] = updated.copy(summary = summary)
-                    pin?.let { store?.saveNotes(_notes, it) }
+                    val newIndex = _notes.indexOfFirst { it.id == noteId }
+                    if (newIndex != -1) {
+                        _notes[newIndex] = _notes[newIndex].copy(summary = summary)
+                        pin?.let { store?.saveNotes(_notes, it) }
+                    }
                 }
             }
         }
     }
+
+    fun getNoteById(id: Long): Note? = _notes.firstOrNull { it.id == id }
 
     private fun processNewNoteContent(
         content: String,
@@ -277,6 +293,7 @@ class NoteViewModel : ViewModel() {
                 _notes.clear()
             }
             _notes.addAll(imported)
+            reorderNotes()
             pin?.let { store?.saveNotes(_notes, it) }
             true
         } catch (_: Exception) {
@@ -293,5 +310,19 @@ class NoteViewModel : ViewModel() {
         return Patterns.WEB_URL.matcher(url).matches() &&
                 (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
                         lower.endsWith(".gif") || lower.endsWith(".bmp") || lower.endsWith(".webp"))
+    }
+
+    private fun reorderNotes() {
+        if (_notes.size <= 1) {
+            return
+        }
+        val sorted = _notes.sortedWith(
+            compareByDescending<Note> { it.date }
+                .thenByDescending { it.id }
+        )
+        if (!sorted.zip(_notes).all { it.first === it.second }) {
+            _notes.clear()
+            _notes.addAll(sorted)
+        }
     }
 }

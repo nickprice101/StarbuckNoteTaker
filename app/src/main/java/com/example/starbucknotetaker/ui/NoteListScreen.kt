@@ -41,8 +41,8 @@ fun NoteListScreen(
     notes: List<Note>,
     onAddNote: () -> Unit,
     onAddEvent: () -> Unit,
-    onOpenNote: (Int) -> Unit,
-    onDeleteNote: (Int) -> Unit,
+    onOpenNote: (Long) -> Unit,
+    onDeleteNote: (Long) -> Unit,
     onSettings: () -> Unit,
     summarizerState: Summarizer.SummarizerState
 ) {
@@ -53,7 +53,7 @@ fun NoteListScreen(
                 it.summary.contains(query, true) ||
                 (it.event?.location?.contains(query, true) ?: false)
     }
-    var openIndex by remember { mutableStateOf<Int?>(null) }
+    var openNoteId by remember { mutableStateOf<Long?>(null) }
     val focusManager = LocalFocusManager.current
     val hideKeyboard = rememberKeyboardHider()
     var creationMenuExpanded by remember { mutableStateOf(false) }
@@ -135,24 +135,23 @@ fun NoteListScreen(
             )
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(filtered, key = { _, note -> note.id }) { index, note ->
-                    val originalIndex = notes.indexOf(note)
                     val showDate = index == 0 || !isSameDay(filtered[index - 1].date, note.date)
                     if (showDate) {
                         DateHeader(note.date)
                     }
                     SwipeToDeleteNoteItem(
                         note = note,
-                        isOpen = openIndex == originalIndex,
-                        onOpen = { openIndex = originalIndex },
-                        onClose = { if (openIndex == originalIndex) openIndex = null },
+                        isOpen = openNoteId == note.id,
+                        onOpen = { openNoteId = note.id },
+                        onClose = { if (openNoteId == note.id) openNoteId = null },
                         onClick = {
                             hideKeyboard()
                             focusManager.clearFocus(force = true)
-                            onOpenNote(originalIndex)
+                            onOpenNote(note.id)
                         },
                         onDelete = {
-                            onDeleteNote(originalIndex)
-                            if (openIndex == originalIndex) openIndex = null
+                            onDeleteNote(note.id)
+                            if (openNoteId == note.id) openNoteId = null
                         }
                     )
                 }

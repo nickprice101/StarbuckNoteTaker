@@ -115,8 +115,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 notes = noteViewModel.notes,
                 onAddNote = { navController.navigate("add") },
                 onAddEvent = { navController.navigate("add_event") },
-                onOpenNote = { index -> navController.navigate("detail/$index") },
-                onDeleteNote = { index -> noteViewModel.deleteNote(index) },
+                onOpenNote = { noteId -> navController.navigate("detail/$noteId") },
+                onDeleteNote = { noteId -> noteViewModel.deleteNote(noteId) },
                 onSettings = { navController.navigate("settings") },
                 summarizerState = summarizerState
             )
@@ -149,25 +149,27 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 entryMode = NoteEntryMode.Event,
             )
         }
-        composable("detail/{index}") { backStackEntry ->
-            val index = backStackEntry.arguments?.getString("index")?.toIntOrNull() ?: 0
-            val note = noteViewModel.notes.getOrNull(index)
+        composable("detail/{noteId}") { backStackEntry ->
+            val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
+            val note = noteId?.let { noteViewModel.getNoteById(it) }
             if (note != null) {
                 NoteDetailScreen(
                     note = note,
                     onBack = { navController.popBackStack() },
-                    onEdit = { navController.navigate("edit/$index") }
+                    onEdit = { navController.navigate("edit/$noteId") }
                 )
+            } else {
+                navController.popBackStack()
             }
         }
-        composable("edit/{index}") { backStackEntry ->
-            val index = backStackEntry.arguments?.getString("index")?.toIntOrNull() ?: 0
-            val note = noteViewModel.notes.getOrNull(index)
-            if (note != null) {
+        composable("edit/{noteId}") { backStackEntry ->
+            val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
+            val note = noteId?.let { noteViewModel.getNoteById(it) }
+            if (note != null && noteId != null) {
                 EditNoteScreen(
                     note = note,
                     onSave = { title, content, images, files, linkPreviews, event ->
-                        noteViewModel.updateNote(index, title, content, images, files, linkPreviews, event)
+                        noteViewModel.updateNote(noteId, title, content, images, files, linkPreviews, event)
                         navController.popBackStack()
                     },
                     onCancel = { navController.popBackStack() },
@@ -175,6 +177,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     onEnablePinCheck = { pinCheckEnabled = true },
                     summarizerState = summarizerState
                 )
+            } else {
+                navController.popBackStack()
             }
         }
         composable("settings") {
