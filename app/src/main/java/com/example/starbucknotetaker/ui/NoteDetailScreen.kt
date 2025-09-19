@@ -34,8 +34,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
+import com.example.starbucknotetaker.NoteEvent
 import androidx.core.content.FileProvider
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @Composable
 fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
@@ -65,6 +70,10 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            note.event?.let { event ->
+                EventDetailsCard(event)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
             val lines = remember(note.content) { note.content.lines() }
             lines.forEach { line ->
                 val trimmed = line.trim()
@@ -211,6 +220,56 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+private val detailDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")
+private val detailTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+
+@Composable
+private fun EventDetailsCard(event: NoteEvent) {
+    val zoneId = remember(event.timeZone) {
+        runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
+    }
+    val start = remember(event.start, zoneId) {
+        Instant.ofEpochMilli(event.start).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
+    }
+    val end = remember(event.end, zoneId) {
+        Instant.ofEpochMilli(event.end).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 4.dp,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Event details", style = MaterialTheme.typography.h6)
+            Spacer(modifier = Modifier.height(8.dp))
+            if (event.allDay) {
+                val startDate = start.toLocalDate()
+                val endDateExclusive = end.toLocalDate()
+                val lastDate = endDateExclusive.minusDays(1)
+                if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
+                    Text("All-day on ${detailDateFormatter.format(start)}")
+                } else {
+                    Text("All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(lastDate)}")
+                }
+            } else {
+                val sameDay = start.toLocalDate() == end.toLocalDate()
+                if (sameDay) {
+                    Text("${detailDateFormatter.format(start)}")
+                    Text("${detailTimeFormatter.format(start)} – ${detailTimeFormatter.format(end)}")
+                } else {
+                    Text("Starts: ${detailDateFormatter.format(start)} ${detailTimeFormatter.format(start)}")
+                    Text("Ends: ${detailDateFormatter.format(end)} ${detailTimeFormatter.format(end)}")
+                }
+            }
+            event.location?.takeIf { it.isNotBlank() }?.let { location ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Location: $location")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Time zone: ${zoneId.id}")
         }
     }
 }

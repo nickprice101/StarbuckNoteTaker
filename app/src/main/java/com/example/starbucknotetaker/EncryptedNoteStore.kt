@@ -72,6 +72,17 @@ class EncryptedNoteStore(private val context: Context) {
                     )
                 )
             }
+            val eventObj = obj.optJSONObject("event")
+            val event = eventObj?.let {
+                NoteEvent(
+                    start = it.getLong("start"),
+                    end = it.getLong("end"),
+                    allDay = it.optBoolean("allDay", false),
+                    timeZone = it.optString("timeZone", java.util.TimeZone.getDefault().id),
+                    location = it.optString("location", null)
+                        ?.takeIf { location -> location.isNotBlank() }
+                )
+            }
             notes.add(
                 Note(
                     id = obj.getLong("id"),
@@ -81,7 +92,8 @@ class EncryptedNoteStore(private val context: Context) {
                     images = images,
                     files = files,
                     linkPreviews = linkPreviews,
-                    summary = obj.optString("summary", "")
+                    summary = obj.optString("summary", ""),
+                    event = event,
                 )
             )
         }
@@ -119,6 +131,15 @@ class EncryptedNoteStore(private val context: Context) {
             }
             obj.put("linkPreviews", linksArray)
             obj.put("summary", note.summary)
+            note.event?.let { event ->
+                val eo = JSONObject()
+                eo.put("start", event.start)
+                eo.put("end", event.end)
+                eo.put("allDay", event.allDay)
+                eo.put("timeZone", event.timeZone)
+                event.location?.let { eo.put("location", it) }
+                obj.put("event", eo)
+            }
             arr.put(obj)
         }
         val root = JSONObject().apply {

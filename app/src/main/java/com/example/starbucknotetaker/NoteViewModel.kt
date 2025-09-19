@@ -69,13 +69,88 @@ class NoteViewModel : ViewModel() {
         content: String,
         images: List<Pair<Uri, Int>>,
         files: List<Uri>,
-        linkPreviews: List<NoteLinkPreview>
+        linkPreviews: List<NoteLinkPreview>,
+        event: NoteEvent? = null,
     ) {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
         } else {
             title
         }
+        val processed = processNewNoteContent(content, images, files)
+        val finalContent = processed.text
+        val embeddedImages = processed.images
+        val embeddedFiles = processed.files
+        val summarizerSource = buildSummarizerSource(finalContent, event)
+        val note = Note(
+            title = finalTitle,
+            content = finalContent.trim(),
+            date = event?.start ?: System.currentTimeMillis(),
+            images = embeddedImages,
+            files = embeddedFiles,
+            linkPreviews = linkPreviews,
+            summary = summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200),
+            event = event,
+        )
+        _notes.add(0, note) // newest first
+        pin?.let { store?.saveNotes(_notes, it) }
+        summarizer?.let { sum ->
+            viewModelScope.launch {
+                val summary = sum.summarize(summarizerSource)
+                _notes[0] = _notes[0].copy(summary = summary)
+                pin?.let { store?.saveNotes(_notes, it) }
+            }
+        }
+    }
+
+    fun deleteNote(index: Int) {
+        if (index in _notes.indices) {
+            _notes.removeAt(index)
+            pin?.let { store?.saveNotes(_notes, it) }
+        }
+    }
+
+    fun updateNote(
+        index: Int,
+        title: String?,
+        content: String,
+        images: List<String>,
+        files: List<NoteFile>,
+        linkPreviews: List<NoteLinkPreview>,
+        event: NoteEvent? = null,
+    ) {
+        if (index in _notes.indices) {
+            val note = _notes[index]
+            val finalTitle = if (title.isNullOrBlank()) note.title else title
+            val finalEvent = event ?: note.event
+            val summarizerSource = buildSummarizerSource(content, finalEvent)
+            val updated = note.copy(
+                title = finalTitle,
+                content = content.trim(),
+                images = images,
+                files = files,
+                linkPreviews = linkPreviews,
+                summary = summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200),
+                event = finalEvent,
+                date = finalEvent?.start ?: note.date,
+            )
+            _notes[index] = updated
+            pin?.let { store?.saveNotes(_notes, it) }
+            summarizer?.let { sum ->
+                viewModelScope.launch {
+                    val summary = sum.summarize(summarizerSource)
+                    _notes[index] = updated.copy(summary = summary)
+                    pin?.let { store?.saveNotes(_notes, it) }
+                }
+            }
+        }
+    }
+
+    private fun processNewNoteContent(
+        content: String,
+        images: List<Pair<Uri, Int>>,
+        files: List<Uri>,
+    ): ProcessedNoteContent {
         val embeddedImages = mutableListOf<String>()
         val embeddedFiles = mutableListOf<NoteFile>()
         context?.let { ctx ->
@@ -138,63 +213,43 @@ class NoteViewModel : ViewModel() {
             }
         }
 
-        val note = Note(
-            title = finalTitle,
-            content = finalContent.trim(),
-            date = System.currentTimeMillis(),
+        return ProcessedNoteContent(
+            text = finalContent,
             images = embeddedImages,
             files = embeddedFiles,
-            linkPreviews = linkPreviews,
-            summary = summarizer?.let { it.fallbackSummary(finalContent) } ?: finalContent.take(200)
         )
-        _notes.add(0, note) // newest first
-        pin?.let { store?.saveNotes(_notes, it) }
-        summarizer?.let { sum ->
-            viewModelScope.launch {
-                val summary = sum.summarize(finalContent)
-                _notes[0] = _notes[0].copy(summary = summary)
-                pin?.let { store?.saveNotes(_notes, it) }
+    }
+
+    private fun buildSummarizerSource(content: String, event: NoteEvent?): String {
+        if (event == null) {
+            return content
+        }
+        val zoneId = runCatching { java.time.ZoneId.of(event.timeZone) }
+            .getOrDefault(java.time.ZoneId.systemDefault())
+        val start = java.time.Instant.ofEpochMilli(event.start).atZone(zoneId)
+        val end = java.time.Instant.ofEpochMilli(event.end).atZone(zoneId)
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        return buildString {
+            append("Event from ")
+            append(start.format(formatter))
+            append(" to ")
+            append(end.format(formatter))
+            if (!event.location.isNullOrBlank()) {
+                append(" at ")
+                append(event.location)
+            }
+            if (content.isNotBlank()) {
+                append('\n')
+                append(content)
             }
         }
     }
 
-    fun deleteNote(index: Int) {
-        if (index in _notes.indices) {
-            _notes.removeAt(index)
-            pin?.let { store?.saveNotes(_notes, it) }
-        }
-    }
-
-    fun updateNote(
-        index: Int,
-        title: String?,
-        content: String,
-        images: List<String>,
-        files: List<NoteFile>,
-        linkPreviews: List<NoteLinkPreview>
-    ) {
-        if (index in _notes.indices) {
-            val note = _notes[index]
-            val finalTitle = if (title.isNullOrBlank()) note.title else title
-            val updated = note.copy(
-                title = finalTitle,
-                content = content.trim(),
-                images = images,
-                files = files,
-                linkPreviews = linkPreviews,
-                summary = summarizer?.let { it.fallbackSummary(content) } ?: content.take(200)
-            )
-            _notes[index] = updated
-            pin?.let { store?.saveNotes(_notes, it) }
-            summarizer?.let { sum ->
-                viewModelScope.launch {
-                    val summary = sum.summarize(updated.content)
-                    _notes[index] = updated.copy(summary = summary)
-                    pin?.let { store?.saveNotes(_notes, it) }
-                }
-            }
-        }
-    }
+    private data class ProcessedNoteContent(
+        val text: String,
+        val images: List<String>,
+        val files: List<NoteFile>,
+    )
 
     fun exportNotes(context: Context, uri: Uri) {
         val currentPin = pin ?: return
