@@ -6,11 +6,11 @@ import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -161,15 +161,14 @@ fun AddNoteScreen(
         }
     }
 
-    val imagePickerContract = remember {
-        OpenDocumentWithInitialUri(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-    }
-    val imageLauncher = rememberLauncherForActivityResult(imagePickerContract) { uri: Uri? ->
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         uri?.let {
-            context.contentResolver.takePersistableUriPermission(
-                it,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
             val last = blocks.lastOrNull()
             if (last is NoteBlock.Text && last.text.isBlank()) {
                 blocks[blocks.size - 1] = NoteBlock.Image(it, 0)
@@ -637,7 +636,9 @@ fun AddNoteScreen(
                         label = "Add Image",
                     ) {
                         onDisablePinCheck()
-                        imageLauncher.launch(arrayOf("image/*"))
+                        imageLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
                     }
                     AttachmentAction(
                         icon = Icons.Default.Mic,

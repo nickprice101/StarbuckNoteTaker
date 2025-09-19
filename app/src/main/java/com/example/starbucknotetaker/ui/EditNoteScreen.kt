@@ -9,12 +9,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.speech.SpeechRecognizer
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -249,10 +249,6 @@ fun EditNoteScreen(
         }
     }
 
-    val imagePickerContract = remember {
-        OpenDocumentWithInitialUri(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-    }
-
     LaunchedEffect(note.id) {
         var idx = 0
         while (idx < blocks.size) {
@@ -263,13 +259,15 @@ fun EditNoteScreen(
             idx++
         }
     }
-    val imageLauncher = rememberLauncherForActivityResult(imagePickerContract) { uri: Uri? ->
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         onEnablePinCheck()
         uri?.let {
-            context.contentResolver.takePersistableUriPermission(
-                it,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
             scope.launch {
                 val base64 = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(it)?.use { input ->
@@ -831,7 +829,9 @@ fun EditNoteScreen(
                         label = "Add Image",
                     ) {
                         onDisablePinCheck()
-                        imageLauncher.launch(arrayOf("image/*"))
+                        imageLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
                     }
                     AttachmentAction(
                         icon = Icons.Default.Mic,

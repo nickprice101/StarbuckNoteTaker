@@ -5,7 +5,9 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -14,11 +16,13 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun AudioTranscriptionDialog(
@@ -161,7 +165,7 @@ fun AudioTranscriptionDialog(
                     partialText.isNotBlank() -> partialText
                     awaitingResult && !isRecording -> "Processing transcription..."
                     isRecording -> "Listening..."
-                    else -> "Press start to begin recording."
+                    else -> "Tap the mic to begin recording."
                 }
 
                 Text(
@@ -190,11 +194,11 @@ fun AudioTranscriptionDialog(
                 ) {
                     AudioLevelMeter(
                         level = if (isRecording) normalizedLevel else 0f,
-                        modifier = Modifier.width(160.dp)
+                        modifier = Modifier.width(220.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     val buttonEnabled = isRecording || !awaitingResult
-                    Button(
+                    IconButton(
                         onClick = {
                             if (isRecording) {
                                 speechRecognizer.stopListening()
@@ -218,16 +222,13 @@ fun AudioTranscriptionDialog(
                                 }
                             }
                         },
-                        enabled = buttonEnabled
+                        enabled = buttonEnabled,
+                        modifier = Modifier.size(56.dp)
                     ) {
                         if (isRecording) {
                             Icon(Icons.Default.Stop, contentDescription = "Stop recording")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Stop")
                         } else {
                             Icon(Icons.Default.Mic, contentDescription = "Start recording")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Start")
                         }
                     }
                 }
@@ -246,12 +247,29 @@ private fun AudioLevelMeter(
             text = "Input level",
             style = MaterialTheme.typography.caption
         )
-        Spacer(modifier = Modifier.height(4.dp))
-        LinearProgressIndicator(
-            progress = level.coerceIn(0f, 1f),
+        Spacer(modifier = Modifier.height(8.dp))
+        val blockCount = 8
+        val activeBlocks = (level.coerceIn(0f, 1f) * blockCount).roundToInt()
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp)
-        )
+                .height(48.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(blockCount) { index ->
+                val isActive = index < activeBlocks
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (isActive) MaterialTheme.colors.primary
+                            else MaterialTheme.colors.onSurface.copy(alpha = 0.15f)
+                        )
+                )
+            }
+        }
     }
 }

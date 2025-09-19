@@ -93,6 +93,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
             ),
             modifier = Modifier
                 .width(200.dp)
+                .heightIn(min = 96.dp)
                 .focusRequester(focusRequester)
         )
         if (error != null) {
@@ -191,6 +192,7 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
                 ),
                 modifier = Modifier
                     .width(200.dp)
+                    .heightIn(min = 96.dp)
                     .focusRequester(focusRequester)
             )
             if (error) {
