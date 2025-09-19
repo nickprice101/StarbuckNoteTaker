@@ -49,7 +49,6 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import androidx.compose.material.icons.filled.Place
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -142,30 +141,31 @@ fun EditNoteScreen(
         }
     }
     val dismissedPreviewUrls = remember { mutableStateMapOf<Long, MutableSet<String>>() }
-    val linkPreviewFetcher = remember { LinkPreviewFetcher() }
     val context = LocalContext.current
+    val linkPreviewFetcher = remember(context) { LinkPreviewFetcher(context.applicationContext) }
     val scaffoldState = rememberScaffoldState()
     val scope = rememberCoroutineScope()
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
     val isEvent = note.event != null
-    val zoneId = remember(note.event) {
+    val initialZone = remember(note.event) {
         note.event?.let { runCatching { ZoneId.of(it.timeZone) }.getOrNull() } ?: ZoneId.systemDefault()
     }
+    var zoneId by remember(note.event) { mutableStateOf(initialZone) }
     var eventLocation by remember(note.event) { mutableStateOf(note.event?.location ?: "") }
     var eventAllDay by remember(note.event) { mutableStateOf(note.event?.allDay ?: false) }
     var eventStart by remember(note.event) {
         mutableStateOf(
-            note.event?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.start), zoneId) }
+            note.event?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.start), initialZone) }
                 ?.truncatedTo(ChronoUnit.MINUTES)
-                ?: ZonedDateTime.now(zoneId).truncatedTo(ChronoUnit.MINUTES)
+                ?: ZonedDateTime.now(initialZone).truncatedTo(ChronoUnit.MINUTES)
         )
     }
     var eventEnd by remember(note.event) {
         mutableStateOf(
-            note.event?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.end), zoneId) }
+            note.event?.let { ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.end), initialZone) }
                 ?.truncatedTo(ChronoUnit.MINUTES)
-                ?: ZonedDateTime.now(zoneId).plusHours(1).truncatedTo(ChronoUnit.MINUTES)
+                ?: ZonedDateTime.now(initialZone).plusHours(1).truncatedTo(ChronoUnit.MINUTES)
         )
     }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
@@ -472,14 +472,13 @@ fun EditNoteScreen(
             if (isEvent) {
                 item {
                     Column(modifier = Modifier.padding(bottom = 16.dp)) {
-                        OutlinedTextField(
+                        LocationAutocompleteField(
                             value = eventLocation,
                             onValueChange = { eventLocation = it },
-                            label = { Text("Location") },
+                            label = "Location",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 12.dp),
-                            leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) }
+                                .padding(bottom = 12.dp)
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -564,7 +563,38 @@ fun EditNoteScreen(
                             timeFormatter = timeFormatter,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Time zone: ${zoneId.id}")
+                        TimeZonePicker(
+                            zoneId = zoneId,
+                            onZoneChange = { newZone ->
+                                val convertedStart = eventStart.withZoneSameInstant(newZone)
+                                    .truncatedTo(ChronoUnit.MINUTES)
+                                val convertedEnd = eventEnd.withZoneSameInstant(newZone)
+                                    .truncatedTo(ChronoUnit.MINUTES)
+                                val adjustedStart = if (eventAllDay) {
+                                    convertedStart.withHour(0).withMinute(0)
+                                } else {
+                                    convertedStart
+                                }
+                                val adjustedEnd = if (eventAllDay) {
+                                    val normalized = convertedEnd.withHour(0).withMinute(0)
+                                    if (normalized.toLocalDate().isBefore(adjustedStart.toLocalDate())) {
+                                        adjustedStart.plusDays(1)
+                                    } else {
+                                        normalized
+                                    }
+                                } else {
+                                    if (convertedEnd.isBefore(adjustedStart)) {
+                                        adjustedStart.plusHours(1)
+                                    } else {
+                                        convertedEnd
+                                    }
+                                }
+                                zoneId = newZone
+                                eventStart = adjustedStart
+                                eventEnd = adjustedEnd
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -796,35 +826,42 @@ private fun EventDateTimePickerEditable(
     Column {
         Text(label, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedButton(onClick = {
-            DatePickerDialog(
-                context,
-                { _, year, month, dayOfMonth ->
-                    val updated = date.withYear(year).withMonth(month + 1).withDayOfMonth(dayOfMonth)
-                    onDateChange(updated)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            val updated = date.withYear(year).withMonth(month + 1).withDayOfMonth(dayOfMonth)
+                            onDateChange(updated)
+                        },
+                        date.year,
+                        date.monthValue - 1,
+                        date.dayOfMonth,
+                    ).show()
                 },
-                date.year,
-                date.monthValue - 1,
-                date.dayOfMonth,
-            ).show()
-        }) {
-            Text(dateFormatter.format(date))
-        }
-        if (!allDay) {
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinedButton(onClick = {
-                TimePickerDialog(
-                    context,
-                    { _, hourOfDay, minute ->
-                        val updated = date.withHour(hourOfDay).withMinute(minute)
-                        onTimeChange(updated)
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(dateFormatter.format(date))
+            }
+            if (!allDay) {
+                OutlinedButton(
+                    onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, hourOfDay, minute ->
+                                val updated = date.withHour(hourOfDay).withMinute(minute)
+                                onTimeChange(updated)
+                            },
+                            date.hour,
+                            date.minute,
+                            false,
+                        ).show()
                     },
-                    date.hour,
-                    date.minute,
-                    false,
-                ).show()
-            }) {
-                Text(timeFormatter.format(date))
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(timeFormatter.format(date))
+                }
             }
         }
     }

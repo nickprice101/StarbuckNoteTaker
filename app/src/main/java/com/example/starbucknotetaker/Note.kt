@@ -34,6 +34,7 @@ data class NoteLinkPreview(
     val title: String? = null,
     val description: String? = null,
     val imageUrl: String? = null,
+    val cachedImagePath: String? = null,
 )
 
 /**
