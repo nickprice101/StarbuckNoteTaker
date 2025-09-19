@@ -10,7 +10,6 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
-import java.util.LinkedHashMap
 import java.util.LinkedHashSet
 import java.util.Locale
 
@@ -448,10 +447,12 @@ class Summarizer(
             return collapsed
         }
 
-        val rewritten = buildKeywordSentence(cleanedWords)
-        if (rewritten.isNotEmpty()) return rewritten
+        val hasLetterWord = cleanedWords.any { containsLetter(it) }
+        if (!hasLetterWord) {
+            return ensureSentence(collapsed)
+        }
 
-        return collapsed
+        return sentenceCase(collapsed)
     }
 
     private fun looksLikeConciseHeadline(words: List<String>): Boolean {
@@ -516,68 +517,18 @@ class Summarizer(
         return uniqueNormalized.size >= 2
     }
 
-    private fun buildKeywordSentence(words: List<String>): String {
-        if (words.isEmpty()) return ""
-
-        val keywords = LinkedHashMap<String, String>()
-        for (word in words) {
-            val trimmed = trimEdgePunctuation(word)
-            val normalized = normalizeWord(trimmed)
-            if (normalized.isEmpty() || STOP_WORDS.contains(normalized)) continue
-            keywords.putIfAbsent(normalized, trimmed)
-        }
-
-        var candidates = keywords.values.toList()
-        if (candidates.isEmpty()) {
-            candidates = words.map { trimEdgePunctuation(it) }.filter { it.isNotEmpty() }
-        }
-
-        if (candidates.isEmpty()) return ""
-
-        val limited = candidates.take(MAX_KEYWORD_SENTENCE_WORDS)
-        val formattedKeywords = limited.mapNotNull { formatKeyword(it) }
-        if (formattedKeywords.isEmpty()) return ""
-
-        val sentenceBody = formatWordList(formattedKeywords)
-        return ensureSentence(sentenceBody)
-    }
-
-    private fun trimEdgePunctuation(word: String): String {
-        var start = 0
-        var end = word.length
-        while (start < end && WORD_TRIM_CHARACTERS.contains(word[start])) start++
-        while (end > start && WORD_TRIM_CHARACTERS.contains(word[end - 1])) end--
-        return word.substring(start, end).trim()
-    }
-
-    private fun formatKeyword(word: String): String? {
-        if (word.isEmpty()) return null
-        val cleaned = word.trim()
-        if (cleaned.isEmpty()) return null
-        val hasUppercase = cleaned.any { it.isUpperCase() }
-        val hasLowercase = cleaned.any { it.isLowerCase() }
-        val normalized = when {
-            hasUppercase && !hasLowercase -> cleaned
-            else -> cleaned.lowercase(Locale.US)
-        }
-        return normalized
-    }
-
-    private fun formatWordList(words: List<String>): String {
-        if (words.isEmpty()) return ""
-        if (words.size == 1) return words[0]
-        if (words.size == 2) return "${words[0]} and ${words[1]}"
-        val head = words.dropLast(1).joinToString(", ")
-        return "$head, and ${words.last()}"
-    }
-
     private fun ensureSentence(text: String): String {
+        val capitalized = sentenceCase(text)
+        if (capitalized.isEmpty()) return ""
+        return if (capitalized.last() in SENTENCE_ENDINGS) capitalized else "$capitalized."
+    }
+
+    private fun sentenceCase(text: String): String {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return ""
-        val capitalized = trimmed.replaceFirstChar { ch ->
+        return trimmed.replaceFirstChar { ch ->
             if (ch.isLowerCase()) ch.titlecase(Locale.US) else ch.toString()
         }
-        return if (capitalized.last() in SENTENCE_ENDINGS) capitalized else "$capitalized."
     }
 
     private fun buildKeywordStats(text: String): KeywordStats {
@@ -843,10 +794,6 @@ class Summarizer(
             "will",
             "just"
         )
-        private val WORD_TRIM_CHARACTERS = setOf(
-            ',', '.', ';', ':', '-', '–', '—', '"', '\'', '(', ')', '[', ']', '{', '}', '/', '\\'
-        )
         private val SENTENCE_ENDINGS = charArrayOf('.', '!', '?')
-        private const val MAX_KEYWORD_SENTENCE_WORDS = 6
     }
 }

@@ -275,11 +275,10 @@ class SummarizerTest {
 
         val input = "Project planning notes covering roadmap milestones"
         val summary = summarizer.summarize(input)
+        val expected = listOf(400, 401, 402, 403, 404).joinToString(" ") { tokenMap[it] ?: "" }
 
-        assertEquals(
-            "Timeline milestones roadmap deliverables updates",
-            summary
-        )
+        assertEquals(expected, summary)
+        assertFalse(summary.startsWith("Summary highlights", ignoreCase = true))
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
 
         summarizer.close()
