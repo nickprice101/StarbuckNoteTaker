@@ -212,18 +212,21 @@ class NoteViewModel : ViewModel() {
         }
     }
 
-    fun importNotes(context: Context, uri: Uri, archivePin: String, overwrite: Boolean) {
-        try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val bytes = input.readBytes()
-                val imported = EncryptedNoteStore(context).loadNotesFromBytes(bytes, archivePin)
-                if (overwrite) {
-                    _notes.clear()
-                }
-                _notes.addAll(imported)
-                pin?.let { store?.saveNotes(_notes, it) }
+    fun importNotes(context: Context, uri: Uri, archivePin: String, overwrite: Boolean): Boolean {
+        return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                input.readBytes()
+            } ?: return false
+            val imported = EncryptedNoteStore(context).loadNotesFromBytes(bytes, archivePin)
+            if (overwrite) {
+                _notes.clear()
             }
-        } catch (_: Exception) {}
+            _notes.addAll(imported)
+            pin?.let { store?.saveNotes(_notes, it) }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun onCleared() {

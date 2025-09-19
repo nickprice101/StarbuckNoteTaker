@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
@@ -21,7 +22,7 @@ import java.util.Locale
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onImport: (Uri, String, Boolean) -> Unit,
+    onImport: (Uri, String, Boolean) -> Boolean,
     onExport: (Uri) -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit
@@ -56,22 +57,38 @@ fun SettingsScreen(
 
     if (showDialog && selectedUri != null) {
         var pin by remember { mutableStateOf("") }
+        var importError by remember { mutableStateOf<String?>(null) }
         var overwrite by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = {
                 hideKeyboard()
                 focusManager.clearFocus(force = true)
                 showDialog = false
+                importError = null
             },
             title = { Text("Import Archive") },
             text = {
                 Column {
                     OutlinedTextField(
                         value = pin,
-                        onValueChange = { pin = it },
+                        onValueChange = {
+                            pin = it
+                            if (importError != null) {
+                                importError = null
+                            }
+                        },
                         label = { Text("Archive PIN") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        visualTransformation = PasswordVisualTransformation('*')
                     )
+                    if (importError != null) {
+                        Text(
+                            importError!!,
+                            color = MaterialTheme.colors.error,
+                            style = MaterialTheme.typography.caption,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
                     Spacer(Modifier.height(16.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = !overwrite, onClick = { overwrite = false })
@@ -93,10 +110,17 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    hideKeyboard()
-                    focusManager.clearFocus(force = true)
-                    selectedUri?.let { onImport(it, pin, overwrite) }
-                    showDialog = false
+                    selectedUri?.let { uri ->
+                        val success = onImport(uri, pin, overwrite)
+                        if (success) {
+                            hideKeyboard()
+                            focusManager.clearFocus(force = true)
+                            showDialog = false
+                            importError = null
+                        } else {
+                            importError = "Incorrect PIN. Please try again."
+                        }
+                    }
                 }) { Text("Import") }
             },
             dismissButton = {
@@ -104,6 +128,7 @@ fun SettingsScreen(
                     hideKeyboard()
                     focusManager.clearFocus(force = true)
                     showDialog = false
+                    importError = null
                 }) { Text("Cancel") }
             }
         )
