@@ -443,10 +443,56 @@ class Summarizer(
             return collapsed
         }
 
+        if (looksLikeConciseHeadline(cleanedWords)) {
+            return collapsed
+        }
+
         val rewritten = buildKeywordSentence(cleanedWords)
         if (rewritten.isNotEmpty()) return rewritten
 
         return collapsed
+    }
+
+    private fun looksLikeConciseHeadline(words: List<String>): Boolean {
+        if (words.isEmpty() || words.size > MAX_HEADLINE_WORDS) return false
+
+        var hasLetterWord = false
+        var hasLowercaseWord = false
+        var hasHeadlineCue = false
+        for (word in words) {
+            if (!hasLetterWord && containsLetter(word)) {
+                hasLetterWord = true
+            }
+            if (!hasLowercaseWord && word.any { it.isLowerCase() }) {
+                hasLowercaseWord = true
+            }
+            if (!hasHeadlineCue && isHeadlineCueWord(word)) {
+                hasHeadlineCue = true
+            }
+            if (hasLetterWord && hasLowercaseWord && hasHeadlineCue) {
+                break
+            }
+        }
+
+        return hasLetterWord && hasLowercaseWord && hasHeadlineCue
+    }
+
+    private fun isHeadlineCueWord(word: String): Boolean {
+        if (word.isEmpty()) return false
+        if (word.any { it.isDigit() }) return true
+        if (word.length <= HEADLINE_SHORT_WORD_MAX_LENGTH) return true
+
+        val normalized = normalizeWord(word)
+        if (normalized.isEmpty()) return false
+
+        if (normalized.endsWith("ed")) return true
+        if (normalized.endsWith("ing")) return true
+        if (normalized.endsWith("s") && normalized.length <= HEADLINE_VERB_LENGTH_LIMIT) {
+            if (!normalized.endsWith("es")) return true
+            if (normalized.length <= HEADLINE_SHORT_VERB_LENGTH_LIMIT) return true
+        }
+
+        return false
     }
 
     private fun buildKeywordSentence(words: List<String>): String {
@@ -685,6 +731,10 @@ class Summarizer(
         private const val MIN_UNIQUE_WORDS = 3
         private const val ENCODER_HIDDEN_SIZE = 512
         private const val MIN_TOKENS_FOR_KEYWORD_BIAS = 2
+        private const val MAX_HEADLINE_WORDS = 8
+        private const val HEADLINE_SHORT_WORD_MAX_LENGTH = 4
+        private const val HEADLINE_VERB_LENGTH_LIMIT = 8
+        private const val HEADLINE_SHORT_VERB_LENGTH_LIMIT = 6
         private val STOP_WORDS = setOf(
             "a",
             "an",

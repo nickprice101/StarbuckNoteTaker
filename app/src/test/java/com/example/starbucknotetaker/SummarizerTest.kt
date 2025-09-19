@@ -168,6 +168,57 @@ class SummarizerTest {
     }
 
     @Test
+    fun summarizeKeepsConciseHeadline() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val encodedIds = intArrayOf(7, 8, 9, 10)
+        whenever(tokenizer.encodeAsIds(any())).thenReturn(encodedIds)
+        val tokenMap = mapOf(
+            500 to "Rain",
+            501 to "abandons",
+            502 to "T20",
+            503 to "decider"
+        )
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.filter { tokenMap.containsKey(it) }
+                .joinToString(" ") { tokenMap[it] ?: "" }
+                .trim()
+        }
+
+        val generatedTokens = intArrayOf(500, 501, 502, 503)
+        val attentionCapacity = max(encodedIds.size, generatedTokens.size + 1)
+        val decoder = DecoderStub(generatedTokens, attentionCapacity)
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(EncoderStub(attentionCapacity))
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val summary = summarizer.summarize("Rain forced the final match to be abandoned.")
+
+        assertEquals("Rain abandons T20 decider", summary)
+        summarizer.close()
+    }
+
+    @Test
     fun summarizeTurnsKeywordListIntoReadableSentence() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
