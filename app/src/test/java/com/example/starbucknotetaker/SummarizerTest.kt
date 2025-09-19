@@ -426,6 +426,78 @@ class SummarizerTest {
     }
 
     @Test
+    fun summarizeAcceptsSemanticParaphraseWithoutKeywordOverlap() = runBlocking {
+        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
+        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
+
+        val fetcher = mock<ModelFetcher>()
+        whenever(fetcher.ensureModels(any())).thenReturn(
+            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
+        )
+
+        val tokenizer = mock<SentencePieceProcessor>()
+        val prefix = "summarize: "
+        val sourceTokens = intArrayOf(10, 11, 12, 13, 14)
+        val summaryTokens = intArrayOf(20, 21, 22, 23)
+        val abstractive = "Financial plan emphasizes launch readiness"
+
+        whenever(tokenizer.encodeAsIds(any())).thenAnswer { invocation ->
+            val textArg = invocation.arguments[0] as String
+            when {
+                textArg.startsWith(prefix) -> sourceTokens
+                textArg == abstractive -> summaryTokens
+                else -> intArrayOf()
+            }
+        }
+
+        val tokenMap = mapOf(
+            100 to "Financial",
+            101 to "plan",
+            102 to "emphasizes",
+            103 to "launch",
+            104 to "readiness"
+        )
+        whenever(tokenizer.decodeIds(any())).thenAnswer { invocation ->
+            val ids = invocation.arguments[0] as IntArray
+            ids.joinToString(" ") { tokenMap[it] ?: "" }.trim()
+        }
+
+        val generatedTokens = intArrayOf(100, 101, 102, 103, 104)
+        val attentionCapacity = max(sourceTokens.size, generatedTokens.size + 1)
+        val encoder = SemanticEncoderStub(
+            mapOf(
+                sourceTokens.first() to floatArrayOf(0.6f, 0.8f, 0f, 0f),
+                summaryTokens.first() to floatArrayOf(0.6f, 0.8f, 0f, 0f)
+            ),
+            attentionCapacity
+        )
+        val decoder = DecoderStub(generatedTokens, attentionCapacity)
+        val interpreters = ArrayDeque<LiteInterpreter>().apply {
+            add(encoder)
+            add(decoder)
+        }
+
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            spFactory = { tokenizer },
+            nativeLoader = { true },
+            interpreterFactory = { interpreters.removeFirst() },
+            logger = { _, _ -> },
+            debug = { }
+        )
+
+        val source = "Roadmap review covers milestones, budgets, timeline risks, and rollout preparation."
+        val summary = summarizer.summarize(source)
+
+        assertEquals(abstractive, summary)
+        assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
+
+        summarizer.close()
+    }
+
+    @Test
     fun summarizeKeepsHyphenatedParaphrase() = runBlocking {
         val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
         val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
@@ -649,6 +721,46 @@ class SummarizerTest {
         override fun run(input: Any, output: Any) {}
 
         override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {}
+
+        override fun close() {}
+    }
+
+    private class SemanticEncoderStub(
+        private val embeddings: Map<Int, FloatArray>,
+        private val tokenCapacity: Int,
+        private val hiddenSize: Int = 4
+    ) : LiteInterpreter {
+        override val inputTensorCount: Int = 2
+
+        override fun getOutputTensor(index: Int): LiteTensor =
+            FakeTensor(intArrayOf(1, tokenCapacity, hiddenSize), tokenCapacity * hiddenSize)
+
+        override fun getInputTensor(index: Int): LiteTensor = when (index) {
+            0, 1 -> FakeTensor(intArrayOf(1, tokenCapacity), tokenCapacity)
+            else -> FakeTensor()
+        }
+
+        override fun run(input: Any, output: Any) {}
+
+        override fun runForMultipleInputsOutputs(inputs: Array<Any?>, outputs: Map<Int, Any>) {
+            val attention = (inputs[0] as Array<IntArray>)[0]
+            val tokens = (inputs[1] as Array<IntArray>)[0]
+            val hidden = outputs[0] as Array<Array<FloatArray>>
+            if (hidden.isEmpty() || hidden[0].isEmpty()) return
+            if (hidden[0][0].isEmpty()) return
+
+            val length = attention.count { it == 1 }.coerceAtMost(hidden[0].size)
+            if (tokens.isEmpty() || length <= 0) return
+
+            val vector = embeddings[tokens[0]] ?: FloatArray(hiddenSize)
+            val dim = kotlin.math.min(vector.size, hidden[0][0].size)
+            for (i in 0 until length) {
+                val row = hidden[0][i]
+                for (d in 0 until dim) {
+                    row[d] = vector[d]
+                }
+            }
+        }
 
         override fun close() {}
     }

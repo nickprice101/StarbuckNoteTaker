@@ -12,6 +12,7 @@ import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import java.util.LinkedHashSet
 import java.util.Locale
+import kotlin.math.sqrt
 
 /**
  * Simple on-device text summarizer.
@@ -312,12 +313,44 @@ class Summarizer(
         }
         val hasLetterWord = summaryWords.any { containsLetter(it) }
         if (hasLetterWord && requiredOverlap > 0 && overlapHits < requiredOverlap) {
-            debug(
-                "abstractive summary missing keyword overlap: hits=$overlapHits required=$requiredOverlap"
-            )
-            return@withContext fallback(
-                "abstractive summary missing keyword overlap ($overlapHits/$requiredOverlap)"
-            )
+            val semanticScore = try {
+                val summaryIds = tok.encodeAsIds(cleaned)
+                val summaryLen = kotlin.math.min(summaryIds.size, maxEncoderTokens)
+                if (summaryLen == 0) {
+                    debug("semantic similarity check skipped due to empty summary encoding")
+                    0f
+                } else {
+                    val summaryInput = Array(1) { IntArray(encoderTokenCapacity) }
+                    val summaryAttention = Array(1) { IntArray(encoderAttentionCapacity) }
+                    for (i in 0 until summaryLen) {
+                        summaryInput[0][i] = summaryIds[i]
+                        summaryAttention[0][i] = 1
+                    }
+                    val summaryHidden = Array(encoderHiddenBatch) {
+                        Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
+                    }
+                    val summaryInputs = arrayOfNulls<Any>(2).apply {
+                        this[0] = summaryAttention
+                        this[1] = summaryInput
+                    }
+                    val summaryOutputs = hashMapOf<Int, Any>(0 to summaryHidden)
+                    enc.runForMultipleInputsOutputs(summaryInputs, summaryOutputs)
+                    cosineSimilarity(encHidden, encLen, summaryHidden, summaryLen)
+                }
+            } catch (t: Throwable) {
+                logger("failed to compute semantic similarity", t)
+                Float.NaN
+            }
+            if (!semanticScore.isNaN() && semanticScore >= SEMANTIC_SIMILARITY_THRESHOLD) {
+                debug("accepting abstractive summary due to semantic similarity $semanticScore")
+            } else {
+                debug(
+                    "abstractive summary missing keyword overlap: hits=$overlapHits required=$requiredOverlap semantic=$semanticScore"
+                )
+                return@withContext fallback(
+                    "abstractive summary missing keyword overlap ($overlapHits/$requiredOverlap)"
+                )
+            }
         }
         debug("summarizer inference complete")
         return@withContext cleaned
@@ -620,6 +653,60 @@ class Summarizer(
         return false
     }
 
+    private fun cosineSimilarity(
+        sourceHidden: Array<Array<FloatArray>>,
+        sourceLength: Int,
+        summaryHidden: Array<Array<FloatArray>>,
+        summaryLength: Int
+    ): Float {
+        if (sourceLength <= 0 || summaryLength <= 0) return 0f
+        if (sourceHidden.isEmpty() || sourceHidden[0].isEmpty()) return 0f
+        if (summaryHidden.isEmpty() || summaryHidden[0].isEmpty()) return 0f
+
+        val sourceLimit = sourceLength.coerceAtMost(sourceHidden[0].size)
+        val summaryLimit = summaryLength.coerceAtMost(summaryHidden[0].size)
+        if (sourceLimit <= 0 || summaryLimit <= 0) return 0f
+
+        val sourceDim = if (sourceHidden[0].isNotEmpty()) sourceHidden[0][0].size else 0
+        val summaryDim = if (summaryHidden[0].isNotEmpty()) summaryHidden[0][0].size else 0
+        val dim = kotlin.math.min(sourceDim, summaryDim)
+        if (dim <= 0) return 0f
+
+        val sourceVector = FloatArray(dim)
+        val summaryVector = FloatArray(dim)
+
+        for (i in 0 until sourceLimit) {
+            val row = sourceHidden[0][i]
+            for (d in 0 until dim.coerceAtMost(row.size)) {
+                sourceVector[d] += row[d]
+            }
+        }
+
+        for (i in 0 until summaryLimit) {
+            val row = summaryHidden[0][i]
+            for (d in 0 until dim.coerceAtMost(row.size)) {
+                summaryVector[d] += row[d]
+            }
+        }
+
+        val invSource = 1f / sourceLimit
+        val invSummary = 1f / summaryLimit
+        var dot = 0f
+        var sourceNorm = 0f
+        var summaryNorm = 0f
+        for (d in 0 until dim) {
+            val pooledSource = sourceVector[d] * invSource
+            val pooledSummary = summaryVector[d] * invSummary
+            dot += pooledSource * pooledSummary
+            sourceNorm += pooledSource * pooledSource
+            summaryNorm += pooledSummary * pooledSummary
+        }
+
+        val denom = sqrt(sourceNorm) * sqrt(summaryNorm)
+        if (denom == 0f) return 0f
+        return dot / denom
+    }
+
     private fun topKIndices(values: FloatArray, k: Int): IntArray {
         if (k <= 0) return intArrayOf()
         val limit = kotlin.math.min(k, values.size)
@@ -815,6 +902,7 @@ class Summarizer(
         private const val HEADLINE_SHORT_WORD_MAX_LENGTH = 4
         private const val HEADLINE_VERB_LENGTH_LIMIT = 8
         private const val HEADLINE_SHORT_VERB_LENGTH_LIMIT = 6
+        private const val SEMANTIC_SIMILARITY_THRESHOLD = 0.7f
         private val STOP_WORDS = setOf(
             "a",
             "an",
