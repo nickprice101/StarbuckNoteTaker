@@ -36,8 +36,8 @@ import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
 import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.Summarizer
+import com.example.starbucknotetaker.UrlDetection
 import com.example.starbucknotetaker.extractUrls
-import com.example.starbucknotetaker.normalizeUrl
 import com.example.starbucknotetaker.ui.LinkPreviewCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -139,8 +139,12 @@ fun EditNoteScreen(
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
 
-    fun syncLinkPreviews(index: Int, textBlock: EditBlock.Text) {
-        val normalizedUrls = extractUrls(textBlock.text).map { normalizeUrl(it) }.distinct()
+    fun syncLinkPreviews(
+        index: Int,
+        textBlock: EditBlock.Text,
+        finalizePending: Boolean = false,
+    ) {
+        val detections = extractUrls(textBlock.text, finalizePending)
         val existingBlocks = mutableMapOf<String, EditBlock.LinkPreview>()
         var cursor = index + 1
         while (cursor < blocks.size) {
@@ -152,21 +156,57 @@ fun EditNoteScreen(
                 break
             }
         }
-        if (normalizedUrls.isEmpty()) {
+        if (detections.isEmpty()) {
             dismissedPreviewUrls.remove(textBlock.id)
             return
         }
         val dismissed = dismissedPreviewUrls.getOrPut(textBlock.id) { mutableSetOf() }
-        dismissed.retainAll(normalizedUrls.toSet())
-        val filteredUrls = normalizedUrls.filterNot { dismissed.contains(it) }
+        dismissed.retainAll(detections.map(UrlDetection::normalizedUrl).toSet())
         var insertionIndex = index + 1
-        filteredUrls.forEach { url ->
-            val block = existingBlocks[url] ?: EditBlock.LinkPreview(
-                sourceId = textBlock.id,
-                preview = NoteLinkPreview(url = url)
-            )
-            blocks.add(insertionIndex, block)
-            insertionIndex++
+        detections.forEach { detection ->
+            val normalized = detection.normalizedUrl
+            if (!dismissed.contains(normalized)) {
+                val existing = existingBlocks[normalized]
+                val block = if (existing != null) {
+                    if (detection.isComplete) {
+                        existing.copy(
+                            preview = existing.preview.copy(url = normalized),
+                            awaitingCompletion = false,
+                            isLoading = if (existing.hasAttempted) false else true,
+                            errorMessage = if (existing.hasAttempted) existing.errorMessage else null,
+                        )
+                    } else {
+                        existing.copy(
+                            preview = NoteLinkPreview(url = normalized),
+                            awaitingCompletion = true,
+                            isLoading = false,
+                            errorMessage = null,
+                            hasAttempted = false,
+                        )
+                    }
+                } else {
+                    if (detection.isComplete) {
+                        EditBlock.LinkPreview(
+                            sourceId = textBlock.id,
+                            preview = NoteLinkPreview(url = normalized),
+                            isLoading = true,
+                            errorMessage = null,
+                            awaitingCompletion = false,
+                        )
+                    } else {
+                        EditBlock.LinkPreview(
+                            sourceId = textBlock.id,
+                            preview = NoteLinkPreview(url = normalized),
+                            isLoading = false,
+                            errorMessage = null,
+                            hasAttempted = false,
+                            awaitingCompletion = true,
+                        )
+                    }
+                }
+                blocks.add(insertionIndex, block)
+                insertionIndex++
+            }
         }
     }
 
@@ -179,7 +219,7 @@ fun EditNoteScreen(
         while (idx < blocks.size) {
             val block = blocks.getOrNull(idx)
             if (block is EditBlock.Text) {
-                syncLinkPreviews(idx, block)
+                syncLinkPreviews(idx, block, finalizePending = true)
             }
             idx++
         }
@@ -288,6 +328,14 @@ fun EditNoteScreen(
                 },
                 actions = {
                     IconButton(onClick = {
+                        var idx = 0
+                        while (idx < blocks.size) {
+                            val block = blocks.getOrNull(idx)
+                            if (block is EditBlock.Text) {
+                                syncLinkPreviews(idx, block, finalizePending = true)
+                            }
+                            idx++
+                        }
                         val images = mutableListOf<String>()
                         val files = mutableListOf<NoteFile>()
                         val linkPreviews = mutableListOf<NoteLinkPreview>()
@@ -466,8 +514,13 @@ fun EditNoteScreen(
                     }
                     is EditBlock.LinkPreview -> {
                         val previewBlock = block
-                        LaunchedEffect(previewBlock.id, previewBlock.hasAttempted, previewBlock.preview.url) {
-                            if (!previewBlock.hasAttempted) {
+                        LaunchedEffect(
+                            previewBlock.id,
+                            previewBlock.hasAttempted,
+                            previewBlock.preview.url,
+                            previewBlock.awaitingCompletion,
+                        ) {
+                            if (!previewBlock.hasAttempted && !previewBlock.awaitingCompletion) {
                                 when (val result = linkPreviewFetcher.fetch(previewBlock.preview.url)) {
                                     is LinkPreviewResult.Success -> {
                                         blocks[index] = previewBlock.copy(
@@ -489,6 +542,7 @@ fun EditNoteScreen(
                         }
                         LinkPreviewCard(
                             preview = previewBlock.preview,
+                            awaitingCompletion = previewBlock.awaitingCompletion,
                             isLoading = previewBlock.isLoading,
                             errorMessage = previewBlock.errorMessage,
                             onRemove = {
@@ -505,11 +559,15 @@ fun EditNoteScreen(
                                     }
                                 }
                             },
-                            onOpen = {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse(previewBlock.preview.url))
-                                    )
+                            onOpen = if (previewBlock.awaitingCompletion) {
+                                null
+                            } else {
+                                {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(previewBlock.preview.url))
+                                        )
+                                    }
                                 }
                             }
                         )
@@ -571,6 +629,7 @@ private sealed class EditBlock {
         val isLoading: Boolean = true,
         val errorMessage: String? = null,
         val hasAttempted: Boolean = false,
+        val awaitingCompletion: Boolean = false,
         override val id: Long = nextEditBlockId()
     ) : EditBlock()
 }

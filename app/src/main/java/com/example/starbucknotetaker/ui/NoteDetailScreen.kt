@@ -118,6 +118,7 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                         note.linkPreviews.getOrNull(index)?.let { preview ->
                             LinkPreviewCard(
                                 preview = preview,
+                                awaitingCompletion = false,
                                 isLoading = false,
                                 errorMessage = null,
                                 onOpen = {
