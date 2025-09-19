@@ -68,7 +68,9 @@ class EncryptedNoteStore(private val context: Context) {
                         url = l.getString("url"),
                         title = l.optString("title", null),
                         description = l.optString("description", null),
-                        imageUrl = l.optString("imageUrl", null)
+                        imageUrl = l.optString("imageUrl", null),
+                        cachedImagePath = l.optString("cachedImagePath", null)
+                            ?.takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -127,6 +129,7 @@ class EncryptedNoteStore(private val context: Context) {
                 link.title?.let { lo.put("title", it) }
                 link.description?.let { lo.put("description", it) }
                 link.imageUrl?.let { lo.put("imageUrl", it) }
+                link.cachedImagePath?.let { lo.put("cachedImagePath", it) }
                 linksArray.put(lo)
             }
             obj.put("linkPreviews", linksArray)

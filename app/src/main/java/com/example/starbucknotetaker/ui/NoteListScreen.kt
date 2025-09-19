@@ -35,6 +35,7 @@ import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 @Composable
 fun NoteListScreen(
     notes: List<Note>,
@@ -306,30 +307,31 @@ private fun isSameDay(first: Long, second: Long): Boolean {
     return formatter.format(Date(first)) == formatter.format(Date(second))
 }
 
-private val eventDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
+private val eventDayFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE")
 private val eventTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
 
 private fun formatEventRange(event: NoteEvent): String {
     val zoneId = runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
     val start = Instant.ofEpochMilli(event.start).atZone(zoneId)
     val end = Instant.ofEpochMilli(event.end).atZone(zoneId)
+    val zoneLabel = zoneId.getDisplayName(TextStyle.SHORT, Locale.getDefault()).takeIf { it.isNotBlank() }
+        ?: zoneId.id
     return if (event.allDay) {
         val startDate = start.toLocalDate()
         val endDateExclusive = end.toLocalDate()
         val lastDate = endDateExclusive.minusDays(1)
-        if (lastDate.isBefore(startDate)) {
-            "All-day • ${eventDateFormatter.format(start)}"
-        } else if (lastDate.isEqual(startDate)) {
-            "All-day • ${eventDateFormatter.format(start)}"
+        if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
+            "All-day • $zoneLabel"
         } else {
-            "All-day • ${eventDateFormatter.format(start)} – ${eventDateFormatter.format(lastDate)}"
+            "All-day • Ends ${eventDayFormatter.format(lastDate)} • $zoneLabel"
         }
     } else {
         val sameDay = start.toLocalDate() == end.toLocalDate()
-        if (sameDay) {
-            "${eventDateFormatter.format(start)} • ${eventTimeFormatter.format(start)} – ${eventTimeFormatter.format(end)}"
+        val timePortion = if (sameDay) {
+            "${eventTimeFormatter.format(start)} – ${eventTimeFormatter.format(end)}"
         } else {
-            "${eventDateFormatter.format(start)} ${eventTimeFormatter.format(start)} – ${eventDateFormatter.format(end)} ${eventTimeFormatter.format(end)}"
+            "${eventTimeFormatter.format(start)} – ${eventDayFormatter.format(end)} ${eventTimeFormatter.format(end)}"
         }
+        "$timePortion • $zoneLabel"
     }
 }

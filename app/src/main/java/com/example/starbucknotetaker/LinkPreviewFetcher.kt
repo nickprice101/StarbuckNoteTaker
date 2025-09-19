@@ -1,25 +1,39 @@
 package com.example.starbucknotetaker
 
+import android.content.Context
+import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.security.MessageDigest
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private const val MAX_HTML_CHARS = 200_000
 
-class LinkPreviewFetcher {
+class LinkPreviewFetcher(context: Context) {
+    private val appContext = context.applicationContext
+    private val cacheDir = File(appContext.filesDir, "link_previews").apply { mkdirs() }
     private val cache = mutableMapOf<String, LinkPreviewResult>()
 
     suspend fun fetch(rawUrl: String): LinkPreviewResult {
         val normalized = normalizeUrl(rawUrl)
-        cache[normalized]?.let { return it }
-        val result = withContext(Dispatchers.IO) {
-            runCatching { loadPreview(normalized) }.getOrElse {
-                LinkPreviewResult.Failure(it.message)
+        cache[normalized]?.let { cached ->
+            if (cached is LinkPreviewResult.Success) {
+                val path = cached.preview.cachedImagePath
+                if (path == null || File(path).exists()) {
+                    return cached
+                }
+                cache.remove(normalized)
+            } else {
+                return cached
             }
+        }
+        val result = withContext(Dispatchers.IO) {
+            runCatching { loadPreview(normalized) }
+                .getOrElse { LinkPreviewResult.Failure(it.message) }
         }
         cache[normalized] = result
         return result
@@ -43,18 +57,106 @@ class LinkPreviewFetcher {
                 val meta = parseMetadata(html, url)
                 val title = meta.title ?: url.host
                 val description = meta.description
-                val snapshotUrl = buildSnapshotUrl(urlString)
+                val imageCandidates = buildList {
+                    meta.imageUrl?.let { add(it) }
+                    add(buildSnapshotUrl(urlString))
+                }
+                var selectedImageUrl: String? = null
+                var cachedImagePath: String? = null
+                for (candidate in imageCandidates) {
+                    selectedImageUrl = candidate
+                    val cached = cacheImage(urlString, candidate)
+                    if (cached != null) {
+                        cachedImagePath = cached
+                        break
+                    }
+                }
                 val preview = NoteLinkPreview(
                     url = urlString,
                     title = title,
                     description = description,
-                    imageUrl = snapshotUrl
+                    imageUrl = selectedImageUrl,
+                    cachedImagePath = cachedImagePath,
                 )
                 LinkPreviewResult.Success(preview)
             }
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun cacheImage(urlKey: String, remoteImageUrl: String): String? {
+        val existing = findCachedFile(urlKey)
+        if (existing != null && existing.exists()) {
+            return existing.absolutePath
+        }
+        return runCatching {
+            val connection = (URL(remoteImageUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                instanceFollowRedirects = true
+                setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Android) StarbuckNoteTaker/1.0"
+                )
+            }
+            try {
+                connection.connect()
+                if (connection.responseCode !in 200..299) {
+                    return@runCatching null
+                }
+                val cacheKey = cacheKeyFor(urlKey)
+                val extension = extensionFromConnection(connection.contentType, remoteImageUrl)
+                cacheDir.listFiles()
+                    ?.filter { it.nameWithoutExtensionSafe() == cacheKey }
+                    ?.forEach { it.delete() }
+                val target = File(cacheDir, cacheKey + extension)
+                connection.inputStream.use { input ->
+                    target.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                target.absolutePath
+            } finally {
+                connection.disconnect()
+            }
+        }.getOrElse { null }
+    }
+
+    private fun findCachedFile(urlKey: String): File? {
+        val cacheKey = cacheKeyFor(urlKey)
+        return cacheDir.listFiles()?.firstOrNull { it.nameWithoutExtensionSafe() == cacheKey }
+    }
+
+    private fun cacheKeyFor(urlKey: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest(urlKey.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun extensionFromConnection(contentType: String?, remoteImageUrl: String): String {
+        val normalized = contentType?.lowercase(Locale.ROOT) ?: ""
+        return when {
+            "png" in normalized -> ".png"
+            "gif" in normalized -> ".gif"
+            "webp" in normalized -> ".webp"
+            "bmp" in normalized -> ".bmp"
+            "svg" in normalized -> ".svg"
+            else -> {
+                val cleanedPath = remoteImageUrl.substringBefore('?').substringAfterLast('/')
+                val ext = cleanedPath.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                if (ext.length in 1..5 && ext.all { it.isLetterOrDigit() }) {
+                    ".${ext}"
+                } else {
+                    ".jpg"
+                }
+            }
+        }
+    }
+
+    private fun File.nameWithoutExtensionSafe(): String {
+        val dotIndex = name.lastIndexOf('.')
+        return if (dotIndex <= 0) name else name.substring(0, dotIndex)
     }
 }
 
@@ -150,11 +252,12 @@ fun extractUrls(text: String, treatUnterminatedAsComplete: Boolean = false): Lis
     val matcher = android.util.Patterns.WEB_URL.matcher(text)
     val detections = linkedMapOf<String, UrlDetection>()
     while (matcher.find()) {
-        var url = text.substring(matcher.start(), matcher.end())
-        val trimmed = url.trimEnd('.', ',', ';', ')', ']', '}', '>', '"', '\'')
+        val matchStart = matcher.start()
+        var url = text.substring(matchStart, matcher.end())
+        val trimmed = trimTrailingSentencePunctuation(url)
         if (trimmed.isNotBlank()) {
             val trimmedTrailing = trimmed.length != url.length
-            val nextIndex = matcher.start() + trimmed.length
+            val nextIndex = matchStart + trimmed.length
             val nextChar = text.getOrNull(nextIndex)
             val isComplete = when {
                 trimmedTrailing -> true
@@ -174,6 +277,26 @@ fun extractUrls(text: String, treatUnterminatedAsComplete: Boolean = false): Lis
         }
     }
     return detections.values.toList()
+}
+
+private fun trimTrailingSentencePunctuation(url: String): String {
+    var endIndex = url.length
+    while (endIndex > 0) {
+        val ch = url[endIndex - 1]
+        val shouldTrim = when (ch) {
+            '.', ',', ';', ')', ']', '}', '>', '\"', '\'' -> true
+            else -> false
+        }
+        if (!shouldTrim) break
+        val candidate = url.substring(0, endIndex - 1)
+        if (ch == '.') {
+            if (!android.util.Patterns.WEB_URL.matcher(candidate).matches()) {
+                break
+            }
+        }
+        endIndex--
+    }
+    return url.substring(0, endIndex)
 }
 
 private fun String.cleanWhitespace(): String {

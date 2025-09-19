@@ -38,6 +38,8 @@ import com.example.starbucknotetaker.NoteEvent
 import androidx.core.content.FileProvider
 import java.io.File
 import java.time.Instant
+import java.time.format.TextStyle
+import java.util.Locale
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -238,6 +240,10 @@ private fun EventDetailsCard(event: NoteEvent) {
     val end = remember(event.end, zoneId) {
         Instant.ofEpochMilli(event.end).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
     }
+    val zoneLabel = remember(zoneId) {
+        zoneId.getDisplayName(TextStyle.SHORT, Locale.getDefault()).takeIf { it.isNotBlank() }
+            ?: zoneId.id
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = 4.dp,
@@ -250,18 +256,20 @@ private fun EventDetailsCard(event: NoteEvent) {
                 val endDateExclusive = end.toLocalDate()
                 val lastDate = endDateExclusive.minusDays(1)
                 if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
-                    Text("All-day on ${detailDateFormatter.format(start)}")
+                    Text("All-day on ${detailDateFormatter.format(start)} ($zoneLabel)")
                 } else {
-                    Text("All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(lastDate)}")
+                    Text(
+                        "All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(lastDate)} ($zoneLabel)"
+                    )
                 }
             } else {
                 val sameDay = start.toLocalDate() == end.toLocalDate()
                 if (sameDay) {
                     Text("${detailDateFormatter.format(start)}")
-                    Text("${detailTimeFormatter.format(start)} – ${detailTimeFormatter.format(end)}")
+                    Text("${detailTimeFormatter.format(start)} – ${detailTimeFormatter.format(end)} $zoneLabel")
                 } else {
-                    Text("Starts: ${detailDateFormatter.format(start)} ${detailTimeFormatter.format(start)}")
-                    Text("Ends: ${detailDateFormatter.format(end)} ${detailTimeFormatter.format(end)}")
+                    Text("Starts: ${detailDateFormatter.format(start)} ${detailTimeFormatter.format(start)} ($zoneLabel)")
+                    Text("Ends: ${detailDateFormatter.format(end)} ${detailTimeFormatter.format(end)} ($zoneLabel)")
                 }
             }
             event.location?.takeIf { it.isNotBlank() }?.let { location ->
@@ -269,7 +277,7 @@ private fun EventDetailsCard(event: NoteEvent) {
                 Text("Location: $location")
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Time zone: ${zoneId.id}")
+            Text("Time zone: $zoneLabel (${zoneId.id})")
         }
     }
 }

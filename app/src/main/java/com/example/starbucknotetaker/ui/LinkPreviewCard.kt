@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.starbucknotetaker.NoteLinkPreview
+import java.io.File
 
 @Composable
 fun LinkPreviewCard(
@@ -83,9 +84,11 @@ fun LinkPreviewCard(
                         Text(text = errorMessage, color = MaterialTheme.colors.error)
                     }
                     else -> {
-                        preview.imageUrl?.let { imageUrl ->
+                        val imageModel = preview.cachedImagePath?.let { File(it) }
+                            ?: preview.imageUrl
+                        imageModel?.let { model ->
                             Image(
-                                painter = rememberAsyncImagePainter(imageUrl),
+                                painter = rememberAsyncImagePainter(model),
                                 contentDescription = null,
                                 modifier = Modifier
                                     .fillMaxWidth()
