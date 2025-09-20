@@ -37,7 +37,6 @@ import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
 @Composable
 fun NoteListScreen(
     notes: List<Note>,
@@ -346,22 +345,21 @@ private fun isSameDay(first: Long, second: Long): Boolean {
 }
 
 private val eventDayFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE")
-private val eventTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+private val eventTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 private fun formatEventRange(event: NoteEvent): String {
     val zoneId = runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
     val start = Instant.ofEpochMilli(event.start).atZone(zoneId)
     val end = Instant.ofEpochMilli(event.end).atZone(zoneId)
-    val zoneLabel = zoneId.getDisplayName(TextStyle.SHORT, Locale.getDefault()).takeIf { it.isNotBlank() }
-        ?: zoneId.id
+    val zoneCode = formatZoneCode(zoneId, Locale.getDefault(), start.toInstant())
     return if (event.allDay) {
         val startDate = start.toLocalDate()
         val endDateExclusive = end.toLocalDate()
         val lastDate = endDateExclusive.minusDays(1)
         if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
-            "All-day • $zoneLabel"
+            "All-day • $zoneCode"
         } else {
-            "All-day • Ends ${eventDayFormatter.format(lastDate)} • $zoneLabel"
+            "All-day • Ends ${eventDayFormatter.format(lastDate)} • $zoneCode"
         }
     } else {
         val sameDay = start.toLocalDate() == end.toLocalDate()
@@ -370,6 +368,6 @@ private fun formatEventRange(event: NoteEvent): String {
         } else {
             "${eventTimeFormatter.format(start)} – ${eventDayFormatter.format(end)} ${eventTimeFormatter.format(end)}"
         }
-        "$timePortion • $zoneLabel"
+        "$timePortion • $zoneCode"
     }
 }

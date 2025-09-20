@@ -88,7 +88,7 @@ fun AddNoteScreen(
         )
     }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
-    val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
 
     fun syncLinkPreviews(
         index: Int,
@@ -765,7 +765,7 @@ private fun EventDateTimePicker(
                             },
                             date.hour,
                             date.minute,
-                            false,
+                            true,
                         ).show()
                     },
                     modifier = Modifier.weight(1f)
