@@ -1,9 +1,10 @@
 package com.example.starbucknotetaker
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.starbucknotetaker.ui.AddNoteScreen
@@ -58,18 +60,155 @@ class MainActivity : AppCompatActivity() {
         }
 
         handleReminderIntent(intent)
+        handleShareIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleReminderIntent(intent)
+        handleShareIntent(intent)
     }
 
     private fun handleReminderIntent(intent: Intent?) {
         val noteId = intent?.getLongExtra(EXTRA_NOTE_ID, -1L)?.takeIf { it > 0 } ?: return
         noteViewModel.handleReminderNavigation(noteId)
         intent.removeExtra(EXTRA_NOTE_ID)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        val sourceIntent = intent ?: return
+        val pending = when (sourceIntent.action) {
+            Intent.ACTION_SEND -> parseShareSendIntent(sourceIntent)
+            Intent.ACTION_SEND_MULTIPLE -> parseShareSendMultipleIntent(sourceIntent)
+            else -> null
+        } ?: return
+
+        noteViewModel.setPendingShare(pending)
+        persistSharedUris(pending)
+
+        sourceIntent.action = null
+        sourceIntent.type = null
+        sourceIntent.removeExtra(Intent.EXTRA_TEXT)
+        sourceIntent.removeExtra(Intent.EXTRA_SUBJECT)
+        sourceIntent.removeExtra(Intent.EXTRA_TITLE)
+        sourceIntent.removeExtra(Intent.EXTRA_STREAM)
+        sourceIntent.clipData = null
+    }
+
+    private fun parseShareSendIntent(intent: Intent): PendingShare? {
+        val title = intent.getStringExtra(Intent.EXTRA_SUBJECT)
+            ?: intent.getStringExtra(Intent.EXTRA_TITLE)
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        val stream = intent.getParcelableExtraUri(Intent.EXTRA_STREAM)
+            ?: intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+
+        val images = mutableListOf<Uri>()
+        val files = mutableListOf<Uri>()
+        stream?.let { uri ->
+            if (isImageType(resolveStreamType(intent, uri))) {
+                images += uri
+            } else {
+                files += uri
+            }
+        }
+
+        if (title.isNullOrBlank() && text.isNullOrBlank() && images.isEmpty() && files.isEmpty()) {
+            return null
+        }
+
+        return PendingShare(
+            title = title,
+            text = text,
+            images = images,
+            files = files,
+        )
+    }
+
+    private fun parseShareSendMultipleIntent(intent: Intent): PendingShare? {
+        val title = intent.getStringExtra(Intent.EXTRA_SUBJECT)
+            ?: intent.getStringExtra(Intent.EXTRA_TITLE)
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        val uris = intent.getParcelableArrayListExtraUris(Intent.EXTRA_STREAM)
+            ?: extractClipDataUris(intent.clipData)
+
+        if (title.isNullOrBlank() && text.isNullOrBlank() && (uris == null || uris.isEmpty())) {
+            return null
+        }
+
+        val images = mutableListOf<Uri>()
+        val files = mutableListOf<Uri>()
+        uris?.forEach { uri ->
+            if (isImageType(resolveStreamType(intent, uri))) {
+                images += uri
+            } else {
+                files += uri
+            }
+        }
+
+        return PendingShare(
+            title = title,
+            text = text,
+            images = images,
+            files = files,
+        )
+    }
+
+    private fun resolveStreamType(intent: Intent, uri: Uri): String? {
+        val explicitType = intent.type?.takeUnless { it == "*/*" }
+        if (!explicitType.isNullOrBlank()) {
+            return explicitType
+        }
+        return try {
+            contentResolver.getType(uri) ?: explicitType
+        } catch (_: SecurityException) {
+            explicitType
+        }
+    }
+
+    private fun isImageType(type: String?): Boolean {
+        return type?.startsWith("image/") == true
+    }
+
+    private fun persistSharedUris(share: PendingShare) {
+        val uris = share.images + share.files
+        uris.forEach { uri ->
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: SecurityException) {
+                // Ignore if the URI cannot grant persistable permissions
+            }
+        }
+    }
+
+    private fun extractClipDataUris(clipData: android.content.ClipData?): List<Uri>? {
+        if (clipData == null || clipData.itemCount == 0) return null
+        val uris = mutableListOf<Uri>()
+        for (index in 0 until clipData.itemCount) {
+            val uri = clipData.getItemAt(index)?.uri
+            if (uri != null) {
+                uris += uri
+            }
+        }
+        return uris
+    }
+
+    private fun Intent.getParcelableExtraUri(name: String): Uri? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(name, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableExtra(name)
+        }
+    }
+
+    private fun Intent.getParcelableArrayListExtraUris(name: String): List<Uri>? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableArrayListExtra(name, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableArrayListExtra(name)
+        }
     }
 
     companion object {
@@ -86,6 +225,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val executor = remember(activity) { ContextCompat.getMainExecutor(activity) }
     val biometricManager = remember(activity) { BiometricManager.from(activity) }
     val summarizerState by noteViewModel.summarizerState.collectAsState()
+    val pendingShare by noteViewModel.pendingShare.collectAsState()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
@@ -140,6 +281,16 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
+    LaunchedEffect(pendingShare, navBackStackEntry?.destination?.route) {
+        if (pendingShare == null) return@LaunchedEffect
+        val currentRoute = navBackStackEntry?.destination?.route
+        if (currentRoute != "pin_enter" && currentRoute != "pin_setup") {
+            navController.navigate("add") {
+                launchSingleTop = true
+            }
+        }
+    }
+
     NavHost(navController = navController, startDestination = start) {
         composable("pin_setup") {
             PinSetupScreen(pinManager = pinManager) { pin ->
@@ -183,13 +334,18 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             AddNoteScreen(
                 onSave = { title, content, images, files, linkPreviews, event ->
                     noteViewModel.addNote(title, content, images, files, linkPreviews, event)
+                    noteViewModel.clearPendingShare()
                     navController.popBackStack()
                 },
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    noteViewModel.clearPendingShare()
+                    navController.popBackStack()
+                },
                 onDisablePinCheck = {},
                 onEnablePinCheck = {},
                 summarizerState = summarizerState,
                 entryMode = NoteEntryMode.Note,
+                prefill = pendingShare,
             )
         }
         composable("add_event") {

@@ -10,6 +10,7 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.speech.SpeechRecognizer
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +44,7 @@ import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.Summarizer
 import com.example.starbucknotetaker.UrlDetection
 import com.example.starbucknotetaker.extractUrls
+import com.example.starbucknotetaker.PendingShare
 import androidx.core.content.ContextCompat
 import java.time.Instant
 import java.time.ZoneId
@@ -60,14 +62,41 @@ fun AddNoteScreen(
     summarizerState: Summarizer.SummarizerState,
     entryMode: NoteEntryMode = NoteEntryMode.Note,
     initialEvent: NoteEvent? = null,
+    prefill: PendingShare? = null,
 ) {
-    var title by remember { mutableStateOf("") }
-    val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
-    val dismissedPreviewUrls = remember { mutableStateMapOf<Long, MutableSet<String>>() }
+    var title by remember(prefill) { mutableStateOf(prefill?.title.orEmpty()) }
+    val blocks = remember(prefill) {
+        val initialBlocks = mutableListOf<NoteBlock>()
+        prefill?.text?.takeIf { it.isNotBlank() }?.let { text ->
+            initialBlocks.add(NoteBlock.Text(text))
+        }
+        prefill?.images.orEmpty().forEach { uri ->
+            initialBlocks.add(NoteBlock.Image(uri, 0))
+        }
+        prefill?.files.orEmpty().forEach { uri ->
+            initialBlocks.add(NoteBlock.File(uri))
+        }
+        if (initialBlocks.firstOrNull() !is NoteBlock.Text) {
+            initialBlocks.add(0, NoteBlock.Text(""))
+        }
+        val needsTrailingText = initialBlocks.isEmpty() ||
+            (initialBlocks.last() as? NoteBlock.Text)?.text?.isNotBlank() != false
+        if (needsTrailingText) {
+            initialBlocks.add(NoteBlock.Text(""))
+        }
+        mutableStateListOf<NoteBlock>().apply { addAll(initialBlocks) }
+    }
+    val dismissedPreviewUrls = remember(prefill) { mutableStateMapOf<Long, MutableSet<String>>() }
     val context = LocalContext.current
     val linkPreviewFetcher = remember(context) { LinkPreviewFetcher(context.applicationContext) }
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
+
+    BackHandler {
+        hideKeyboard()
+        focusManager.clearFocus(force = true)
+        onBack()
+    }
 
     val initialZone = remember(initialEvent) {
         initialEvent?.let { runCatching { ZoneId.of(it.timeZone) }.getOrNull() } ?: ZoneId.systemDefault()
@@ -183,6 +212,14 @@ fun AddNoteScreen(
                 blocks.add(insertionIndex, block)
                 insertionIndex++
             }
+        }
+    }
+
+    LaunchedEffect(prefill) {
+        if (!prefill?.text.isNullOrBlank()) {
+            val index = blocks.indexOfFirst { it is NoteBlock.Text && it.text.isNotBlank() }
+            val block = blocks.getOrNull(index) as? NoteBlock.Text ?: return@LaunchedEffect
+            syncLinkPreviews(index, block, finalizePending = true)
         }
     }
 
