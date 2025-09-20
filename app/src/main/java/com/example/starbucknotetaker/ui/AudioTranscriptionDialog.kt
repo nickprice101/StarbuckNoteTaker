@@ -5,18 +5,21 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -223,12 +226,13 @@ fun AudioTranscriptionDialog(
                             }
                         },
                         enabled = buttonEnabled,
-                        modifier = Modifier.size(56.dp)
+                        modifier = Modifier.size(64.dp)
                     ) {
+                        val iconModifier = Modifier.size(48.dp)
                         if (isRecording) {
-                            Icon(Icons.Default.Stop, contentDescription = "Stop recording")
+                            StopRecordingIcon(modifier = iconModifier)
                         } else {
-                            Icon(Icons.Default.Mic, contentDescription = "Start recording")
+                            StartRecordingIcon(modifier = iconModifier)
                         }
                     }
                 }
@@ -271,5 +275,48 @@ private fun AudioLevelMeter(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun StartRecordingIcon(modifier: Modifier = Modifier) {
+    val outlineColor = Color(0xFFFF69B4)
+    val fillColor = Color(0xFFE53935)
+    Canvas(modifier = modifier) {
+        val radius = size.minDimension / 2f
+        val strokeWidth = radius * 0.18f
+        drawCircle(
+            color = outlineColor,
+            radius = radius - strokeWidth / 2f,
+            style = Stroke(width = strokeWidth)
+        )
+        drawCircle(
+            color = fillColor,
+            radius = radius * 0.55f
+        )
+    }
+}
+
+@Composable
+private fun StopRecordingIcon(modifier: Modifier = Modifier) {
+    val outlineColor = Color(0xFFFF69B4)
+    Canvas(modifier = modifier) {
+        val radius = size.minDimension / 2f
+        val strokeWidth = radius * 0.18f
+        drawCircle(
+            color = outlineColor,
+            radius = radius - strokeWidth / 2f,
+            style = Stroke(width = strokeWidth)
+        )
+        val squareSide = radius * 1.1f
+        val topLeft = Offset(
+            x = center.x - squareSide / 2f,
+            y = center.y - squareSide / 2f
+        )
+        drawRect(
+            color = Color.Black,
+            topLeft = topLeft,
+            size = Size(squareSide, squareSide)
+        )
     }
 }
