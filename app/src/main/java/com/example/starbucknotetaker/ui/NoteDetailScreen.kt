@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
@@ -57,7 +58,13 @@ fun NoteDetailScreen(
     var fullImage by remember { mutableStateOf<String?>(null) }
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(note.title) },
+            title = {
+                Text(
+                    note.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(
