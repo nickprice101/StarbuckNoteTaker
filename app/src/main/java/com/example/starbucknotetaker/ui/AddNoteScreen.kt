@@ -6,6 +6,7 @@ import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.speech.SpeechRecognizer
 import android.widget.Toast
@@ -37,6 +38,7 @@ import coil.compose.rememberAsyncImagePainter
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
 import com.example.starbucknotetaker.NoteEvent
+import com.example.starbucknotetaker.REMINDER_MINUTE_OPTIONS
 import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.Summarizer
 import com.example.starbucknotetaker.UrlDetection
@@ -89,6 +91,29 @@ fun AddNoteScreen(
     }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
     val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    var reminderEnabled by remember(initialEvent) {
+        mutableStateOf(initialEvent?.reminderMinutesBeforeStart != null)
+    }
+    var reminderMinutes by remember(initialEvent) {
+        mutableStateOf(initialEvent?.reminderMinutesBeforeStart ?: REMINDER_MINUTE_OPTIONS.getOrElse(4) { 30 })
+    }
+    var pendingReminderPermission by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (pendingReminderPermission) {
+                if (granted) {
+                    reminderEnabled = true
+                } else {
+                    Toast.makeText(
+                        context,
+                        "Notification permission is required to enable reminders",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    reminderEnabled = false
+                }
+                pendingReminderPermission = false
+            }
+        }
 
     fun syncLinkPreviews(
         index: Int,
@@ -338,6 +363,7 @@ fun AddNoteScreen(
                                 allDay = eventAllDay,
                                 timeZone = zoneId.id,
                                 location = eventLocation.takeIf { it.isNotBlank() },
+                                reminderMinutesBeforeStart = reminderMinutes.takeIf { reminderEnabled },
                             )
                         } else {
                             null
@@ -495,6 +521,42 @@ fun AddNoteScreen(
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Reminder")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(
+                                checked = reminderEnabled,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.POST_NOTIFICATIONS
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (!granted) {
+                                                pendingReminderPermission = true
+                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                                return@Switch
+                                            }
+                                        }
+                                        reminderEnabled = true
+                                    } else {
+                                        reminderEnabled = false
+                                    }
+                                }
+                            )
+                        }
+                        if (reminderEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ReminderOffsetDropdown(
+                                selectedMinutes = reminderMinutes,
+                                onMinutesSelected = { reminderMinutes = it },
+                            )
+                        }
                     }
                 }
             }

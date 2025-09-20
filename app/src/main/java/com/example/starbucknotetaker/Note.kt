@@ -47,5 +47,6 @@ data class NoteEvent(
     val allDay: Boolean,
     val timeZone: String,
     val location: String? = null,
+    val reminderMinutesBeforeStart: Int? = null,
 )
 

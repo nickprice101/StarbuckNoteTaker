@@ -18,9 +18,13 @@ import java.net.URL
 import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.widget.Toast
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * ViewModel storing notes in memory.
@@ -35,19 +39,29 @@ class NoteViewModel : ViewModel() {
     private var store: EncryptedNoteStore? = null
     private var context: Context? = null
     private var summarizer: Summarizer? = null
+    private var reminderScheduler: NoteReminderScheduler? = null
     private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
     val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
     private val unlockedNoteIds = mutableStateListOf<Long>()
+    private val reminderNavigationEvents = MutableSharedFlow<Long>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val reminderNavigation: SharedFlow<Long> = reminderNavigationEvents.asSharedFlow()
+    private var pendingReminderNoteId: Long? = null
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
         this.context = context.applicationContext
         val s = EncryptedNoteStore(context)
         store = s
+        reminderScheduler = NoteReminderScheduler(context.applicationContext)
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
         unlockedNoteIds.clear()
         reorderNotes()
+        reminderScheduler?.syncNotes(_notes)
+        tryEmitPendingReminder()
         summarizer = Summarizer(context.applicationContext).also { sum ->
             viewModelScope.launch {
                 sum.state.collect { state ->
@@ -109,6 +123,8 @@ class NoteViewModel : ViewModel() {
         _notes.add(note)
         reorderNotes()
         pin?.let { store?.saveNotes(_notes, it) }
+        reminderScheduler?.scheduleIfNeeded(note)
+        tryEmitPendingReminder()
         val noteId = note.id
         summarizer?.let { sum ->
             viewModelScope.launch {
@@ -129,8 +145,12 @@ class NoteViewModel : ViewModel() {
     fun deleteNote(id: Long) {
         val index = _notes.indexOfFirst { it.id == id }
         if (index != -1) {
+            reminderScheduler?.cancel(id)
             _notes.removeAt(index)
             unlockedNoteIds.remove(id)
+            if (pendingReminderNoteId == id) {
+                pendingReminderNoteId = null
+            }
             pin?.let { store?.saveNotes(_notes, it) }
         }
     }
@@ -164,6 +184,8 @@ class NoteViewModel : ViewModel() {
             _notes[index] = updated
             reorderNotes()
             pin?.let { store?.saveNotes(_notes, it) }
+            reminderScheduler?.scheduleIfNeeded(updated)
+            tryEmitPendingReminder()
             val noteId = updated.id
             summarizer?.let { sum ->
                 viewModelScope.launch {
@@ -205,6 +227,7 @@ class NoteViewModel : ViewModel() {
                 unlockedNoteIds.remove(id)
             }
             pin?.let { store?.saveNotes(_notes, it) }
+            reminderScheduler?.scheduleIfNeeded(updated)
         }
     }
 
@@ -346,6 +369,8 @@ class NoteViewModel : ViewModel() {
             _notes.addAll(imported)
             reorderNotes()
             pin?.let { store?.saveNotes(_notes, it) }
+            reminderScheduler?.syncNotes(_notes)
+            tryEmitPendingReminder()
             true
         } catch (_: Exception) {
             false
@@ -420,6 +445,28 @@ class NoteViewModel : ViewModel() {
         if (!sorted.zip(_notes).all { it.first === it.second }) {
             _notes.clear()
             _notes.addAll(sorted)
+        }
+    }
+
+    fun handleReminderNavigation(noteId: Long) {
+        if (_notes.any { it.id == noteId }) {
+            emitReminderNavigation(noteId)
+        } else {
+            pendingReminderNoteId = noteId
+        }
+    }
+
+    private fun emitReminderNavigation(noteId: Long) {
+        viewModelScope.launch {
+            reminderNavigationEvents.emit(noteId)
+        }
+    }
+
+    private fun tryEmitPendingReminder() {
+        val id = pendingReminderNoteId ?: return
+        if (_notes.any { it.id == id }) {
+            pendingReminderNoteId = null
+            emitReminderNavigation(id)
         }
     }
 }

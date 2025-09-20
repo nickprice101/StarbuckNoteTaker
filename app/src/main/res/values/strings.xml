@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">Starbuck Notes</string>
+    <string name="reminder_notification_channel_name">Event reminders</string>
+    <string name="reminder_notification_channel_description">Notifications before your note events begin.</string>
+    <string name="reminder_notification_title">Upcoming event: %1$s</string>
+    <string name="reminder_notification_locked_body">Unlock with your PIN to view details.</string>
+    <string name="reminder_notification_subtext">Reminder %1$s</string>
 </resources>
