@@ -497,7 +497,7 @@ fun EditNoteScreen(
                                     allDay = eventAllDay,
                                     timeZone = zoneId.id,
                                     location = eventLocation.takeIf { it.isNotBlank() },
-                                    reminderMinutesBeforeStart = reminderMinutes.takeIf { reminderEnabled },
+                                    reminderMinutesBeforeStart = if (reminderEnabled) reminderMinutes else null,
                                 )
                             } else {
                                 note.event
