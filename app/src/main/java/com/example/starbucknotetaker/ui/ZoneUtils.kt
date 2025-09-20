@@ -16,14 +16,11 @@ internal fun formatZoneCode(
     val hours = totalSeconds / 3600
     val minutes = abs(totalSeconds % 3600) / 60
 
-    val rawShortName = zoneId.getDisplayName(TextStyle.SHORT, locale)
-    val sanitizedShortName = rawShortName.takeIf { shortName ->
-        shortName.isNotBlank() &&
-            shortName.any { it.isLetter() } &&
-            shortName.none { it.isDigit() } &&
-            !shortName.contains('+') &&
-            !shortName.contains('-')
-    } ?: "GMT"
+    val base = if (totalSeconds == 0) {
+        "GMT"
+    } else {
+        "UTC"
+    }
 
     val sign = if (totalSeconds >= 0) "+" else "-"
     val hourComponent = String.format(Locale.US, "%d", abs(hours))
@@ -34,7 +31,7 @@ internal fun formatZoneCode(
     }
 
     return buildString {
-        append(sanitizedShortName)
+        append(base)
         append(sign)
         append(hourComponent)
         append(minuteComponent)

@@ -1,5 +1,6 @@
 package com.example.starbucknotetaker.ui
 
+import android.location.Address
 import android.location.Geocoder
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,8 +25,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
@@ -61,6 +65,8 @@ fun LocationAutocompleteField(
     var expanded by remember { mutableStateOf(false) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     var fetchJob by remember { mutableStateOf<Job?>(null) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
 
     fun requestSuggestions(query: String) {
         fetchJob?.cancel()
@@ -74,8 +80,7 @@ fun LocationAutocompleteField(
             val results = withContext(Dispatchers.IO) {
                 runCatching {
                     geocoder.getFromLocationName(query, 5)
-                        ?.mapNotNull { address -> address.getAddressLine(0) }
-                        ?.filter { it.isNotBlank() }
+                        ?.mapNotNull(Address::toSuggestion)
                         ?: emptyList()
                 }.getOrDefault(emptyList())
             }
@@ -86,7 +91,17 @@ fun LocationAutocompleteField(
 
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { expanded = it && suggestions.isNotEmpty() },
+        onExpandedChange = {
+            if (suggestions.isNotEmpty()) {
+                expanded = it
+                if (it) {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
+            } else {
+                expanded = false
+            }
+        },
         modifier = modifier,
     ) {
         OutlinedTextField(
@@ -94,13 +109,15 @@ fun LocationAutocompleteField(
             onValueChange = { newValue ->
                 onValueChange(newValue)
                 requestSuggestions(newValue)
+                keyboardController?.show()
             },
             label = { Text(label) },
             leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             singleLine = true,
             modifier = Modifier
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
         )
         DropdownMenu(
             expanded = expanded && suggestions.isNotEmpty(),
@@ -111,6 +128,8 @@ fun LocationAutocompleteField(
                     onValueChange(suggestion)
                     expanded = false
                     suggestions = emptyList()
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
                 }) {
                     Text(text = suggestion, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -135,6 +154,8 @@ fun TimeZonePicker(
     }
     var expanded by remember { mutableStateOf(false) }
     var query by remember(zoneId) { mutableStateOf(zoneId.id) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
 
     val filteredZones = remember(query, locale) {
         val normalized = query.trim()
@@ -177,19 +198,28 @@ fun TimeZonePicker(
     Column(modifier = modifier) {
         ExposedDropdownMenuBox(
             expanded = expanded && filteredZones.isNotEmpty(),
-            onExpandedChange = { expanded = it && filteredZones.isNotEmpty() },
+            onExpandedChange = { isExpanded ->
+                val hasItems = filteredZones.isNotEmpty()
+                expanded = isExpanded && hasItems
+                if (expanded) {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
+            },
         ) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { newValue ->
                     query = newValue
                     expanded = true
+                    keyboardController?.show()
                 },
                 label = { Text(label) },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && filteredZones.isNotEmpty()) },
                 singleLine = true,
                 modifier = Modifier
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
             )
             DropdownMenu(
                 expanded = expanded && filteredZones.isNotEmpty(),
@@ -200,6 +230,8 @@ fun TimeZonePicker(
                         query = zone.id
                         expanded = false
                         onZoneChange(zone)
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
                     }) {
                         Text(text = formatZoneLabel(zone, locale), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -229,4 +261,37 @@ private fun formatZoneLabel(zoneId: ZoneId, locale: Locale): String {
             append(')')
         }
     }
+}
+
+private fun Address.toSuggestion(): String? {
+    val components = linkedSetOf<String>()
+
+    fun addIfUseful(value: String?) {
+        val cleaned = value?.trim().orEmpty()
+        if (cleaned.isNotEmpty()) {
+            components.add(cleaned)
+        }
+    }
+
+    addIfUseful(featureName)
+
+    val street = listOfNotNull(subThoroughfare?.trim(), thoroughfare?.trim())
+        .filter { it.isNotEmpty() }
+        .joinToString(separator = " ")
+        .takeIf { it.isNotEmpty() }
+    addIfUseful(street)
+
+    addIfUseful(subLocality)
+    addIfUseful(locality)
+    addIfUseful(subAdminArea)
+    addIfUseful(adminArea)
+    addIfUseful(countryName)
+
+    val summary = components.joinToString(separator = ", ")
+    if (summary.isNotEmpty()) {
+        return summary
+    }
+
+    val addressLine = getAddressLine(0)?.trim()
+    return addressLine.takeUnless { it.isNullOrEmpty() }
 }
