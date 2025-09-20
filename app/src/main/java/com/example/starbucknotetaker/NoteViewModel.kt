@@ -55,11 +55,21 @@ class NoteViewModel : ViewModel() {
                     this@NoteViewModel.context?.let { ctx ->
                         when (state) {
                             Summarizer.SummarizerState.Ready ->
-                                Toast.makeText(ctx, "AI summarizer loaded", Toast.LENGTH_SHORT).show()
+                                NotificationInterruptionManager.runOrQueue {
+                                    Toast.makeText(ctx, "AI summarizer loaded", Toast.LENGTH_SHORT).show()
+                                }
                             Summarizer.SummarizerState.Fallback ->
-                                Toast.makeText(ctx, "Using fallback summarization", Toast.LENGTH_SHORT).show()
+                                NotificationInterruptionManager.runOrQueue {
+                                    Toast.makeText(ctx, "Using fallback summarization", Toast.LENGTH_SHORT).show()
+                                }
                             is Summarizer.SummarizerState.Error ->
-                                Toast.makeText(ctx, "Summarizer init failed: ${'$'}{state.message}", Toast.LENGTH_LONG).show()
+                                NotificationInterruptionManager.runOrQueue {
+                                    Toast.makeText(
+                                        ctx,
+                                        "Summarizer init failed: ${'$'}{state.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             else -> {}
                         }
                     }
@@ -196,6 +206,11 @@ class NoteViewModel : ViewModel() {
             }
             pin?.let { store?.saveNotes(_notes, it) }
         }
+    }
+
+    fun updateStoredPin(newPin: String) {
+        pin = newPin
+        pin?.let { store?.saveNotes(_notes, it) }
     }
 
     private fun processNewNoteContent(
