@@ -36,6 +36,7 @@ class NoteViewModel : ViewModel() {
     private var summarizer: Summarizer? = null
     private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
     val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
+    private val unlockedNoteIds = mutableStateListOf<Long>()
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -44,6 +45,7 @@ class NoteViewModel : ViewModel() {
         store = s
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
+        unlockedNoteIds.clear()
         reorderNotes()
         summarizer = Summarizer(context.applicationContext).also { sum ->
             viewModelScope.launch {
@@ -113,6 +115,7 @@ class NoteViewModel : ViewModel() {
         val index = _notes.indexOfFirst { it.id == id }
         if (index != -1) {
             _notes.removeAt(index)
+            unlockedNoteIds.remove(id)
             pin?.let { store?.saveNotes(_notes, it) }
         }
     }
@@ -161,6 +164,30 @@ class NoteViewModel : ViewModel() {
     }
 
     fun getNoteById(id: Long): Note? = _notes.firstOrNull { it.id == id }
+
+    fun isNoteTemporarilyUnlocked(id: Long): Boolean = unlockedNoteIds.contains(id)
+
+    fun markNoteTemporarilyUnlocked(id: Long) {
+        if (!unlockedNoteIds.contains(id)) {
+            unlockedNoteIds.add(id)
+        }
+    }
+
+    fun relockNote(id: Long) {
+        unlockedNoteIds.remove(id)
+    }
+
+    fun setNoteLock(id: Long, locked: Boolean) {
+        val index = _notes.indexOfFirst { it.id == id }
+        if (index != -1) {
+            val updated = _notes[index].copy(isLocked = locked)
+            _notes[index] = updated
+            if (!locked) {
+                unlockedNoteIds.remove(id)
+            }
+            pin?.let { store?.saveNotes(_notes, it) }
+        }
+    }
 
     private fun processNewNoteContent(
         content: String,

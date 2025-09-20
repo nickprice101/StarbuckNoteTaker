@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.runtime.*
@@ -45,7 +47,13 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 @Composable
-fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
+fun NoteDetailScreen(
+    note: Note,
+    onBack: () -> Unit,
+    onEdit: () -> Unit,
+    onLockRequest: () -> Unit,
+    onUnlockRequest: () -> Unit,
+) {
     val context = LocalContext.current
     var fullImage by remember { mutableStateOf<String?>(null) }
     Scaffold(topBar = {
@@ -60,6 +68,20 @@ fun NoteDetailScreen(note: Note, onBack: () -> Unit, onEdit: () -> Unit) {
                 }
             },
             actions = {
+                IconButton(
+                    onClick = {
+                        if (note.isLocked) {
+                            onUnlockRequest()
+                        } else {
+                            onLockRequest()
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (note.isLocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                        contentDescription = if (note.isLocked) "Unlock note" else "Lock note"
+                    )
+                }
                 IconButton(onClick = onEdit) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit")
                 }

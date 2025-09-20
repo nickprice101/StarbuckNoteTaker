@@ -13,6 +13,7 @@ data class Note(
     val linkPreviews: List<NoteLinkPreview> = emptyList(),
     val summary: String = "",
     val event: NoteEvent? = null,
+    val isLocked: Boolean = false,
 )
 
 /**
