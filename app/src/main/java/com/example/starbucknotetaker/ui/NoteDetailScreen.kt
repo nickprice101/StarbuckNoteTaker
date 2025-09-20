@@ -1,12 +1,15 @@
 package com.example.starbucknotetaker.ui
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.MediaStore
 import android.util.Base64
 import android.util.Patterns
-import android.content.ContentValues
-import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -18,12 +21,13 @@ import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,6 +35,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
@@ -38,13 +43,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
+import com.example.starbucknotetaker.formatReminderOffsetMinutes
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import java.io.File
 import java.time.Instant
+import java.util.ArrayList
 import java.util.Locale
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun NoteDetailScreen(
@@ -55,7 +68,9 @@ fun NoteDetailScreen(
     onUnlockRequest: () -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var fullImage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     Scaffold(topBar = {
         TopAppBar(
             title = {
@@ -87,6 +102,66 @@ fun NoteDetailScreen(
                         imageVector = if (note.isLocked) Icons.Default.LockOpen else Icons.Default.Lock,
                         contentDescription = if (note.isLocked) "Unlock note" else "Lock note"
                     )
+                }
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            val preparation = prepareShareAttachments(context, note)
+                            if (preparation.errors.isNotEmpty()) {
+                                Toast.makeText(
+                                    context,
+                                    preparation.errors.joinToString(separator = "\n"),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            val shareText = buildShareText(note)
+                            val attachments = preparation.attachments
+                            if (shareText.isBlank() && attachments.isEmpty()) {
+                                Toast.makeText(context, "Nothing to share", Toast.LENGTH_SHORT).show()
+                                cleanupSharedFiles(attachments)
+                                return@launch
+                            }
+                            val baseIntent = buildShareIntent(context, note, shareText, attachments)
+                            val chooser = Intent.createChooser(baseIntent, "Share note")
+                            if (attachments.isNotEmpty()) {
+                                val lifecycle = lifecycleOwner.lifecycle
+                                val observer = object : LifecycleEventObserver {
+                                    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+                                        if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_DESTROY) {
+                                            cleanupSharedFiles(attachments)
+                                            lifecycle.removeObserver(this)
+                                        }
+                                    }
+                                }
+                                lifecycle.addObserver(observer)
+                                runCatching {
+                                    context.startActivity(chooser)
+                                }.onFailure { throwable ->
+                                    lifecycle.removeObserver(observer)
+                                    cleanupSharedFiles(attachments)
+                                    val message = if (throwable is ActivityNotFoundException) {
+                                        "No apps available to share note."
+                                    } else {
+                                        "Couldn't share note."
+                                    }
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                runCatching {
+                                    context.startActivity(chooser)
+                                }.onFailure { throwable ->
+                                    val message = if (throwable is ActivityNotFoundException) {
+                                        "No apps available to share note."
+                                    } else {
+                                        "Couldn't share note."
+                                    }
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = "Share note")
                 }
                 IconButton(onClick = onEdit) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit")
@@ -253,6 +328,196 @@ fun NoteDetailScreen(
         }
     }
 }
+
+private suspend fun prepareShareAttachments(context: Context, note: Note): SharePreparation {
+    if (note.images.isEmpty() && note.files.isEmpty()) {
+        return SharePreparation(emptyList(), emptyList())
+    }
+    return withContext(Dispatchers.IO) {
+        val directory = File(context.cacheDir, "shared_attachments")
+        if (directory.exists()) {
+            directory.listFiles()?.forEach { runCatching { it.delete() } }
+        } else if (!directory.mkdirs()) {
+            return@withContext SharePreparation(
+                attachments = emptyList(),
+                errors = listOf("Couldn't prepare space for attachments.")
+            )
+        }
+        val authority = "${context.packageName}.fileprovider"
+        val attachments = mutableListOf<PreparedAttachment>()
+        val errors = mutableListOf<String>()
+        note.images.forEachIndexed { index, data ->
+            runCatching {
+                val bytes = Base64.decode(data, Base64.DEFAULT)
+                val file = writeAttachmentFile(directory, "image_${index + 1}.png", bytes)
+                val uri = FileProvider.getUriForFile(context, authority, file)
+                attachments += PreparedAttachment(file, uri, "image/png")
+            }.onFailure {
+                errors += "Couldn't attach image ${index + 1} for sharing."
+            }
+        }
+        note.files.forEach { embedded ->
+            runCatching {
+                val bytes = Base64.decode(embedded.data, Base64.DEFAULT)
+                val fileName = sanitizeFilename(embedded.name).ifBlank { "attachment" }
+                val file = writeAttachmentFile(directory, fileName, bytes)
+                val uri = FileProvider.getUriForFile(context, authority, file)
+                attachments += PreparedAttachment(file, uri, embedded.mime.ifBlank { "*/*" })
+            }.onFailure {
+                errors += "Couldn't attach ${embedded.name} for sharing."
+            }
+        }
+        SharePreparation(attachments, errors)
+    }
+}
+
+private fun writeAttachmentFile(directory: File, baseName: String, bytes: ByteArray): File {
+    val sanitized = sanitizeFilename(baseName).ifBlank { "attachment" }
+    val target = uniqueFile(directory, sanitized)
+    target.outputStream().use { stream ->
+        stream.write(bytes)
+    }
+    return target
+}
+
+private fun buildShareIntent(
+    context: Context,
+    note: Note,
+    shareText: String,
+    attachments: List<PreparedAttachment>,
+): Intent {
+    val multiple = attachments.size > 1
+    val intent = Intent(if (multiple) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND).apply {
+        if (note.title.isNotBlank()) {
+            putExtra(Intent.EXTRA_SUBJECT, note.title)
+            putExtra(Intent.EXTRA_TITLE, note.title)
+        }
+        if (shareText.isNotBlank()) {
+            putExtra(Intent.EXTRA_TEXT, shareText)
+        }
+        type = when {
+            attachments.isEmpty() -> "text/plain"
+            multiple -> "*/*"
+            else -> attachments.first().mimeType
+        }
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    if (attachments.isNotEmpty()) {
+        val streams = ArrayList<Uri>(attachments.size)
+        attachments.forEach { attachment ->
+            streams += attachment.uri
+        }
+        if (multiple) {
+            intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, streams)
+        } else {
+            intent.putExtra(Intent.EXTRA_STREAM, streams.first())
+        }
+        val clipLabel = note.title.ifBlank { "attachments" }
+        val clipData = ClipData.newUri(context.contentResolver, clipLabel, streams.first())
+        streams.drop(1).forEach { uri ->
+            clipData.addItem(ClipData.Item(uri))
+        }
+        intent.clipData = clipData
+    }
+    return intent
+}
+
+private fun buildShareText(note: Note): String {
+    val eventSummary = note.event?.let { buildEventSummary(it) }?.takeIf { it.isNotBlank() }
+    val cleanedContent = attachmentPlaceholderRegex.replace(note.content, "").trim()
+    val sections = mutableListOf<String>()
+    if (note.title.isNotBlank()) {
+        sections += note.title.trim()
+    }
+    if (cleanedContent.isNotBlank()) {
+        sections += cleanedContent
+    }
+    eventSummary?.let { sections += it }
+    return sections.joinToString(separator = "\n\n").trim()
+}
+
+private fun cleanupSharedFiles(attachments: List<PreparedAttachment>) {
+    attachments.forEach { attachment ->
+        runCatching {
+            if (attachment.file.exists()) {
+                attachment.file.delete()
+            }
+        }
+    }
+}
+
+private fun buildEventSummary(event: NoteEvent): String {
+    val zoneId = runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
+    val start = Instant.ofEpochMilli(event.start).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
+    val end = Instant.ofEpochMilli(event.end).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
+    val zoneCode = formatZoneCode(zoneId, Locale.getDefault(), start.toInstant())
+    return buildString {
+        appendLine("Event details:")
+        if (event.allDay) {
+            val startDate = start.toLocalDate()
+            val endDateExclusive = end.toLocalDate()
+            val lastDate = endDateExclusive.minusDays(1)
+            if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
+                appendLine("All-day on ${detailDateFormatter.format(start)} ($zoneCode)")
+            } else {
+                appendLine(
+                    "All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(lastDate)} ($zoneCode)"
+                )
+            }
+        } else {
+            val sameDay = start.toLocalDate() == end.toLocalDate()
+            if (sameDay) {
+                appendLine(detailDateFormatter.format(start))
+                appendLine("${detailTimeFormatter.format(start)} – ${detailTimeFormatter.format(end)} $zoneCode")
+            } else {
+                appendLine("Starts: ${detailDateFormatter.format(start)} ${detailTimeFormatter.format(start)} ($zoneCode)")
+                appendLine("Ends: ${detailDateFormatter.format(end)} ${detailTimeFormatter.format(end)} ($zoneCode)")
+            }
+        }
+        event.location?.takeIf { it.isNotBlank() }?.let { location ->
+            appendLine("Location: $location")
+        }
+        event.reminderMinutesBeforeStart?.let { minutes ->
+            appendLine("Reminder: ${formatReminderOffsetMinutes(minutes)}")
+        }
+        append("Time zone: $zoneCode (${zoneId.id})")
+    }.trim()
+}
+
+private fun sanitizeFilename(name: String): String {
+    val trimmed = name.substringAfterLast('/').substringAfterLast('\\')
+    return trimmed.replace(Regex("[^A-Za-z0-9._-]"), "_")
+}
+
+private fun uniqueFile(directory: File, baseName: String): File {
+    var candidate = File(directory, baseName)
+    if (!candidate.exists()) {
+        return candidate
+    }
+    val dotIndex = baseName.lastIndexOf('.')
+    val namePart = if (dotIndex > 0) baseName.substring(0, dotIndex) else baseName
+    val extension = if (dotIndex > 0) baseName.substring(dotIndex) else ""
+    var index = 1
+    while (candidate.exists()) {
+        val nextName = "${namePart}_${index}${extension}"
+        candidate = File(directory, nextName)
+        index++
+    }
+    return candidate
+}
+
+private val attachmentPlaceholderRegex = Regex("\\[\\[(image|file):\\d+]]")
+
+private data class PreparedAttachment(
+    val file: File,
+    val uri: Uri,
+    val mimeType: String,
+)
+
+private data class SharePreparation(
+    val attachments: List<PreparedAttachment>,
+    val errors: List<String>,
+)
 
 private val detailDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")
 private val detailTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
