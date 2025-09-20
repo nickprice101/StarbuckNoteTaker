@@ -1,5 +1,8 @@
 package com.example.starbucknotetaker
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -26,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.starbucknotetaker.ui.AddNoteScreen
 import com.example.starbucknotetaker.ui.NoteEntryMode
@@ -36,12 +40,15 @@ import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.ui.SettingsScreen
+import java.util.LinkedHashSet
 
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        handleShareIntent(intent)
 
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
 
@@ -51,6 +58,83 @@ class MainActivity : AppCompatActivity() {
                 val navController = rememberNavController()
                 AppContent(navController, noteViewModel, pinManager)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent == null) {
+            return
+        }
+        val action = intent.action
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) {
+            return
+        }
+        val title = intent.getStringExtra(Intent.EXTRA_SUBJECT)
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        val imageUris = LinkedHashSet<Uri>()
+        val fileUris = LinkedHashSet<Uri>()
+        fun addUri(uri: Uri) {
+            if (imageUris.contains(uri) || fileUris.contains(uri)) {
+                return
+            }
+            val mime = contentResolver.getType(uri) ?: intent.type
+            if (mime != null && mime.startsWith("image/")) {
+                imageUris.add(uri)
+            } else {
+                fileUris.add(uri)
+            }
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        when (action) {
+            Intent.ACTION_SEND -> {
+                intent.getParcelableStream()?.let { addUri(it) }
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                intent.getParcelableStreams().forEach { addUri(it) }
+            }
+        }
+        val clipData = intent.clipData
+        if (clipData != null) {
+            for (index in 0 until clipData.itemCount) {
+                clipData.getItemAt(index).uri?.let { addUri(it) }
+            }
+        }
+        if (title.isNullOrBlank() && text.isNullOrBlank() && imageUris.isEmpty() && fileUris.isEmpty()) {
+            return
+        }
+        noteViewModel.setPendingShare(
+            PendingShare(
+                title = title,
+                text = text,
+                images = imageUris.toList(),
+                files = fileUris.toList(),
+            )
+        )
+    }
+
+    private fun Intent.getParcelableStream(): Uri? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableExtra(Intent.EXTRA_STREAM)
+        }
+    }
+
+    private fun Intent.getParcelableStreams(): List<Uri> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)?.toList().orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
         }
     }
 }
@@ -63,6 +147,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val executor = remember(activity) { ContextCompat.getMainExecutor(activity) }
     val biometricManager = remember(activity) { BiometricManager.from(activity) }
     val summarizerState by noteViewModel.summarizerState.collectAsState()
+    val pendingShare by noteViewModel.pendingShare.collectAsState()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
@@ -100,6 +186,17 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             .setNegativeButtonText("Use PIN")
             .build()
         biometricPrompt.authenticate(promptInfo)
+    }
+
+    LaunchedEffect(pendingShare?.id, navBackStackEntry?.destination?.route) {
+        val share = pendingShare ?: return@LaunchedEffect
+        val route = navBackStackEntry?.destination?.route ?: return@LaunchedEffect
+        if (route == "pin_enter" || route == "pin_setup" || route == "add") {
+            return@LaunchedEffect
+        }
+        navController.navigate("add") {
+            launchSingleTop = true
+        }
     }
 
     NavHost(navController = navController, startDestination = start) {
@@ -151,6 +248,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onDisablePinCheck = {},
                 onEnablePinCheck = {},
                 summarizerState = summarizerState,
+                pendingShare = pendingShare,
+                onClearPendingShare = noteViewModel::clearPendingShare,
                 entryMode = NoteEntryMode.Note,
             )
         }

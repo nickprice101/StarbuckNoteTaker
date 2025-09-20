@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.net.URL
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -38,6 +39,8 @@ class NoteViewModel : ViewModel() {
     private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
     val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
     private val unlockedNoteIds = mutableStateListOf<Long>()
+    private val _pendingShare = MutableStateFlow<PendingShare?>(null)
+    val pendingShare: StateFlow<PendingShare?> = _pendingShare
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -194,6 +197,14 @@ class NoteViewModel : ViewModel() {
 
     fun relockNote(id: Long) {
         unlockedNoteIds.remove(id)
+    }
+
+    fun setPendingShare(share: PendingShare?) {
+        _pendingShare.value = share
+    }
+
+    fun clearPendingShare() {
+        _pendingShare.value = null
     }
 
     fun setNoteLock(id: Long, locked: Boolean) {
@@ -423,3 +434,13 @@ class NoteViewModel : ViewModel() {
         }
     }
 }
+
+private val pendingShareIdGenerator = AtomicLong(0L)
+
+data class PendingShare(
+    val title: String?,
+    val text: String?,
+    val images: List<Uri> = emptyList(),
+    val files: List<Uri> = emptyList(),
+    val id: Long = pendingShareIdGenerator.incrementAndGet(),
+)

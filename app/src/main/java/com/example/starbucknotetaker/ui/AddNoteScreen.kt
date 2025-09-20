@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.speech.SpeechRecognizer
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
+import com.example.starbucknotetaker.PendingShare
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
 import com.example.starbucknotetaker.NoteEvent
@@ -56,16 +58,25 @@ fun AddNoteScreen(
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
     summarizerState: Summarizer.SummarizerState,
+    pendingShare: PendingShare? = null,
+    onClearPendingShare: () -> Unit = {},
     entryMode: NoteEntryMode = NoteEntryMode.Note,
     initialEvent: NoteEvent? = null,
 ) {
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<NoteBlock>(NoteBlock.Text("")) }
     val dismissedPreviewUrls = remember { mutableStateMapOf<Long, MutableSet<String>>() }
+    var appliedShareId by remember { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
     val linkPreviewFetcher = remember(context) { LinkPreviewFetcher(context.applicationContext) }
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
+    val handleBack = {
+        hideKeyboard()
+        focusManager.clearFocus(force = true)
+        onClearPendingShare()
+        onBack()
+    }
 
     val initialZone = remember(initialEvent) {
         initialEvent?.let { runCatching { ZoneId.of(it.timeZone) }.getOrNull() } ?: ZoneId.systemDefault()
@@ -161,6 +172,59 @@ fun AddNoteScreen(
         }
     }
 
+    LaunchedEffect(pendingShare?.id) {
+        val share = pendingShare
+        if (share == null) {
+            appliedShareId = null
+            return@LaunchedEffect
+        }
+        if (appliedShareId == share.id) {
+            return@LaunchedEffect
+        }
+        appliedShareId = share.id
+        dismissedPreviewUrls.clear()
+        val newBlocks = mutableListOf<NoteBlock>()
+        val textContent = share.text?.takeIf { it.isNotBlank() }
+        var textIndex = -1
+        if (textContent != null) {
+            val textBlock = NoteBlock.Text(textContent)
+            newBlocks.add(textBlock)
+            textIndex = 0
+        } else {
+            newBlocks.add(NoteBlock.Text(""))
+        }
+        share.images.forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            newBlocks.add(NoteBlock.Image(uri, 0))
+            newBlocks.add(NoteBlock.Text(""))
+        }
+        share.files.forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            newBlocks.add(NoteBlock.File(uri))
+            newBlocks.add(NoteBlock.Text(""))
+        }
+        if (newBlocks.lastOrNull() !is NoteBlock.Text) {
+            newBlocks.add(NoteBlock.Text(""))
+        }
+        blocks.clear()
+        blocks.addAll(newBlocks)
+        title = share.title.orEmpty()
+        if (textIndex != -1) {
+            val textBlock = blocks[textIndex] as NoteBlock.Text
+            syncLinkPreviews(textIndex, textBlock, finalizePending = true)
+        }
+    }
+
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         uri?.let {
             runCatching {
@@ -238,6 +302,8 @@ fun AddNoteScreen(
         onDispose { onEnablePinCheck() }
     }
 
+    BackHandler { handleBack() }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -250,11 +316,7 @@ fun AddNoteScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        hideKeyboard()
-                        focusManager.clearFocus(force = true)
-                        onBack()
-                    }) {
+                    IconButton(onClick = { handleBack() }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -343,6 +405,7 @@ fun AddNoteScreen(
                             null
                         }
                         onSave(title, content, imageList, fileList, linkPreviewList, event)
+                        onClearPendingShare()
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")
                     }
