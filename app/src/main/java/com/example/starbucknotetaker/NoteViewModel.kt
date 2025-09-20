@@ -434,7 +434,7 @@ class NoteViewModel : ViewModel() {
         }.trim()
         val summaryText = reason?.takeIf { it.isNotBlank() } ?: "Summarizer fallback triggered"
         val note = Note(
-            title = "Summarizer Debug – $referencedTitle (#${'$'}{debugNoteCounter++})",
+            title = "Summarizer Debug – $referencedTitle (#${debugNoteCounter++})",
             content = content,
             summary = summaryText.take(200),
             date = System.currentTimeMillis(),

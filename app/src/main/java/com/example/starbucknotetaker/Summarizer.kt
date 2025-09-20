@@ -128,14 +128,14 @@ class Summarizer(
         val trace = mutableListOf<String>()
         debugTrace.set(trace)
         try {
-            emitDebug("summarizing text of length ${'$'}{text.length}")
+            emitDebug("summarizing text of length ${text.length}")
             loadModelsIfNeeded()
             val enc = encoder
             val dec = decoder
             val tok = tokenizer
 
             suspend fun fallback(reason: String, throwable: Throwable? = null): String {
-                emitDebug("fallback reason: ${'$'}reason")
+                emitDebug("fallback reason: $reason")
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
                 return fallbackSummary(text)
@@ -150,7 +150,7 @@ class Summarizer(
             val sourceKeywords = buildKeywordStats(text)
 
             if (enc.inputTensorCount != 2) {
-                return@withContext fallback("unexpected encoder input count: ${'$'}{enc.inputTensorCount}")
+                return@withContext fallback("unexpected encoder input count: ${enc.inputTensorCount}")
             }
 
             val encoderAttentionTensor = enc.getInputTensor(0)
@@ -158,7 +158,7 @@ class Summarizer(
             val encoderBatch = encoderInputTensor.dimensionOrElse(0, 1)
             val attentionBatch = encoderAttentionTensor.dimensionOrElse(0, encoderBatch)
             if (encoderBatch != 1 || attentionBatch != 1) {
-                return@withContext fallback("unsupported encoder batch size: ${'$'}encoderBatch/${'$'}attentionBatch")
+                return@withContext fallback("unsupported encoder batch size: ${encoderBatch}/${attentionBatch}")
             }
 
             val encoderTokenCapacity = encoderInputTensor.dimensionOrElse(1, MAX_INPUT_TOKENS)
@@ -166,7 +166,7 @@ class Summarizer(
             val encoderOutputTensor = enc.getOutputTensor(0)
             val encoderHiddenBatch = encoderOutputTensor.dimensionOrElse(0, 1)
             if (encoderHiddenBatch != 1) {
-                return@withContext fallback("unsupported encoder hidden batch size: ${'$'}encoderHiddenBatch")
+                return@withContext fallback("unsupported encoder hidden batch size: ${encoderHiddenBatch}")
             }
             val encoderHiddenCapacity = encoderOutputTensor.dimensionOrElse(1, encoderTokenCapacity)
             val encoderHiddenSize = encoderOutputTensor.dimensionOrElse(2, ENCODER_HIDDEN_SIZE)
@@ -198,7 +198,7 @@ class Summarizer(
             enc.runForMultipleInputsOutputs(encoderInputs, encOutputs)
 
             if (dec.inputTensorCount < 3) {
-                return@withContext fallback("unexpected decoder input count: ${'$'}{dec.inputTensorCount}")
+                return@withContext fallback("unexpected decoder input count: ${dec.inputTensorCount}")
             }
 
             val decoderAttentionTensor = dec.getInputTensor(0)
@@ -209,7 +209,7 @@ class Summarizer(
             val decoderHiddenBatch = decoderHiddenTensor.dimensionOrElse(0, 1)
             if (decoderAttentionBatch != 1 || decoderTokenBatch != 1 || decoderHiddenBatch != 1) {
                 return@withContext fallback(
-                    "unsupported decoder batch sizes: ${'$'}decoderAttentionBatch/${'$'}decoderTokenBatch/${'$'}decoderHiddenBatch"
+                    "unsupported decoder batch sizes: ${decoderAttentionBatch}/${decoderTokenBatch}/${decoderHiddenBatch}"
                 )
             }
 
@@ -219,7 +219,7 @@ class Summarizer(
             val decoderHiddenSize = decoderHiddenTensor.dimensionOrElse(2, encoderHiddenSize)
             if (encoderHiddenCapacity > decoderHiddenCapacity || encoderHiddenSize > decoderHiddenSize) {
                 return@withContext fallback(
-                    "decoder hidden state smaller than encoder output: ${'$'}{encoderHiddenCapacity}x${'$'}{encoderHiddenSize} vs ${'$'}{decoderHiddenCapacity}x${'$'}{decoderHiddenSize}"
+                    "decoder hidden state smaller than encoder output: ${encoderHiddenCapacity}x${encoderHiddenSize} vs ${decoderHiddenCapacity}x${decoderHiddenSize}"
                 )
             }
 
@@ -358,13 +358,13 @@ class Summarizer(
                     Float.NaN
                 }
                 if (!semanticScore.isNaN() && semanticScore >= SEMANTIC_SIMILARITY_THRESHOLD) {
-                    emitDebug("accepting abstractive summary due to semantic similarity ${'$'}semanticScore")
+                    emitDebug("accepting abstractive summary due to semantic similarity ${semanticScore}")
                 } else {
                     emitDebug(
-                        "abstractive summary missing keyword overlap: ${'$'}overlapHits/${'$'}requiredOverlap semantic=${'$'}semanticScore"
+                        "abstractive summary missing keyword overlap: ${overlapHits}/${requiredOverlap} semantic=${semanticScore}"
                     )
                     return@withContext fallback(
-                        "abstractive summary missing keyword overlap (${'$'}overlapHits/${'$'}requiredOverlap)"
+                        "abstractive summary missing keyword overlap (${overlapHits}/${requiredOverlap})"
                     )
                 }
             }
@@ -411,7 +411,7 @@ class Summarizer(
         }
 
         top.forEach {
-            emitDebug("fallback sentence[${'$'}{it.index}] score=${"%.2f".format(it.score)} ${'$'}{it.text}")
+            emitDebug("fallback sentence[${it.index}] score=${"%.2f".format(it.score)} ${it.text}")
         }
 
         val summary = top.joinToString(" ") { candidate ->
