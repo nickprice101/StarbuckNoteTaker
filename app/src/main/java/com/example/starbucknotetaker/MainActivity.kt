@@ -1,6 +1,9 @@
 package com.example.starbucknotetaker
 
+import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -36,6 +39,7 @@ import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.ui.SettingsScreen
+import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
@@ -52,6 +56,25 @@ class MainActivity : AppCompatActivity() {
                 AppContent(navController, noteViewModel, pinManager)
             }
         }
+
+        handleReminderIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleReminderIntent(intent)
+    }
+
+    private fun handleReminderIntent(intent: Intent?) {
+        val noteId = intent?.getLongExtra(EXTRA_NOTE_ID, -1L)?.takeIf { it > 0 } ?: return
+        noteViewModel.handleReminderNavigation(noteId)
+        intent.removeExtra(EXTRA_NOTE_ID)
+    }
+
+    companion object {
+        const val ACTION_VIEW_NOTE_FROM_REMINDER = "com.example.starbucknotetaker.action.VIEW_NOTE"
+        const val EXTRA_NOTE_ID = "extra_note_id"
     }
 }
 
@@ -100,6 +123,21 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             .setNegativeButtonText("Use PIN")
             .build()
         biometricPrompt.authenticate(promptInfo)
+    }
+
+    LaunchedEffect(noteViewModel) {
+        noteViewModel.reminderNavigation.collectLatest { noteId ->
+            val note = noteViewModel.getNoteById(noteId)
+            if (note == null) {
+                Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
+            } else if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
+                pendingOpenNoteId = note.id
+            } else {
+                navController.navigate("detail/$noteId") {
+                    launchSingleTop = true
+                }
+            }
+        }
     }
 
     NavHost(navController = navController, startDestination = start) {

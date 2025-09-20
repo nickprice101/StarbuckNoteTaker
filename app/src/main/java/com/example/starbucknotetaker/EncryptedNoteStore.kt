@@ -76,13 +76,19 @@ class EncryptedNoteStore(private val context: Context) {
             }
             val eventObj = obj.optJSONObject("event")
             val event = eventObj?.let {
+                val reminderMinutes = if (it.has("reminderMinutesBeforeStart") && !it.isNull("reminderMinutesBeforeStart")) {
+                    it.optInt("reminderMinutesBeforeStart")
+                } else {
+                    null
+                }
                 NoteEvent(
                     start = it.getLong("start"),
                     end = it.getLong("end"),
                     allDay = it.optBoolean("allDay", false),
                     timeZone = it.optString("timeZone", java.util.TimeZone.getDefault().id),
                     location = it.optString("location", null)
-                        ?.takeIf { location -> location.isNotBlank() }
+                        ?.takeIf { location -> location.isNotBlank() },
+                    reminderMinutesBeforeStart = reminderMinutes,
                 )
             }
             notes.add(
@@ -142,6 +148,7 @@ class EncryptedNoteStore(private val context: Context) {
                 eo.put("allDay", event.allDay)
                 eo.put("timeZone", event.timeZone)
                 event.location?.let { eo.put("location", it) }
+                event.reminderMinutesBeforeStart?.let { eo.put("reminderMinutesBeforeStart", it) }
                 obj.put("event", eo)
             }
             obj.put("locked", note.isLocked)
