@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -45,6 +46,19 @@ fun AudioTranscriptionDialog(
     var rms by remember { mutableStateOf(0f) }
     var partialText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val dialogView = LocalView.current
+    val shouldKeepScreenOn = isRecording || awaitingResult
+    DisposableEffect(dialogView, shouldKeepScreenOn) {
+        if (shouldKeepScreenOn) {
+            dialogView.keepScreenOn = true
+        }
+        onDispose {
+            if (shouldKeepScreenOn) {
+                dialogView.keepScreenOn = false
+            }
+        }
+    }
 
     DisposableEffect(speechRecognizer) {
         val listener = object : RecognitionListener {
