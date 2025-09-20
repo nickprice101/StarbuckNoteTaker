@@ -26,11 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import java.time.Instant
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
-import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -145,14 +143,9 @@ fun TimeZonePicker(
         } else {
             val lowered = normalized.lowercase(locale)
             allZones.filter { zone ->
-                val idMatch = zone.id.lowercase(locale).contains(lowered)
-                val fullMatch = zone.getDisplayName(TextStyle.FULL, locale)
-                    .lowercase(locale)
-                    .contains(lowered)
-                val shortMatch = zone.getDisplayName(TextStyle.SHORT, locale)
-                    .lowercase(locale)
-                    .contains(lowered)
-                idMatch || fullMatch || shortMatch
+                zoneSearchStrings(zone, locale).any { candidate ->
+                    candidate.lowercase(locale).contains(lowered)
+                }
             }.take(12)
         }
     }
@@ -165,7 +158,17 @@ fun TimeZonePicker(
 
     LaunchedEffect(query) {
         val trimmed = query.trim()
-        val match = allZones.firstOrNull { it.id == trimmed }
+        if (trimmed.isEmpty()) {
+            return@LaunchedEffect
+        }
+        val lowered = trimmed.lowercase(locale)
+        val match = allZones.firstOrNull { zone ->
+            zoneSearchStrings(zone, locale).any { candidate ->
+                val normalizedCandidate = candidate.replace('_', ' ')
+                normalizedCandidate.equals(trimmed, ignoreCase = true) ||
+                    normalizedCandidate.lowercase(locale) == lowered
+            }
+        }
         if (match != null && match != zoneId) {
             onZoneChange(match)
         }
@@ -212,12 +215,18 @@ fun TimeZonePicker(
 }
 
 private fun formatZoneLabel(zoneId: ZoneId, locale: Locale): String {
-    val offset = zoneId.rules.getOffset(Instant.now())
-    val totalSeconds = offset.totalSeconds
-    val hours = totalSeconds / 3600
-    val minutes = abs(totalSeconds % 3600) / 60
-    val sign = if (totalSeconds >= 0) "+" else "-"
-    val offsetText = String.format(Locale.US, "GMT%s%02d:%02d", sign, abs(hours), minutes)
-    val shortName = zoneId.getDisplayName(TextStyle.SHORT, locale)
-    return "$offsetText • ${zoneId.id} ($shortName)"
+    val code = formatZoneCode(zoneId, locale)
+    val displayName = zoneIdDisplayName(zoneId)
+    val longName = zoneId.getDisplayName(TextStyle.FULL, locale)
+    val suffix = longName.takeIf { it.isNotBlank() && !it.equals(displayName, ignoreCase = true) }
+    return buildString {
+        append(code)
+        append(" • ")
+        append(displayName)
+        suffix?.let {
+            append(" (")
+            append(it)
+            append(')')
+        }
+    }
 }
