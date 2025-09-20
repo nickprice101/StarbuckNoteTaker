@@ -58,7 +58,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val context = LocalContext.current
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
-    var pendingLockNoteId by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
 
     NavHost(navController = navController, startDestination = start) {
@@ -134,7 +133,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     note = note,
                     onBack = { navController.popBackStack() },
                     onEdit = { navController.navigate("edit/$noteId") },
-                    onLockRequest = { pendingLockNoteId = note.id },
+                    onLockRequest = {
+                        noteViewModel.setNoteLock(note.id, true)
+                        noteViewModel.markNoteTemporarilyUnlocked(note.id)
+                    },
                     onUnlockRequest = { pendingUnlockNoteId = note.id }
                 )
             } else {
@@ -162,11 +164,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
         composable("settings") {
             SettingsScreen(
+                pinManager = pinManager,
                 onBack = { navController.popBackStack() },
                 onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
                 onExport = { uri -> noteViewModel.exportNotes(context, uri) },
                 onDisablePinCheck = {},
-                onEnablePinCheck = {}
+                onEnablePinCheck = {},
+                onPinChanged = { newPin -> noteViewModel.updateStoredPin(newPin) }
             )
         }
     }
@@ -187,25 +191,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             )
         } else {
             pendingOpenNoteId = null
-        }
-    }
-
-    pendingLockNoteId?.let { noteId ->
-        val note = noteViewModel.getNoteById(noteId)
-        if (note != null) {
-            PinPromptDialog(
-                title = "Lock note",
-                message = "Enter your PIN to lock \"${note.title}\".",
-                pinManager = pinManager,
-                onDismiss = { pendingLockNoteId = null },
-                onPinConfirmed = {
-                    noteViewModel.setNoteLock(noteId, true)
-                    noteViewModel.markNoteTemporarilyUnlocked(noteId)
-                    pendingLockNoteId = null
-                }
-            )
-        } else {
-            pendingLockNoteId = null
         }
     }
 

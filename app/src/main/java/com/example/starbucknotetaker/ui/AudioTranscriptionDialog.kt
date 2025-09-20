@@ -7,7 +7,19 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
@@ -23,10 +35,13 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import java.util.Locale
 import kotlin.math.roundToInt
+
+import com.example.starbucknotetaker.NotificationInterruptionManager
 
 @Composable
 fun AudioTranscriptionDialog(
@@ -46,6 +61,16 @@ fun AudioTranscriptionDialog(
     var rms by remember { mutableStateOf(0f) }
     var partialText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val isTranscribing = isRecording || awaitingResult
+    if (isTranscribing) {
+        DisposableEffect(Unit) {
+            NotificationInterruptionManager.blockNotifications()
+            onDispose {
+                NotificationInterruptionManager.releaseNotifications().forEach { it() }
+            }
+        }
+    }
 
     val dialogView = LocalView.current
     val shouldKeepScreenOn = isRecording || awaitingResult
@@ -204,6 +229,7 @@ fun AudioTranscriptionDialog(
                 Spacer(modifier = Modifier.weight(1f, fill = true))
 
                 val normalizedLevel = ((rms + 2f) / 10f).coerceIn(0f, 1f)
+                val meterContentHeight = 96.dp
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -211,6 +237,7 @@ fun AudioTranscriptionDialog(
                 ) {
                     AudioLevelMeter(
                         level = if (isRecording) normalizedLevel else 0f,
+                        meterHeight = meterContentHeight,
                         modifier = Modifier.width(220.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
@@ -240,9 +267,9 @@ fun AudioTranscriptionDialog(
                             }
                         },
                         enabled = buttonEnabled,
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(meterContentHeight)
                     ) {
-                        val iconModifier = Modifier.size(48.dp)
+                        val iconModifier = Modifier.size(meterContentHeight * 0.75f)
                         if (isRecording) {
                             StopRecordingIcon(modifier = iconModifier)
                         } else {
@@ -259,6 +286,7 @@ fun AudioTranscriptionDialog(
 private fun AudioLevelMeter(
     level: Float,
     modifier: Modifier = Modifier,
+    meterHeight: Dp = 48.dp,
 ) {
     Column(modifier = modifier, horizontalAlignment = Alignment.Start) {
         Text(
@@ -271,7 +299,7 @@ private fun AudioLevelMeter(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .height(meterHeight),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
