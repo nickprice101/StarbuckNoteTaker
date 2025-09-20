@@ -120,7 +120,7 @@ class NoteViewModel : ViewModel() {
                     pin?.let { store?.saveNotes(_notes, it) }
                 }
                 if (shouldCreateDebugNote(trace)) {
-                    createSummarizerDebugNote(summarizerSource, trace)
+                    createSummarizerDebugNote(finalTitle, summarizerSource, trace)
                 }
             }
         }
@@ -175,7 +175,7 @@ class NoteViewModel : ViewModel() {
                         pin?.let { store?.saveNotes(_notes, it) }
                     }
                     if (shouldCreateDebugNote(trace)) {
-                        createSummarizerDebugNote(summarizerSource, trace)
+                        createSummarizerDebugNote(finalTitle, summarizerSource, trace)
                     }
                 }
             }
@@ -367,15 +367,26 @@ class NoteViewModel : ViewModel() {
         return trace.any { it.startsWith("fallback reason:") }
     }
 
-    private fun createSummarizerDebugNote(source: String, trace: List<String>) {
+    private fun createSummarizerDebugNote(relatedTitle: String, source: String, trace: List<String>) {
         if (trace.isEmpty()) return
         val reason = trace.firstOrNull { it.startsWith("fallback reason:") }
             ?.removePrefix("fallback reason:")
             ?.trim()
+        val sanitizedRelatedTitle = relatedTitle
+            .lines()
+            .firstOrNull()
+            ?.take(60)
+            ?.trim()
+            .orEmpty()
+        val referencedTitle = if (sanitizedRelatedTitle.isNotBlank()) {
+            sanitizedRelatedTitle
+        } else {
+            "Related entry"
+        }
         val content = buildString {
-            appendLine("Summarizer fallback triggered.")
+            appendLine("Summarizer fallback triggered for \"$referencedTitle\".")
             if (!reason.isNullOrBlank()) {
-                appendLine("Reason: ${'$'}reason")
+                appendLine("Reason: $reason")
             }
             if (source.isNotBlank()) {
                 appendLine()
@@ -384,11 +395,11 @@ class NoteViewModel : ViewModel() {
             }
             appendLine()
             appendLine("Debug trace:")
-            trace.forEach { appendLine("• ${'$'}it") }
+            trace.forEach { appendLine("• $it") }
         }.trim()
         val summaryText = reason?.takeIf { it.isNotBlank() } ?: "Summarizer fallback triggered"
         val note = Note(
-            title = "Summarizer Debug #${'$'}{debugNoteCounter++}",
+            title = "Summarizer Debug – $referencedTitle (#${'$'}{debugNoteCounter++})",
             content = content,
             summary = summaryText.take(200),
             date = System.currentTimeMillis(),
