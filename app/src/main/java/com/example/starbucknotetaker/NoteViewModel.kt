@@ -30,6 +30,7 @@ class NoteViewModel : ViewModel() {
     val notes: List<Note> = _notes
 
     private var untitledCounter = 1
+    private var debugNoteCounter = 1
     private var pin: String? = null
     private var store: EncryptedNoteStore? = null
     private var context: Context? = null
@@ -102,10 +103,14 @@ class NoteViewModel : ViewModel() {
         summarizer?.let { sum ->
             viewModelScope.launch {
                 val summary = sum.summarize(summarizerSource)
+                val trace = sum.consumeDebugTrace()
                 val index = _notes.indexOfFirst { it.id == noteId }
                 if (index != -1) {
                     _notes[index] = _notes[index].copy(summary = summary)
                     pin?.let { store?.saveNotes(_notes, it) }
+                }
+                if (shouldCreateDebugNote(trace)) {
+                    createSummarizerDebugNote(summarizerSource, trace)
                 }
             }
         }
@@ -153,10 +158,14 @@ class NoteViewModel : ViewModel() {
             summarizer?.let { sum ->
                 viewModelScope.launch {
                     val summary = sum.summarize(summarizerSource)
+                    val trace = sum.consumeDebugTrace()
                     val newIndex = _notes.indexOfFirst { it.id == noteId }
                     if (newIndex != -1) {
                         _notes[newIndex] = _notes[newIndex].copy(summary = summary)
                         pin?.let { store?.saveNotes(_notes, it) }
+                    }
+                    if (shouldCreateDebugNote(trace)) {
+                        createSummarizerDebugNote(summarizerSource, trace)
                     }
                 }
             }
@@ -337,6 +346,41 @@ class NoteViewModel : ViewModel() {
         return Patterns.WEB_URL.matcher(url).matches() &&
                 (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
                         lower.endsWith(".gif") || lower.endsWith(".bmp") || lower.endsWith(".webp"))
+    }
+
+    private fun shouldCreateDebugNote(trace: List<String>): Boolean {
+        return trace.any { it.startsWith("fallback reason:") }
+    }
+
+    private fun createSummarizerDebugNote(source: String, trace: List<String>) {
+        if (trace.isEmpty()) return
+        val reason = trace.firstOrNull { it.startsWith("fallback reason:") }
+            ?.removePrefix("fallback reason:")
+            ?.trim()
+        val content = buildString {
+            appendLine("Summarizer fallback triggered.")
+            if (!reason.isNullOrBlank()) {
+                appendLine("Reason: ${'$'}reason")
+            }
+            if (source.isNotBlank()) {
+                appendLine()
+                appendLine("Source excerpt:")
+                appendLine(source.take(500))
+            }
+            appendLine()
+            appendLine("Debug trace:")
+            trace.forEach { appendLine("• ${'$'}it") }
+        }.trim()
+        val summaryText = reason?.takeIf { it.isNotBlank() } ?: "Summarizer fallback triggered"
+        val note = Note(
+            title = "Summarizer Debug #${'$'}{debugNoteCounter++}",
+            content = content,
+            summary = summaryText.take(200),
+            date = System.currentTimeMillis(),
+        )
+        _notes.add(note)
+        reorderNotes()
+        pin?.let { store?.saveNotes(_notes, it) }
     }
 
     private fun reorderNotes() {

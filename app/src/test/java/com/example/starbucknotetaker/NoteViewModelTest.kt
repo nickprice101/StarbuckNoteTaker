@@ -34,6 +34,7 @@ class NoteViewModelTest {
         val summarizer = mock<Summarizer>()
         whenever(summarizer.fallbackSummary(any())).thenReturn("initial summary")
         whenever(summarizer.summarize(any())).thenReturn("mocked summary")
+        whenever(summarizer.consumeDebugTrace()).thenReturn(emptyList())
 
         val viewModel = NoteViewModel()
         setField(viewModel, "summarizer", summarizer)
