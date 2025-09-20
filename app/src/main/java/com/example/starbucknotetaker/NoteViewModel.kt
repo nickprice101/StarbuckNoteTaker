@@ -49,6 +49,8 @@ class NoteViewModel : ViewModel() {
     )
     val reminderNavigation: SharedFlow<Long> = reminderNavigationEvents.asSharedFlow()
     private var pendingReminderNoteId: Long? = null
+    private val _pendingShare = MutableStateFlow<PendingShare?>(null)
+    val pendingShare: StateFlow<PendingShare?> = _pendingShare
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -90,6 +92,14 @@ class NoteViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    fun setPendingShare(pending: PendingShare?) {
+        _pendingShare.value = pending
+    }
+
+    fun clearPendingShare() {
+        _pendingShare.value = null
     }
 
     fun addNote(
@@ -470,3 +480,10 @@ class NoteViewModel : ViewModel() {
         }
     }
 }
+
+data class PendingShare(
+    val title: String?,
+    val text: String?,
+    val images: List<Uri>,
+    val files: List<Uri>,
+)
