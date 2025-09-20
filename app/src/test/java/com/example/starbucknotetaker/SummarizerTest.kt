@@ -30,11 +30,14 @@ class SummarizerTest {
     }
 
     @Test
-    fun fallbackSummaryReturnsFirstTwoSentences() {
-        val summarizer = Summarizer(context, nativeLoader = { false })
-        val text = "Sentence one. Sentence two. Sentence three."
+    fun fallbackSummaryPrefersHighScoringSentences() {
+        val summarizer = Summarizer(context, nativeLoader = { false }, debugSink = { })
+        val text = "Security updates require MFA for all accounts. Lunch options were discussed briefly. The security updates also add mandatory VPN use."
         val summary = summarizer.fallbackSummary(text)
-        assertEquals("Sentence one. Sentence two", summary)
+        assertEquals(
+            "Security updates require MFA for all accounts. The security updates also add mandatory VPN use.",
+            summary
+        )
     }
 
     @Test
@@ -49,11 +52,11 @@ class SummarizerTest {
             ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
         )
 
-        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debug = { })
+        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debugSink = { })
 
         val text = "One. Two. Three."
         val result = summarizer.summarize(text)
-        assertEquals("One. Two", result)
+        assertEquals("One. Two.", result)
     }
 
     @Test
@@ -90,7 +93,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val summary = summarizer.summarize("Input text")
@@ -155,7 +158,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val input = "Sir Keir Starmer faces pressure over the Mandelson sacking."
@@ -209,7 +212,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val summary = summarizer.summarize("Rain forced the final match to be abandoned.")
@@ -270,7 +273,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val input = "Project planning notes covering roadmap milestones"
@@ -339,7 +342,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val note = "Project meeting notes include timeline updates and budget discussion."
@@ -410,7 +413,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val note = "Team organizes projects and schedules updates for releases."
@@ -485,7 +488,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val source = "Roadmap review covers milestones, budgets, timeline risks, and rollout preparation."
@@ -548,7 +551,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val note = "Follow-up addresses hand-offs and sign-offs."
@@ -596,7 +599,7 @@ class SummarizerTest {
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val summary = summarizer.summarize("Input text")
@@ -618,7 +621,7 @@ class SummarizerTest {
             ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
         )
 
-        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debug = { })
+        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debugSink = { })
 
         val state = summarizer.warmUp()
         assertEquals(Summarizer.SummarizerState.Fallback, state)
@@ -663,7 +666,7 @@ class SummarizerTest {
             nativeLoader = { NativeLibraryLoader.ensureTokenizer(it) },
             interpreterFactory = { interpreters.removeFirst() },
             logger = { _, _ -> },
-            debug = { }
+            debugSink = { }
         )
 
         val state = summarizer.warmUp()

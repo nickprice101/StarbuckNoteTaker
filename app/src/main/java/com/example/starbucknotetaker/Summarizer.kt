@@ -12,6 +12,7 @@ import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import java.util.LinkedHashSet
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sqrt
 
 /**
@@ -28,7 +29,7 @@ class Summarizer(
     private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensureTokenizer(it) },
     private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
-    private val debug: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
+    private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
 ) {
     private var encoder: LiteInterpreter? = null
     private var decoder: LiteInterpreter? = null
@@ -44,9 +45,17 @@ class Summarizer(
     private val _state = MutableStateFlow<SummarizerState>(SummarizerState.Ready)
     val state: StateFlow<SummarizerState> = _state
 
+    private val debugTrace = ThreadLocal<MutableList<String>?>()
+    private val lastDebugTrace = AtomicReference<List<String>>(emptyList())
+
+    private fun emitDebug(message: String) {
+        debugTrace.get()?.add(message)
+        debugSink(message)
+    }
+
     private suspend fun loadModelsIfNeeded() {
         if (encoder != null && decoder != null && tokenizer != null) return
-        debug("loading summarizer models")
+        emitDebug("loading summarizer models")
         _state.emit(SummarizerState.Loading)
         when (val result = fetcher.ensureModels(context)) {
             is ModelFetcher.Result.Success -> {
@@ -62,7 +71,7 @@ class Summarizer(
                     encoder = interpreterFactory(mapFile(result.encoder))
                     decoder = interpreterFactory(mapFile(result.decoder))
                     tokenizer = spFactory(context).apply { load(context, result.tokenizer.absolutePath) }
-                    debug("summarizer models ready")
+                    emitDebug("summarizer models ready")
                     _state.emit(SummarizerState.Ready)
                 } catch (e: Throwable) {
                     logger("summarizer failed to load models", e)
@@ -106,263 +115,342 @@ class Summarizer(
         state.value
     }
 
+    fun consumeDebugTrace(): List<String> {
+        return lastDebugTrace.getAndSet(emptyList())
+    }
+
     /**
      * Generates a summary for the given [text]. Model inference runs on a background
      * dispatcher. If the models cannot be loaded, this falls back to a simple extractive
      * summary using the first couple of sentences.
      */
     suspend fun summarize(text: String): String = withContext(Dispatchers.Default) {
-        debug("summarizing text of length ${'$'}{text.length}")
-        loadModelsIfNeeded()
-        val enc = encoder
-        val dec = decoder
-        val tok = tokenizer
-        if (enc == null || dec == null || tok == null) {
-            debug("summarizer falling back")
-            _state.emit(SummarizerState.Fallback)
-            return@withContext fallbackSummary(text)
-        }
+        val trace = mutableListOf<String>()
+        debugTrace.set(trace)
+        try {
+            emitDebug("summarizing text of length ${'$'}{text.length}")
+            loadModelsIfNeeded()
+            val enc = encoder
+            val dec = decoder
+            val tok = tokenizer
 
-        val prefix = "summarize: "
-        val inputIds = tok.encodeAsIds(prefix + text)
-        val sourceKeywords = buildKeywordStats(text)
-
-        suspend fun fallback(reason: String, throwable: Throwable? = null): String {
-            logger(reason, throwable ?: IllegalStateException(reason))
-            _state.emit(SummarizerState.Fallback)
-            return fallbackSummary(text)
-        }
-
-        if (enc.inputTensorCount != 2) {
-            return@withContext fallback("unexpected encoder input count: ${enc.inputTensorCount}")
-        }
-
-        val encoderAttentionTensor = enc.getInputTensor(0)
-        val encoderInputTensor = enc.getInputTensor(1)
-        val encoderBatch = encoderInputTensor.dimensionOrElse(0, 1)
-        val attentionBatch = encoderAttentionTensor.dimensionOrElse(0, encoderBatch)
-        if (encoderBatch != 1 || attentionBatch != 1) {
-            return@withContext fallback("unsupported encoder batch size: $encoderBatch/$attentionBatch")
-        }
-
-        val encoderTokenCapacity = encoderInputTensor.dimensionOrElse(1, MAX_INPUT_TOKENS)
-        val encoderAttentionCapacity = encoderAttentionTensor.dimensionOrElse(1, encoderTokenCapacity)
-        val encoderOutputTensor = enc.getOutputTensor(0)
-        val encoderHiddenBatch = encoderOutputTensor.dimensionOrElse(0, 1)
-        if (encoderHiddenBatch != 1) {
-            return@withContext fallback("unsupported encoder hidden batch size: $encoderHiddenBatch")
-        }
-        val encoderHiddenCapacity = encoderOutputTensor.dimensionOrElse(1, encoderTokenCapacity)
-        val encoderHiddenSize = encoderOutputTensor.dimensionOrElse(2, ENCODER_HIDDEN_SIZE)
-        val maxEncoderTokens = kotlin.math.min(
-            encoderTokenCapacity,
-            kotlin.math.min(encoderAttentionCapacity, encoderHiddenCapacity)
-        )
-        val encLen = kotlin.math.min(inputIds.size, maxEncoderTokens)
-        if (encLen == 0) {
-            debug("summarizer falling back due to empty encoder input")
-            return@withContext fallback("encoder received empty input")
-        }
-
-        val encoderInput = Array(1) { IntArray(encoderTokenCapacity) }
-        val encoderAttention = Array(1) { IntArray(encoderAttentionCapacity) }
-        for (i in 0 until encLen) {
-            encoderInput[0][i] = inputIds[i]
-            encoderAttention[0][i] = 1
-        }
-
-        val encHidden = Array(encoderHiddenBatch) {
-            Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
-        }
-        val encoderInputs = arrayOfNulls<Any>(2).apply {
-            this[0] = encoderAttention
-            this[1] = encoderInput
-        }
-        val encOutputs = hashMapOf<Int, Any>(0 to encHidden)
-        enc.runForMultipleInputsOutputs(encoderInputs, encOutputs)
-
-        if (dec.inputTensorCount < 3) {
-            return@withContext fallback("unexpected decoder input count: ${dec.inputTensorCount}")
-        }
-
-        val decoderAttentionTensor = dec.getInputTensor(0)
-        val decoderTokenTensor = dec.getInputTensor(1)
-        val decoderHiddenTensor = dec.getInputTensor(2)
-        val decoderAttentionBatch = decoderAttentionTensor.dimensionOrElse(0, 1)
-        val decoderTokenBatch = decoderTokenTensor.dimensionOrElse(0, 1)
-        val decoderHiddenBatch = decoderHiddenTensor.dimensionOrElse(0, 1)
-        if (decoderAttentionBatch != 1 || decoderTokenBatch != 1 || decoderHiddenBatch != 1) {
-            return@withContext fallback(
-                "unsupported decoder batch sizes: $decoderAttentionBatch/$decoderTokenBatch/$decoderHiddenBatch"
-            )
-        }
-
-        val decoderAttentionCapacity = decoderAttentionTensor.dimensionOrElse(1, maxEncoderTokens)
-        val decoderTokenCapacity = decoderTokenTensor.dimensionOrElse(1, 1)
-        val decoderHiddenCapacity = decoderHiddenTensor.dimensionOrElse(1, encoderHiddenCapacity)
-        val decoderHiddenSize = decoderHiddenTensor.dimensionOrElse(2, encoderHiddenSize)
-        if (encoderHiddenCapacity > decoderHiddenCapacity || encoderHiddenSize > decoderHiddenSize) {
-            return@withContext fallback(
-                "decoder hidden state smaller than encoder output: ${encoderHiddenCapacity}x${encoderHiddenSize} vs ${decoderHiddenCapacity}x${decoderHiddenSize}"
-            )
-        }
-
-        val decoderAttention = Array(1) { IntArray(decoderAttentionCapacity) }
-        val decoderTokenInput = Array(1) { IntArray(decoderTokenCapacity) }
-        val generatedTokens = mutableListOf<Int>()
-        var currentToken = START_TOKEN
-        val numInputs = dec.inputTensorCount
-        val cache = Array(numInputs - 3) {
-            val tensor = dec.getInputTensor(it + 3)
-            FloatArray(tensor.effectiveNumElements())
-        }
-        val usesCache = cache.isNotEmpty() || decoderTokenCapacity == 1
-
-        val decoderInputs = arrayOfNulls<Any>(numInputs).apply {
-            this[0] = decoderAttention
-            this[2] = encHidden
-        }
-
-        fun prepareDecoderInputs() {
-            if (usesCache) {
-                decoderTokenInput[0].fill(0)
-                if (decoderTokenCapacity > 0) {
-                    decoderTokenInput[0][0] = currentToken
-                }
-                val active = (generatedTokens.size + 1).coerceAtMost(decoderAttentionCapacity)
-                for (i in 0 until decoderAttentionCapacity) {
-                    decoderAttention[0][i] = if (i < active) 1 else 0
-                }
-            } else {
-                decoderTokenInput[0].fill(0)
-                decoderAttention[0].fill(0)
-                val totalTokens = 1 + generatedTokens.size
-                val copyLength = kotlin.math.min(totalTokens, decoderTokenCapacity)
-                if (decoderTokenCapacity > 0) {
-                    decoderTokenInput[0][0] = START_TOKEN
-                }
-                for (i in 1 until copyLength) {
-                    decoderTokenInput[0][i] = generatedTokens[i - 1]
-                }
-                val maskLength = kotlin.math.min(totalTokens, decoderAttentionCapacity)
-                for (i in 0 until maskLength) {
-                    decoderAttention[0][i] = 1
-                }
+            suspend fun fallback(reason: String, throwable: Throwable? = null): String {
+                emitDebug("fallback reason: ${'$'}reason")
+                logger(reason, throwable ?: IllegalStateException(reason))
+                _state.emit(SummarizerState.Fallback)
+                return fallbackSummary(text)
             }
-        }
 
-        if (decoderTokenCapacity <= 0) {
-            return@withContext fallback("decoder token tensor has no capacity")
-        }
-        if (decoderAttentionCapacity <= 0) {
-            return@withContext fallback("decoder attention tensor has no capacity")
-        }
-
-        val result = mutableListOf<Int>()
-        for (ignored in 0 until MAX_OUTPUT_TOKENS) {
-            prepareDecoderInputs()
-            decoderInputs[1] = decoderTokenInput
-            for (i in cache.indices) decoderInputs[i + 3] = cache[i]
-
-            val logits = Array(1) { Array(1) { FloatArray(VOCAB_SIZE) } }
-            val outputs = HashMap<Int, Any>().apply {
-                this[0] = logits
+            if (enc == null || dec == null || tok == null) {
+                return@withContext fallback("models unavailable")
             }
-            val newCache = Array(cache.size) {
-                val tensor = dec.getOutputTensor(it + 1)
+
+            val prefix = "summarize: "
+            val inputIds = tok.encodeAsIds(prefix + text)
+            val sourceKeywords = buildKeywordStats(text)
+
+            if (enc.inputTensorCount != 2) {
+                return@withContext fallback("unexpected encoder input count: ${'$'}{enc.inputTensorCount}")
+            }
+
+            val encoderAttentionTensor = enc.getInputTensor(0)
+            val encoderInputTensor = enc.getInputTensor(1)
+            val encoderBatch = encoderInputTensor.dimensionOrElse(0, 1)
+            val attentionBatch = encoderAttentionTensor.dimensionOrElse(0, encoderBatch)
+            if (encoderBatch != 1 || attentionBatch != 1) {
+                return@withContext fallback("unsupported encoder batch size: ${'$'}encoderBatch/${'$'}attentionBatch")
+            }
+
+            val encoderTokenCapacity = encoderInputTensor.dimensionOrElse(1, MAX_INPUT_TOKENS)
+            val encoderAttentionCapacity = encoderAttentionTensor.dimensionOrElse(1, encoderTokenCapacity)
+            val encoderOutputTensor = enc.getOutputTensor(0)
+            val encoderHiddenBatch = encoderOutputTensor.dimensionOrElse(0, 1)
+            if (encoderHiddenBatch != 1) {
+                return@withContext fallback("unsupported encoder hidden batch size: ${'$'}encoderHiddenBatch")
+            }
+            val encoderHiddenCapacity = encoderOutputTensor.dimensionOrElse(1, encoderTokenCapacity)
+            val encoderHiddenSize = encoderOutputTensor.dimensionOrElse(2, ENCODER_HIDDEN_SIZE)
+            val maxEncoderTokens = kotlin.math.min(
+                encoderTokenCapacity,
+                kotlin.math.min(encoderAttentionCapacity, encoderHiddenCapacity)
+            )
+            val encLen = kotlin.math.min(inputIds.size, maxEncoderTokens)
+            if (encLen == 0) {
+                emitDebug("summarizer falling back due to empty encoder input")
+                return@withContext fallback("encoder received empty input")
+            }
+
+            val encoderInput = Array(1) { IntArray(encoderTokenCapacity) }
+            val encoderAttention = Array(1) { IntArray(encoderAttentionCapacity) }
+            for (i in 0 until encLen) {
+                encoderInput[0][i] = inputIds[i]
+                encoderAttention[0][i] = 1
+            }
+
+            val encHidden = Array(encoderHiddenBatch) {
+                Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
+            }
+            val encoderInputs = arrayOfNulls<Any>(2).apply {
+                this[0] = encoderAttention
+                this[1] = encoderInput
+            }
+            val encOutputs = hashMapOf<Int, Any>(0 to encHidden)
+            enc.runForMultipleInputsOutputs(encoderInputs, encOutputs)
+
+            if (dec.inputTensorCount < 3) {
+                return@withContext fallback("unexpected decoder input count: ${'$'}{dec.inputTensorCount}")
+            }
+
+            val decoderAttentionTensor = dec.getInputTensor(0)
+            val decoderTokenTensor = dec.getInputTensor(1)
+            val decoderHiddenTensor = dec.getInputTensor(2)
+            val decoderAttentionBatch = decoderAttentionTensor.dimensionOrElse(0, 1)
+            val decoderTokenBatch = decoderTokenTensor.dimensionOrElse(0, 1)
+            val decoderHiddenBatch = decoderHiddenTensor.dimensionOrElse(0, 1)
+            if (decoderAttentionBatch != 1 || decoderTokenBatch != 1 || decoderHiddenBatch != 1) {
+                return@withContext fallback(
+                    "unsupported decoder batch sizes: ${'$'}decoderAttentionBatch/${'$'}decoderTokenBatch/${'$'}decoderHiddenBatch"
+                )
+            }
+
+            val decoderAttentionCapacity = decoderAttentionTensor.dimensionOrElse(1, maxEncoderTokens)
+            val decoderTokenCapacity = decoderTokenTensor.dimensionOrElse(1, 1)
+            val decoderHiddenCapacity = decoderHiddenTensor.dimensionOrElse(1, encoderHiddenCapacity)
+            val decoderHiddenSize = decoderHiddenTensor.dimensionOrElse(2, encoderHiddenSize)
+            if (encoderHiddenCapacity > decoderHiddenCapacity || encoderHiddenSize > decoderHiddenSize) {
+                return@withContext fallback(
+                    "decoder hidden state smaller than encoder output: ${'$'}{encoderHiddenCapacity}x${'$'}{encoderHiddenSize} vs ${'$'}{decoderHiddenCapacity}x${'$'}{decoderHiddenSize}"
+                )
+            }
+
+            val decoderAttention = Array(1) { IntArray(decoderAttentionCapacity) }
+            val decoderTokenInput = Array(1) { IntArray(decoderTokenCapacity) }
+            val generatedTokens = mutableListOf<Int>()
+            var currentToken = START_TOKEN
+            val numInputs = dec.inputTensorCount
+            val cache = Array(numInputs - 3) {
+                val tensor = dec.getInputTensor(it + 3)
                 FloatArray(tensor.effectiveNumElements())
             }
-            for (i in newCache.indices) outputs[i + 1] = newCache[i]
+            val usesCache = cache.isNotEmpty() || decoderTokenCapacity == 1
 
-            dec.runForMultipleInputsOutputs(decoderInputs, outputs)
-
-            val next = selectNextToken(logits[0][0], generatedTokens, tok, sourceKeywords)
-            if (next == EOS_ID) break
-
-            if (!usesCache) {
-                val requiredTokens = generatedTokens.size + 2
-                if (requiredTokens > decoderTokenCapacity) {
-                    return@withContext fallback("decoder token buffer full")
-                }
-                if (requiredTokens > decoderAttentionCapacity) {
-                    return@withContext fallback("decoder attention buffer full")
-                }
+            val decoderInputs = arrayOfNulls<Any>(numInputs).apply {
+                this[0] = decoderAttention
+                this[2] = encHidden
             }
 
-            result.add(next)
-            generatedTokens.add(next)
-            currentToken = next
-            for (i in cache.indices) cache[i] = newCache[i]
-        }
-        val decoded = tok.decodeIds(result.toIntArray())
-        val cleaned = cleanSummary(decoded)
-        if (cleaned.isEmpty()) {
-            return@withContext fallback("empty summary output")
-        }
-
-        val summaryWords = tokenizeWords(cleaned)
-            .map { normalizeWord(it) }
-            .filter { it.isNotEmpty() }
-        val overlapHits = sourceKeywords.scoreNewWords(summaryWords)
-        val uniqueKeywords = sourceKeywords.uniqueCount()
-        val requiredOverlap = when {
-            uniqueKeywords == 0 -> 0
-            uniqueKeywords == 1 -> 1
-            uniqueKeywords <= 5 -> 1
-            else -> 2
-        }
-        val hasLetterWord = summaryWords.any { containsLetter(it) }
-        if (hasLetterWord && requiredOverlap > 0 && overlapHits < requiredOverlap) {
-            val semanticScore = try {
-                val summaryIds = tok.encodeAsIds(cleaned)
-                val summaryLen = kotlin.math.min(summaryIds.size, maxEncoderTokens)
-                if (summaryLen == 0) {
-                    debug("semantic similarity check skipped due to empty summary encoding")
-                    0f
+            fun prepareDecoderInputs() {
+                if (usesCache) {
+                    decoderTokenInput[0].fill(0)
+                    if (decoderTokenCapacity > 0) {
+                        decoderTokenInput[0][0] = currentToken
+                    }
+                    val active = (generatedTokens.size + 1).coerceAtMost(decoderAttentionCapacity)
+                    for (i in 0 until decoderAttentionCapacity) {
+                        decoderAttention[0][i] = if (i < active) 1 else 0
+                    }
                 } else {
-                    val summaryInput = Array(1) { IntArray(encoderTokenCapacity) }
-                    val summaryAttention = Array(1) { IntArray(encoderAttentionCapacity) }
-                    for (i in 0 until summaryLen) {
-                        summaryInput[0][i] = summaryIds[i]
-                        summaryAttention[0][i] = 1
+                    decoderTokenInput[0].fill(0)
+                    decoderAttention[0].fill(0)
+                    val totalTokens = 1 + generatedTokens.size
+                    val copyLength = kotlin.math.min(totalTokens, decoderTokenCapacity)
+                    if (decoderTokenCapacity > 0) {
+                        decoderTokenInput[0][0] = START_TOKEN
                     }
-                    val summaryHidden = Array(encoderHiddenBatch) {
-                        Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
+                    for (i in 1 until copyLength) {
+                        decoderTokenInput[0][i] = generatedTokens[i - 1]
                     }
-                    val summaryInputs = arrayOfNulls<Any>(2).apply {
-                        this[0] = summaryAttention
-                        this[1] = summaryInput
+                    val maskLength = kotlin.math.min(totalTokens, decoderAttentionCapacity)
+                    for (i in 0 until maskLength) {
+                        decoderAttention[0][i] = 1
                     }
-                    val summaryOutputs = hashMapOf<Int, Any>(0 to summaryHidden)
-                    enc.runForMultipleInputsOutputs(summaryInputs, summaryOutputs)
-                    cosineSimilarity(encHidden, encLen, summaryHidden, summaryLen)
                 }
-            } catch (t: Throwable) {
-                logger("failed to compute semantic similarity", t)
-                Float.NaN
             }
-            if (!semanticScore.isNaN() && semanticScore >= SEMANTIC_SIMILARITY_THRESHOLD) {
-                debug("accepting abstractive summary due to semantic similarity $semanticScore")
-            } else {
-                debug(
-                    "abstractive summary missing keyword overlap: hits=$overlapHits required=$requiredOverlap semantic=$semanticScore"
-                )
-                return@withContext fallback(
-                    "abstractive summary missing keyword overlap ($overlapHits/$requiredOverlap)"
-                )
+
+            if (decoderTokenCapacity <= 0) {
+                return@withContext fallback("decoder token tensor has no capacity")
             }
+            if (decoderAttentionCapacity <= 0) {
+                return@withContext fallback("decoder attention tensor has no capacity")
+            }
+
+            val result = mutableListOf<Int>()
+            for (ignored in 0 until MAX_OUTPUT_TOKENS) {
+                prepareDecoderInputs()
+                decoderInputs[1] = decoderTokenInput
+                for (i in cache.indices) decoderInputs[i + 3] = cache[i]
+
+                val logits = Array(1) { Array(1) { FloatArray(VOCAB_SIZE) } }
+                val outputs = HashMap<Int, Any>().apply {
+                    this[0] = logits
+                }
+                val newCache = Array(cache.size) {
+                    val tensor = dec.getOutputTensor(it + 1)
+                    FloatArray(tensor.effectiveNumElements())
+                }
+                for (i in newCache.indices) outputs[i + 1] = newCache[i]
+
+                dec.runForMultipleInputsOutputs(decoderInputs, outputs)
+
+                val next = selectNextToken(logits[0][0], generatedTokens, tok, sourceKeywords)
+                if (next == EOS_ID) break
+
+                if (!usesCache) {
+                    val requiredTokens = generatedTokens.size + 2
+                    if (requiredTokens > decoderTokenCapacity) {
+                        return@withContext fallback("decoder token buffer full")
+                    }
+                    if (requiredTokens > decoderAttentionCapacity) {
+                        return@withContext fallback("decoder attention buffer full")
+                    }
+                }
+
+                result.add(next)
+                generatedTokens.add(next)
+                currentToken = next
+                for (i in cache.indices) cache[i] = newCache[i]
+            }
+            val decoded = tok.decodeIds(result.toIntArray())
+            val cleaned = cleanSummary(decoded)
+            if (cleaned.isEmpty()) {
+                return@withContext fallback("empty summary output")
+            }
+
+            val summaryWords = tokenizeWords(cleaned)
+                .map { normalizeWord(it) }
+                .filter { it.isNotEmpty() }
+            val overlapHits = sourceKeywords.scoreNewWords(summaryWords)
+            val uniqueKeywords = sourceKeywords.uniqueCount()
+            val requiredOverlap = when {
+                uniqueKeywords == 0 -> 0
+                uniqueKeywords == 1 -> 1
+                uniqueKeywords <= 5 -> 1
+                else -> 2
+            }
+            val hasLetterWord = summaryWords.any { containsLetter(it) }
+            if (hasLetterWord && requiredOverlap > 0 && overlapHits < requiredOverlap) {
+                val semanticScore = try {
+                    val summaryIds = tok.encodeAsIds(cleaned)
+                    val summaryLen = kotlin.math.min(summaryIds.size, maxEncoderTokens)
+                    if (summaryLen == 0) {
+                        emitDebug("semantic similarity check skipped due to empty summary encoding")
+                        0f
+                    } else {
+                        val summaryInput = Array(1) { IntArray(encoderTokenCapacity) }
+                        val summaryAttention = Array(1) { IntArray(encoderAttentionCapacity) }
+                        for (i in 0 until summaryLen) {
+                            summaryInput[0][i] = summaryIds[i]
+                            summaryAttention[0][i] = 1
+                        }
+                        val summaryHidden = Array(encoderHiddenBatch) {
+                            Array(encoderHiddenCapacity) { FloatArray(encoderHiddenSize) }
+                        }
+                        val summaryInputs = arrayOfNulls<Any>(2).apply {
+                            this[0] = summaryAttention
+                            this[1] = summaryInput
+                        }
+                        val summaryOutputs = hashMapOf<Int, Any>(0 to summaryHidden)
+                        enc.runForMultipleInputsOutputs(summaryInputs, summaryOutputs)
+                        cosineSimilarity(encHidden, encLen, summaryHidden, summaryLen)
+                    }
+                } catch (t: Throwable) {
+                    logger("failed to compute semantic similarity", t)
+                    Float.NaN
+                }
+                if (!semanticScore.isNaN() && semanticScore >= SEMANTIC_SIMILARITY_THRESHOLD) {
+                    emitDebug("accepting abstractive summary due to semantic similarity ${'$'}semanticScore")
+                } else {
+                    emitDebug(
+                        "abstractive summary missing keyword overlap: ${'$'}overlapHits/${'$'}requiredOverlap semantic=${'$'}semanticScore"
+                    )
+                    return@withContext fallback(
+                        "abstractive summary missing keyword overlap (${'$'}overlapHits/${'$'}requiredOverlap)"
+                    )
+                }
+            }
+            emitDebug("summarizer inference complete")
+            return@withContext cleaned
+        } finally {
+            debugTrace.set(null)
+            lastDebugTrace.set(trace.toList())
         }
-        debug("summarizer inference complete")
-        return@withContext cleaned
     }
 
     fun fallbackSummary(text: String): String {
-        val sentences = text.split('.', '!', '?')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        val candidate = sentences.take(2).joinToString(". ")
-        return if (candidate.isNotEmpty()) candidate else text.take(200)
+        val sentences = extractSentences(text)
+        if (sentences.isEmpty()) {
+            emitDebug("fallback extractive summary using raw text due to missing sentences")
+            return text.take(200)
+        }
+
+        val keywords = buildKeywordStats(text)
+        val candidates = sentences.mapIndexedNotNull { index, raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) return@mapIndexedNotNull null
+            val words = tokenizeWords(trimmed)
+            val normalized = words.map { normalizeWord(it) }.filter { it.isNotEmpty() }
+            val keywordScore = if (keywords.isEmpty()) 0 else keywords.scoreNewWords(normalized)
+            val diversity = normalized.toSet().size.toDouble()
+            val lengthBonus = normalized.size.coerceAtMost(30) / 30.0
+            val letterBonus = if (words.any { containsLetter(it) }) 0.5 else 0.0
+            val score = keywordScore * 6.0 + diversity + lengthBonus + letterBonus
+            SentenceCandidate(trimmed, score, index)
+        }
+        if (candidates.isEmpty()) {
+            emitDebug("fallback extractive summary unable to score sentences")
+            return text.take(200)
+        }
+
+        val ranked = candidates.sortedWith(
+            compareByDescending<SentenceCandidate> { it.score }.thenBy { it.index }
+        )
+        val top = ranked.take(2).sortedBy { it.index }
+        if (top.isEmpty()) {
+            emitDebug("fallback extractive summary found no top sentences")
+            return text.take(200)
+        }
+
+        top.forEach {
+            emitDebug("fallback sentence[${'$'}{it.index}] score=${"%.2f".format(it.score)} ${'$'}{it.text}")
+        }
+
+        val summary = top.joinToString(" ") { candidate ->
+            val endsWithTerminator = candidate.text.lastOrNull()?.let { it in SENTENCE_ENDINGS } ?: false
+            if (endsWithTerminator) candidate.text else "${'$'}{candidate.text}."
+        }
+        return if (summary.isNotBlank()) summary else text.take(200)
     }
+
+    private fun extractSentences(text: String): List<String> {
+        if (text.isBlank()) return emptyList()
+        val trimmed = text.trim()
+        val sentences = mutableListOf<String>()
+        val buffer = StringBuilder()
+        for (ch in trimmed) {
+            buffer.append(ch)
+            if (ch in SENTENCE_ENDINGS) {
+                val candidate = buffer.toString().trim()
+                if (candidate.isNotEmpty()) {
+                    sentences.add(candidate)
+                }
+                buffer.clear()
+            }
+        }
+        val remainder = buffer.toString().trim()
+        if (remainder.isNotEmpty()) {
+            sentences.add(remainder)
+        }
+        if (sentences.isEmpty()) {
+            return trimmed.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        }
+        return sentences
+    }
+
+    private data class SentenceCandidate(
+        val text: String,
+        val score: Double,
+        val index: Int,
+    )
 
     private fun selectNextToken(
         logits: FloatArray,
@@ -418,7 +506,7 @@ class Summarizer(
                 continue
             }
             if (isDegenerate(words)) {
-                debug("skipping token $candidate due to degeneracy")
+                emitDebug("skipping token $candidate due to degeneracy")
                 continue
             }
             val normalizedWords = words.map { normalizeWord(it) }.filter { it.isNotEmpty() }
