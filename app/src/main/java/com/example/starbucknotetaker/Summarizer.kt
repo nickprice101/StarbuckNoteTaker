@@ -416,7 +416,7 @@ class Summarizer(
 
         val summary = top.joinToString(" ") { candidate ->
             val endsWithTerminator = candidate.text.lastOrNull()?.let { it in SENTENCE_ENDINGS } ?: false
-            if (endsWithTerminator) candidate.text else "${'$'}{candidate.text}."
+            if (endsWithTerminator) candidate.text else "${candidate.text}."
         }
         return if (summary.isNotBlank()) summary else text.take(200)
     }
