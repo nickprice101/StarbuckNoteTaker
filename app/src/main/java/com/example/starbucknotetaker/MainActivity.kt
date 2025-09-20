@@ -5,12 +5,21 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.AlertDialog
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Text
+import androidx.compose.material.TextButton
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,43 +56,14 @@ class MainActivity : ComponentActivity() {
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val start = if (pinManager.isPinSet()) "pin_enter" else "pin_setup"
     val context = LocalContext.current
-    var requireAuth by remember { mutableStateOf(false) }
-    var pinCheckEnabled by remember { mutableStateOf(true) }
-    var lastRoute by rememberSaveable { mutableStateOf<String?>(null) }
-    val lifecycleOwner = LocalLifecycleOwner.current
     val summarizerState by noteViewModel.summarizerState.collectAsState()
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE && pinCheckEnabled) {
-                requireAuth = true
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    LaunchedEffect(requireAuth) {
-        if (requireAuth && navController.currentDestination?.route !in listOf("pin_enter", "pin_setup")) {
-            val entry = navController.currentBackStackEntry
-            lastRoute = entry?.destination?.route?.let { route ->
-                val args = entry.arguments
-                if (args == null) {
-                    route
-                } else {
-                    args.keySet().fold(route) { acc, key ->
-                        acc.replace("{$key}", args.get(key).toString())
-                    }
-                }
-            }
-            navController.navigate("pin_enter")
-        }
-    }
+    var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
+    var pendingLockNoteId by remember { mutableStateOf<Long?>(null) }
+    var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
 
     NavHost(navController = navController, startDestination = start) {
         composable("pin_setup") {
             PinSetupScreen(pinManager = pinManager) { pin ->
-                requireAuth = false
                 noteViewModel.loadNotes(context, pin)
                 navController.navigate("list") {
                     popUpTo("pin_setup") { inclusive = true }
@@ -92,22 +72,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
         composable("pin_enter") {
             PinEnterScreen(pinManager = pinManager) { pin ->
-                requireAuth = false
                 noteViewModel.loadNotes(context, pin)
-                val destination = lastRoute
-                if (navController.previousBackStackEntry != null) {
-                    navController.popBackStack()
-                } else if (destination != null) {
-                    navController.navigate(destination) {
-                        popUpTo("pin_enter") { inclusive = true }
-                        launchSingleTop = true
-                    }
-                } else {
-                    navController.navigate("list") {
-                        popUpTo("pin_enter") { inclusive = true }
-                    }
+                navController.navigate("list") {
+                    popUpTo("pin_enter") { inclusive = true }
                 }
-                lastRoute = null
             }
         }
         composable("list") {
@@ -115,7 +83,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 notes = noteViewModel.notes,
                 onAddNote = { navController.navigate("add") },
                 onAddEvent = { navController.navigate("add_event") },
-                onOpenNote = { noteId -> navController.navigate("detail/$noteId") },
+                onOpenNote = { note ->
+                    if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
+                        pendingOpenNoteId = note.id
+                    } else {
+                        navController.navigate("detail/${note.id}")
+                    }
+                },
                 onDeleteNote = { noteId -> noteViewModel.deleteNote(noteId) },
                 onSettings = { navController.navigate("settings") },
                 summarizerState = summarizerState
@@ -128,8 +102,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() },
-                onDisablePinCheck = { pinCheckEnabled = false },
-                onEnablePinCheck = { pinCheckEnabled = true },
+                onDisablePinCheck = {},
+                onEnablePinCheck = {},
                 summarizerState = summarizerState,
                 entryMode = NoteEntryMode.Note,
             )
@@ -143,8 +117,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() },
-                onDisablePinCheck = { pinCheckEnabled = false },
-                onEnablePinCheck = { pinCheckEnabled = true },
+                onDisablePinCheck = {},
+                onEnablePinCheck = {},
                 summarizerState = summarizerState,
                 entryMode = NoteEntryMode.Event,
             )
@@ -153,10 +127,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
             val note = noteId?.let { noteViewModel.getNoteById(it) }
             if (note != null) {
+                DisposableEffect(noteId) {
+                    onDispose { noteId?.let { noteViewModel.relockNote(it) } }
+                }
                 NoteDetailScreen(
                     note = note,
                     onBack = { navController.popBackStack() },
-                    onEdit = { navController.navigate("edit/$noteId") }
+                    onEdit = { navController.navigate("edit/$noteId") },
+                    onLockRequest = { pendingLockNoteId = note.id },
+                    onUnlockRequest = { pendingUnlockNoteId = note.id }
                 )
             } else {
                 navController.popBackStack()
@@ -173,8 +152,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                         navController.popBackStack()
                     },
                     onCancel = { navController.popBackStack() },
-                    onDisablePinCheck = { pinCheckEnabled = false },
-                    onEnablePinCheck = { pinCheckEnabled = true },
+                    onDisablePinCheck = {},
+                    onEnablePinCheck = {},
                     summarizerState = summarizerState
                 )
             } else {
@@ -186,9 +165,130 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onBack = { navController.popBackStack() },
                 onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
                 onExport = { uri -> noteViewModel.exportNotes(context, uri) },
-                onDisablePinCheck = { pinCheckEnabled = false },
-                onEnablePinCheck = { pinCheckEnabled = true }
+                onDisablePinCheck = {},
+                onEnablePinCheck = {}
             )
         }
     }
+
+    pendingOpenNoteId?.let { noteId ->
+        val note = noteViewModel.getNoteById(noteId)
+        if (note != null) {
+            PinPromptDialog(
+                title = "Unlock note",
+                message = "Enter your PIN to open \"${note.title}\".",
+                pinManager = pinManager,
+                onDismiss = { pendingOpenNoteId = null },
+                onPinConfirmed = {
+                    noteViewModel.markNoteTemporarilyUnlocked(noteId)
+                    pendingOpenNoteId = null
+                    navController.navigate("detail/$noteId")
+                }
+            )
+        } else {
+            pendingOpenNoteId = null
+        }
+    }
+
+    pendingLockNoteId?.let { noteId ->
+        val note = noteViewModel.getNoteById(noteId)
+        if (note != null) {
+            PinPromptDialog(
+                title = "Lock note",
+                message = "Enter your PIN to lock \"${note.title}\".",
+                pinManager = pinManager,
+                onDismiss = { pendingLockNoteId = null },
+                onPinConfirmed = {
+                    noteViewModel.setNoteLock(noteId, true)
+                    noteViewModel.markNoteTemporarilyUnlocked(noteId)
+                    pendingLockNoteId = null
+                }
+            )
+        } else {
+            pendingLockNoteId = null
+        }
+    }
+
+    pendingUnlockNoteId?.let { noteId ->
+        val note = noteViewModel.getNoteById(noteId)
+        if (note != null) {
+            AlertDialog(
+                onDismissRequest = { pendingUnlockNoteId = null },
+                title = { Text("Remove PIN protection") },
+                text = { Text("Remove the PIN lock from \"${note.title}\"?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        noteViewModel.setNoteLock(noteId, false)
+                        pendingUnlockNoteId = null
+                    }) {
+                        Text("Remove")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingUnlockNoteId = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        } else {
+            pendingUnlockNoteId = null
+        }
+    }
+}
+
+@Composable
+private fun PinPromptDialog(
+    title: String,
+    message: String,
+    pinManager: PinManager,
+    onDismiss: () -> Unit,
+    onPinConfirmed: () -> Unit,
+) {
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                Text(message)
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { input ->
+                        if (input.length <= 6 && input.all { it.isDigit() }) {
+                            pin = input
+                            error = false
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                )
+                if (error) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Incorrect PIN", color = Color.Red)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (pinManager.checkPin(pin)) {
+                        onPinConfirmed()
+                    } else {
+                        error = true
+                    }
+                },
+                enabled = pin.length >= 4
+            ) {
+                Text("Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

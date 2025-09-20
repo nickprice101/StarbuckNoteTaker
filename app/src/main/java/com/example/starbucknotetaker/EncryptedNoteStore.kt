@@ -96,6 +96,7 @@ class EncryptedNoteStore(private val context: Context) {
                     linkPreviews = linkPreviews,
                     summary = obj.optString("summary", ""),
                     event = event,
+                    isLocked = obj.optBoolean("locked", false),
                 )
             )
         }
@@ -143,6 +144,7 @@ class EncryptedNoteStore(private val context: Context) {
                 event.location?.let { eo.put("location", it) }
                 obj.put("event", eo)
             }
+            obj.put("locked", note.isLocked)
             arr.put(obj)
         }
         val root = JSONObject().apply {

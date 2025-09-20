@@ -14,8 +14,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,7 +43,7 @@ fun NoteListScreen(
     notes: List<Note>,
     onAddNote: () -> Unit,
     onAddEvent: () -> Unit,
-    onOpenNote: (Long) -> Unit,
+    onOpenNote: (Note) -> Unit,
     onDeleteNote: (Long) -> Unit,
     onSettings: () -> Unit,
     summarizerState: Summarizer.SummarizerState
@@ -147,7 +149,7 @@ fun NoteListScreen(
                         onClick = {
                             hideKeyboard()
                             focusManager.clearFocus(force = true)
-                            onOpenNote(note.id)
+                            onOpenNote(note)
                         },
                         onDelete = {
                             onDeleteNote(note.id)
@@ -272,11 +274,48 @@ fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier)
             }
         }
         if (note.summary.isNotBlank()) {
-            Text(
-                text = note.summary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp)
+            if (note.isLocked) {
+                LockedSummaryPlaceholder(modifier = Modifier.padding(top = 2.dp))
+            } else {
+                Text(
+                    text = note.summary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LockedSummaryPlaceholder(modifier: Modifier = Modifier) {
+    val barColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Lock,
+            contentDescription = null,
+            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .height(8.dp)
+                    .background(barColor, shape = RoundedCornerShape(4.dp))
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.65f)
+                    .height(8.dp)
+                    .background(barColor, shape = RoundedCornerShape(4.dp))
             )
         }
     }
