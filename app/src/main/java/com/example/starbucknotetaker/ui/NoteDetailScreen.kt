@@ -122,7 +122,12 @@ fun NoteDetailScreen(
                                 return@launch
                             }
                             val baseIntent = buildShareIntent(context, note, shareText, attachments)
-                            val chooser = Intent.createChooser(baseIntent, "Share note")
+                            val chooser = Intent.createChooser(baseIntent, "Share note").apply {
+                                if (baseIntent.clipData != null) {
+                                    clipData = baseIntent.clipData
+                                }
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
                             if (attachments.isNotEmpty()) {
                                 val lifecycle = lifecycleOwner.lifecycle
                                 val observer = object : LifecycleEventObserver {
@@ -426,13 +431,13 @@ private fun buildShareText(note: Note): String {
     val eventSummary = note.event?.let { buildEventSummary(it) }?.takeIf { it.isNotBlank() }
     val cleanedContent = attachmentPlaceholderRegex.replace(note.content, "").trim()
     val sections = mutableListOf<String>()
-    if (note.title.isNotBlank()) {
-        sections += note.title.trim()
-    }
     if (cleanedContent.isNotBlank()) {
         sections += cleanedContent
     }
     eventSummary?.let { sections += it }
+    if (sections.isEmpty() && note.title.isNotBlank() && note.images.isEmpty() && note.files.isEmpty()) {
+        sections += note.title.trim()
+    }
     return sections.joinToString(separator = "\n\n").trim()
 }
 
