@@ -219,7 +219,6 @@ class MainActivity : AppCompatActivity() {
 
 @Composable
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
-    val start = if (pinManager.isPinSet()) "pin_enter" else "pin_setup"
     val context = LocalContext.current
     val activity = remember(context) { context as AppCompatActivity }
     val executor = remember(activity) { ContextCompat.getMainExecutor(activity) }
@@ -227,15 +226,20 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val isPinSet = pinManager.isPinSet()
+    var hasLoadedInitialPin by remember { mutableStateOf(false) }
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
     var biometricUnlockRequest by remember { mutableStateOf<BiometricUnlockRequest?>(null) }
+    var showBiometricOptIn by remember { mutableStateOf(false) }
+    var pendingBiometricOptIn by remember { mutableStateOf(false) }
     val biometricStatus = biometricManager.canAuthenticate(
         BiometricManager.Authenticators.BIOMETRIC_STRONG or
             BiometricManager.Authenticators.BIOMETRIC_WEAK
     )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
+    val startDestination = if (isPinSet) "list" else "pin_setup"
     val biometricPrompt = remember(activity, executor) {
         BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -256,6 +260,40 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         })
     }
 
+    val biometricOptInPrompt = remember(activity, executor) {
+        BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                pinManager.setBiometricEnabled(true)
+                biometricsEnabled = true
+                pendingBiometricOptIn = false
+                Toast.makeText(context, "Biometric unlock enabled", Toast.LENGTH_SHORT).show()
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                pendingBiometricOptIn = false
+                if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                    errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                ) {
+                    Toast.makeText(context, errString, Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+    }
+
+    LaunchedEffect(isPinSet) {
+        if (!isPinSet) {
+            hasLoadedInitialPin = false
+            biometricsEnabled = false
+        } else if (!hasLoadedInitialPin) {
+            val storedPin = pinManager.getStoredPin()
+            if (storedPin != null) {
+                noteViewModel.loadNotes(context, storedPin)
+                hasLoadedInitialPin = true
+                biometricsEnabled = pinManager.isBiometricEnabled()
+            }
+        }
+    }
+
     LaunchedEffect(biometricUnlockRequest) {
         val request = biometricUnlockRequest ?: return@LaunchedEffect
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
@@ -264,6 +302,21 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             .setNegativeButtonText("Use PIN")
             .build()
         biometricPrompt.authenticate(promptInfo)
+    }
+
+    LaunchedEffect(pendingBiometricOptIn) {
+        if (pendingBiometricOptIn) {
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Enable biometric unlock")
+                .setSubtitle("Confirm your biometrics to enable unlocking notes.")
+                .setNegativeButtonText("Cancel")
+                .build()
+            try {
+                biometricOptInPrompt.authenticate(promptInfo)
+            } finally {
+                pendingBiometricOptIn = false
+            }
+        }
     }
 
     LaunchedEffect(noteViewModel) {
@@ -291,10 +344,14 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    NavHost(navController = navController, startDestination = start) {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable("pin_setup") {
             PinSetupScreen(pinManager = pinManager) { pin ->
                 noteViewModel.loadNotes(context, pin)
+                hasLoadedInitialPin = true
+                biometricsEnabled = pinManager.isBiometricEnabled()
+                showBiometricOptIn =
+                    biometricStatus == BiometricManager.BIOMETRIC_SUCCESS && !biometricsEnabled
                 navController.navigate("list") {
                     popUpTo("pin_setup") { inclusive = true }
                 }
@@ -303,6 +360,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         composable("pin_enter") {
             PinEnterScreen(pinManager = pinManager) { pin ->
                 noteViewModel.loadNotes(context, pin)
+                hasLoadedInitialPin = true
                 navController.navigate("list") {
                     popUpTo("pin_enter") { inclusive = true }
                 }
@@ -416,6 +474,49 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onPinChanged = { newPin -> noteViewModel.updateStoredPin(newPin) }
             )
         }
+    }
+
+    if (showBiometricOptIn) {
+        AlertDialog(
+            onDismissRequest = {
+                showBiometricOptIn = false
+                pendingBiometricOptIn = false
+                pinManager.setBiometricEnabled(false)
+                biometricsEnabled = false
+            },
+            title = { Text("Enable biometric unlock?") },
+            text = {
+                Text("Would you like to use your fingerprint or face to unlock your notes? You can change this later in Settings.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBiometricOptIn = false
+                    if (biometricStatus == BiometricManager.BIOMETRIC_SUCCESS) {
+                        pendingBiometricOptIn = true
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Biometric unlock isn't available right now.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        pinManager.setBiometricEnabled(false)
+                        biometricsEnabled = false
+                    }
+                }) {
+                    Text("Enable")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showBiometricOptIn = false
+                    pendingBiometricOptIn = false
+                    pinManager.setBiometricEnabled(false)
+                    biometricsEnabled = false
+                }) {
+                    Text("Not now")
+                }
+            }
+        )
     }
 
     pendingOpenNoteId?.let { noteId ->

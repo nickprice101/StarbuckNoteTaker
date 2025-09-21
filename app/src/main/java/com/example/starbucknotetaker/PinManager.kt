@@ -12,6 +12,8 @@ class PinManager(context: Context) {
         prefs.edit().putString(KEY_PIN, pin).apply()
     }
 
+    fun getStoredPin(): String? = prefs.getString(KEY_PIN, null)
+
     fun checkPin(pin: String): Boolean = prefs.getString(KEY_PIN, null) == pin
 
     fun getPinLength(): Int = prefs.getString(KEY_PIN, null)?.length ?: 0
