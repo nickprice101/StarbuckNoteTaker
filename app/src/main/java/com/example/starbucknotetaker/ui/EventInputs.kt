@@ -24,12 +24,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.window.PopupProperties
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
@@ -122,6 +123,7 @@ fun LocationAutocompleteField(
         DropdownMenu(
             expanded = expanded && suggestions.isNotEmpty(),
             onDismissRequest = { expanded = false },
+            properties = PopupProperties(focusable = false),
         ) {
             suggestions.forEach { suggestion ->
                 DropdownMenuItem(onClick = {
@@ -224,6 +226,7 @@ fun TimeZonePicker(
             DropdownMenu(
                 expanded = expanded && filteredZones.isNotEmpty(),
                 onDismissRequest = { expanded = false },
+                properties = PopupProperties(focusable = false),
             ) {
                 filteredZones.forEach { zone ->
                     DropdownMenuItem(onClick = {
@@ -273,17 +276,41 @@ private fun Address.toSuggestion(): String? {
         }
     }
 
-    addIfUseful(featureName)
+    val poiName = listOfNotNull(
+        extras?.getString("name"),
+        extras?.getString("feature_name"),
+        featureName,
+        premises,
+    ).map { it.trim() }
+        .firstOrNull { candidate ->
+            candidate.isNotEmpty() &&
+                !candidate.equals(thoroughfare?.trim(), ignoreCase = true) &&
+                !candidate.equals(subThoroughfare?.trim(), ignoreCase = true) &&
+                !candidate.isLikelyHouseNumber()
+        }
+    addIfUseful(poiName)
 
-    val street = listOfNotNull(subThoroughfare?.trim(), thoroughfare?.trim())
+    val street = listOfNotNull(thoroughfare?.trim(), subThoroughfare?.trim())
         .filter { it.isNotEmpty() }
         .joinToString(separator = " ")
         .takeIf { it.isNotEmpty() }
     addIfUseful(street)
 
-    addIfUseful(subLocality)
-    addIfUseful(locality)
-    addIfUseful(subAdminArea)
+    val cityLine = buildList {
+        val postal = postalCode?.trim()
+        if (!postal.isNullOrEmpty()) {
+            add(postal)
+        }
+        val city = locality?.trim()
+        if (!city.isNullOrEmpty()) {
+            add(city)
+        }
+    }.joinToString(separator = " ")
+        .takeIf { it.isNotEmpty() }
+    addIfUseful(cityLine)
+
+    addIfUseful(subLocality?.takeUnless { it.equals(locality, ignoreCase = true) })
+    addIfUseful(subAdminArea?.takeUnless { it.equals(locality, ignoreCase = true) })
     addIfUseful(adminArea)
     addIfUseful(countryName)
 
@@ -294,4 +321,11 @@ private fun Address.toSuggestion(): String? {
 
     val addressLine = getAddressLine(0)?.trim()
     return addressLine.takeUnless { it.isNullOrEmpty() }
+}
+
+private fun String.isLikelyHouseNumber(): Boolean {
+    val normalized = trim()
+    if (normalized.isEmpty()) return false
+    if (!normalized.first().isDigit()) return false
+    return normalized.length <= 6 && normalized.all { it.isLetterOrDigit() || it == '-' }
 }
