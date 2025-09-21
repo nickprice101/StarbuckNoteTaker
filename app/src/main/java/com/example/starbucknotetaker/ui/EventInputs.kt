@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.DropdownMenu
-import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.ExposedDropdownMenuBox
 import androidx.compose.material.ExposedDropdownMenuDefaults
@@ -23,6 +22,7 @@ import androidx.compose.material.Text
 import androidx.compose.material.Divider
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.runtime.Composable
@@ -52,6 +52,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private data class LocationSuggestion(
+    val text: String,
+    val display: EventLocationDisplay,
+)
+
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun LocationAutocompleteField(
@@ -76,7 +81,7 @@ fun LocationAutocompleteField(
     }
     val geocoder = remember(context) { Geocoder(context, Locale.getDefault()) }
     var expanded by remember { mutableStateOf(false) }
-    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var suggestions by remember { mutableStateOf<List<LocationSuggestion>>(emptyList()) }
     var fetchJob by remember { mutableStateOf<Job?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -93,11 +98,22 @@ fun LocationAutocompleteField(
             val results = withContext(Dispatchers.IO) {
                 runCatching {
                     geocoder.getFromLocationName(query, 5)
-                        ?.mapNotNull(Address::toSuggestion)
+                        ?.mapNotNull { address ->
+                            val summary = address.toSuggestion() ?: return@mapNotNull null
+                            val fallbackDisplay = fallbackEventLocationDisplay(summary)
+                            val resolvedDisplay = address.toEventLocationDisplay()
+                                ?.mergeWithFallback(fallbackDisplay)
+                                ?: fallbackDisplay
+                            LocationSuggestion(
+                                text = summary,
+                                display = resolvedDisplay,
+                            )
+                        }
+                        ?.distinctBy { it.text }
                         ?: emptyList()
                 }.getOrDefault(emptyList())
             }
-            suggestions = results.distinct()
+            suggestions = results
             expanded = suggestions.isNotEmpty()
         }
     }
@@ -139,13 +155,28 @@ fun LocationAutocompleteField(
         ) {
             suggestions.forEach { suggestion ->
                 DropdownMenuItem(onClick = {
-                    onValueChange(suggestion)
+                    onValueChange(suggestion.text)
                     expanded = false
                     suggestions = emptyList()
                     focusRequester.requestFocus()
                     keyboardController?.show()
                 }) {
-                    Text(text = suggestion, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = suggestion.display.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
+                        )
+                        suggestion.display.address?.let { address ->
+                            Text(
+                                text = address,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.caption,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -170,6 +201,8 @@ fun TimeZonePicker(
     var query by remember(zoneId) { mutableStateOf(zoneId.id) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    var isFocused by remember { mutableStateOf(false) }
+    var hasClearedCurrentFocus by remember { mutableStateOf(false) }
 
     val filteredZones = remember(query, locale) {
         val normalized = query.trim()
@@ -185,8 +218,8 @@ fun TimeZonePicker(
         }
     }
 
-    LaunchedEffect(zoneId) {
-        if (zoneId.id != query) {
+    LaunchedEffect(zoneId, isFocused) {
+        if (!isFocused && zoneId.id != query) {
             query = zoneId.id
         }
     }
@@ -240,8 +273,15 @@ fun TimeZonePicker(
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
                 .onFocusChanged { state ->
-                    if (!state.isFocused) {
+                    isFocused = state.isFocused
+                    if (state.isFocused) {
+                        if (!hasClearedCurrentFocus && query == zoneId.id) {
+                            hasClearedCurrentFocus = true
+                            query = ""
+                        }
+                    } else {
                         expanded = false
+                        hasClearedCurrentFocus = false
                     }
                 },
         )
