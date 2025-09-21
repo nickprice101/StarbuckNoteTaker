@@ -570,8 +570,14 @@ private fun EventDetailsCard(event: NoteEvent) {
                 }
             }
             event.location?.takeIf { it.isNotBlank() }?.let { location ->
+                val locationDisplay = rememberEventLocationDisplay(location)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Location: $location")
+                Text("Location: ${locationDisplay?.name ?: location}")
+                val secondary = locationDisplay?.address
+                    ?.takeIf { !it.equals(locationDisplay.name, ignoreCase = true) }
+                secondary?.let { address ->
+                    Text(address)
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text("Time zone: $zoneCode (${zoneId.id})")
