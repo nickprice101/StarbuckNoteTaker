@@ -51,6 +51,8 @@ class NoteViewModel : ViewModel() {
     private var pendingReminderNoteId: Long? = null
     private val _pendingShare = MutableStateFlow<PendingShare?>(null)
     val pendingShare: StateFlow<PendingShare?> = _pendingShare
+    private val _biometricUnlockRequest = MutableStateFlow<BiometricUnlockRequest?>(null)
+    val biometricUnlockRequest: StateFlow<BiometricUnlockRequest?> = _biometricUnlockRequest
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -100,6 +102,18 @@ class NoteViewModel : ViewModel() {
 
     fun clearPendingShare() {
         _pendingShare.value = null
+    }
+
+    fun requestBiometricUnlock(noteId: Long, title: String) {
+        _biometricUnlockRequest.value = BiometricUnlockRequest(noteId, title)
+    }
+
+    fun clearBiometricUnlockRequest() {
+        _biometricUnlockRequest.value = null
+    }
+
+    fun currentBiometricUnlockRequest(): BiometricUnlockRequest? {
+        return _biometricUnlockRequest.value
     }
 
     fun addNote(
