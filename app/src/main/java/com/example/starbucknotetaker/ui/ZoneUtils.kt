@@ -2,6 +2,7 @@ package com.example.starbucknotetaker.ui
 
 import java.time.Instant
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.abs
@@ -11,6 +12,22 @@ internal fun formatZoneCode(
     locale: Locale = Locale.getDefault(),
     instant: Instant = Instant.now(),
 ): String {
+    val zonedDateTime = instant.atZone(zoneId)
+    val formatter = DateTimeFormatter.ofPattern("zzz", locale)
+    val shortName = runCatching { formatter.format(zonedDateTime) }
+        .getOrNull()
+        .orEmpty()
+        .trim()
+
+    val normalized = shortName.takeIf { it.isNotEmpty() }
+    val looksLikeRawOffset = normalized?.let {
+        (it.startsWith("GMT", ignoreCase = true) || it.startsWith("UTC", ignoreCase = true)) && it.length > 3
+    } == true
+
+    if (normalized != null && !looksLikeRawOffset) {
+        return normalized
+    }
+
     val offset = zoneId.rules.getOffset(instant)
     val totalSeconds = offset.totalSeconds
     val hours = totalSeconds / 3600
