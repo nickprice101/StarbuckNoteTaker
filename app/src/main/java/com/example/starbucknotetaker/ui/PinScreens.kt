@@ -15,6 +15,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.VisualTransformation
@@ -52,7 +53,7 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
             reveal = false
         }
     }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    LaunchedEffect(firstPin) { focusRequester.requestFocus() }
 
     val message = if (firstPin == null) {
         "Create a custom PIN"
@@ -76,14 +77,20 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
                 if (input.length <= 6 && input.all { it.isDigit() }) {
                     pin = input
                     reveal = true
+                    if (input.isNotEmpty()) {
+                        error = null
+                    }
                 }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             visualTransformation = PinVisualTransformation(reveal),
             singleLine = true,
-            textStyle = androidx.compose.material.LocalTextStyle.current.copy(
-                textAlign = TextAlign.Center,
-                fontSize = 64.sp
+            textStyle = androidx.compose.material.LocalTextStyle.current.merge(
+                TextStyle(
+                    textAlign = TextAlign.Center,
+                    fontSize = 64.sp,
+                    lineHeight = 64.sp
+                )
             ),
             colors = TextFieldDefaults.textFieldColors(
                 backgroundColor = Color.Transparent,
@@ -114,8 +121,10 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
                         pinManager.setPin(pin)
                         onDone(pin)
                     } else {
-                        error = "PINs do not match"
+                        error = "PINs did not match"
+                        firstPin = null
                         pin = ""
+                        reveal = false
                     }
                 }
             },
@@ -180,9 +189,12 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                 visualTransformation = PinVisualTransformation(reveal),
                 singleLine = true,
-                textStyle = androidx.compose.material.LocalTextStyle.current.copy(
-                    textAlign = TextAlign.Center,
-                    fontSize = 64.sp
+                textStyle = androidx.compose.material.LocalTextStyle.current.merge(
+                    TextStyle(
+                        textAlign = TextAlign.Center,
+                        fontSize = 64.sp,
+                        lineHeight = 64.sp
+                    )
                 ),
                 colors = TextFieldDefaults.textFieldColors(
                     backgroundColor = Color.Transparent,
