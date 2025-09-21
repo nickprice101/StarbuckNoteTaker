@@ -231,7 +231,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
-    var biometricUnlockRequest by remember { mutableStateOf<BiometricUnlockRequest?>(null) }
+    val biometricUnlockRequest by noteViewModel.biometricUnlockRequest.collectAsState()
     var showBiometricOptIn by remember { mutableStateOf(false) }
     var pendingBiometricOptIn by remember { mutableStateOf(false) }
     val biometricStatus = biometricManager.canAuthenticate(
@@ -254,16 +254,16 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricPrompt = remember(activity, executor) {
         BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                val request = biometricUnlockRequest ?: return
+                val request = noteViewModel.currentBiometricUnlockRequest() ?: return
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
-                biometricUnlockRequest = null
+                noteViewModel.clearBiometricUnlockRequest()
                 pendingOpenNoteId = null
                 noteIdToOpenAfterUnlock = request.noteId
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                val request = biometricUnlockRequest
-                biometricUnlockRequest = null
+                val request = noteViewModel.currentBiometricUnlockRequest()
+                noteViewModel.clearBiometricUnlockRequest()
                 if (request != null) {
                     pendingOpenNoteId = request.noteId
                 }
@@ -392,7 +392,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                         if (canUseBiometric) {
                             pendingOpenNoteId = null
-                            biometricUnlockRequest = BiometricUnlockRequest(note.id, note.title)
+                            noteViewModel.requestBiometricUnlock(note.id, note.title)
                         } else {
                             pendingOpenNoteId = note.id
                         }
@@ -547,7 +547,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onBiometricRequested = {
                     pendingOpenNoteId = null
                     if (canUseBiometric) {
-                        biometricUnlockRequest = BiometricUnlockRequest(noteId, note.title)
+                        noteViewModel.requestBiometricUnlock(noteId, note.title)
                     }
                 },
                 onDismiss = { pendingOpenNoteId = null },
@@ -654,5 +654,3 @@ private fun PinPromptDialog(
         }
     )
 }
-
-private data class BiometricUnlockRequest(val noteId: Long, val title: String)
