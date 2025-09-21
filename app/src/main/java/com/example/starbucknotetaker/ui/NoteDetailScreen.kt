@@ -133,10 +133,23 @@ fun NoteDetailScreen(
                             if (attachments.isNotEmpty()) {
                                 val lifecycle = lifecycleOwner.lifecycle
                                 val observer = object : LifecycleEventObserver {
-                                    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
-                                        if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_DESTROY) {
-                                            cleanupSharedFiles(context, attachments)
-                                            lifecycle.removeObserver(this)
+                                    private var hasStopped = false
+
+                                    override fun onStateChanged(
+                                        source: LifecycleOwner,
+                                        event: Lifecycle.Event
+                                    ) {
+                                        when (event) {
+                                            Lifecycle.Event.ON_STOP -> hasStopped = true
+                                            Lifecycle.Event.ON_RESUME -> if (hasStopped) {
+                                                cleanupSharedFiles(context, attachments)
+                                                lifecycle.removeObserver(this)
+                                            }
+                                            Lifecycle.Event.ON_DESTROY -> {
+                                                cleanupSharedFiles(context, attachments)
+                                                lifecycle.removeObserver(this)
+                                            }
+                                            else -> Unit
                                         }
                                     }
                                 }
