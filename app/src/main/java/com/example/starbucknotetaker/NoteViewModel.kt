@@ -48,6 +48,11 @@ class NoteViewModel : ViewModel() {
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val reminderNavigation: SharedFlow<Long> = reminderNavigationEvents.asSharedFlow()
+    private val openNoteRequests = MutableSharedFlow<Long>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val openNoteEvents: SharedFlow<Long> = openNoteRequests.asSharedFlow()
     private var pendingReminderNoteId: Long? = null
     private val _pendingShare = MutableStateFlow<PendingShare?>(null)
     val pendingShare: StateFlow<PendingShare?> = _pendingShare
@@ -236,6 +241,10 @@ class NoteViewModel : ViewModel() {
         if (!unlockedNoteIds.contains(id)) {
             unlockedNoteIds.add(id)
         }
+    }
+
+    fun requestOpenTemporarilyUnlockedNote(id: Long) {
+        openNoteRequests.tryEmit(id)
     }
 
     fun relockNote(id: Long) {

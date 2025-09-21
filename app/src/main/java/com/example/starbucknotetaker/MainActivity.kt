@@ -42,6 +42,7 @@ import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.ui.SettingsScreen
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
@@ -245,9 +246,9 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 val request = biometricUnlockRequest ?: return
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
+                noteViewModel.requestOpenTemporarilyUnlockedNote(request.noteId)
                 biometricUnlockRequest = null
                 pendingOpenNoteId = null
-                navController.navigate("detail/${request.noteId}")
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -320,15 +321,32 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     }
 
     LaunchedEffect(noteViewModel) {
-        noteViewModel.reminderNavigation.collectLatest { noteId ->
-            val note = noteViewModel.getNoteById(noteId)
-            if (note == null) {
-                Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
-            } else if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
-                pendingOpenNoteId = note.id
-            } else {
-                navController.navigate("detail/$noteId") {
-                    launchSingleTop = true
+        launch {
+            noteViewModel.reminderNavigation.collectLatest { noteId ->
+                val note = noteViewModel.getNoteById(noteId)
+                if (note == null) {
+                    Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
+                } else if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
+                    pendingOpenNoteId = note.id
+                } else {
+                    navController.navigate("detail/$noteId") {
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+        launch {
+            noteViewModel.openNoteEvents.collectLatest { noteId ->
+                val note = noteViewModel.getNoteById(noteId)
+                if (note == null) {
+                    Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
+                } else if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
+                    pendingOpenNoteId = note.id
+                } else {
+                    pendingOpenNoteId = null
+                    navController.navigate("detail/$noteId") {
+                        launchSingleTop = true
+                    }
                 }
             }
         }
@@ -522,24 +540,29 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     pendingOpenNoteId?.let { noteId ->
         val note = noteViewModel.getNoteById(noteId)
         if (note != null) {
-            PinPromptDialog(
-                title = "Unlock note",
-                message = "Enter your PIN to open \"${note.title}\".",
-                pinManager = pinManager,
-                showBiometricOption = canUseBiometric,
-                onBiometricRequested = {
-                    pendingOpenNoteId = null
-                    if (canUseBiometric) {
-                        biometricUnlockRequest = BiometricUnlockRequest(noteId, note.title)
+            if (!note.isLocked || noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
+                pendingOpenNoteId = null
+                noteViewModel.requestOpenTemporarilyUnlockedNote(noteId)
+            } else {
+                PinPromptDialog(
+                    title = "Unlock note",
+                    message = "Enter your PIN to open \"${note.title}\".",
+                    pinManager = pinManager,
+                    showBiometricOption = canUseBiometric,
+                    onBiometricRequested = {
+                        pendingOpenNoteId = null
+                        if (canUseBiometric) {
+                            biometricUnlockRequest = BiometricUnlockRequest(noteId, note.title)
+                        }
+                    },
+                    onDismiss = { pendingOpenNoteId = null },
+                    onPinConfirmed = {
+                        noteViewModel.markNoteTemporarilyUnlocked(noteId)
+                        noteViewModel.requestOpenTemporarilyUnlockedNote(noteId)
+                        pendingOpenNoteId = null
                     }
-                },
-                onDismiss = { pendingOpenNoteId = null },
-                onPinConfirmed = {
-                    noteViewModel.markNoteTemporarilyUnlocked(noteId)
-                    pendingOpenNoteId = null
-                    navController.navigate("detail/$noteId")
-                }
-            )
+                )
+            }
         } else {
             pendingOpenNoteId = null
         }
@@ -570,6 +593,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             pendingUnlockNoteId = null
         }
     }
+
 }
 
 @Composable
