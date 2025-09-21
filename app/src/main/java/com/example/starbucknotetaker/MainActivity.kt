@@ -229,7 +229,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
-    var noteToOpenAfterUnlock by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
     var biometricUnlockRequest by remember { mutableStateOf<BiometricUnlockRequest?>(null) }
@@ -241,6 +240,16 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
     val startDestination = if (isPinSet) "list" else "pin_setup"
+    val openNoteAfterUnlock: (Long) -> Unit = { noteId ->
+        val note = noteViewModel.getNoteById(noteId)
+        if (note != null) {
+            navController.navigate("detail/$noteId") {
+                launchSingleTop = true
+            }
+        } else {
+            Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
+        }
+    }
     val biometricPrompt = remember(activity, executor) {
         BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -248,7 +257,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 biometricUnlockRequest = null
                 pendingOpenNoteId = null
-                noteToOpenAfterUnlock = request.noteId
+                openNoteAfterUnlock(request.noteId)
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -538,7 +547,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onPinConfirmed = {
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     pendingOpenNoteId = null
-                    noteToOpenAfterUnlock = noteId
+                    openNoteAfterUnlock(noteId)
                 }
             )
         } else {
@@ -572,11 +581,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    LaunchedEffect(noteToOpenAfterUnlock) {
-        val targetNoteId = noteToOpenAfterUnlock ?: return@LaunchedEffect
-        navController.navigate("detail/$targetNoteId")
-        noteToOpenAfterUnlock = null
-    }
 }
 
 @Composable
