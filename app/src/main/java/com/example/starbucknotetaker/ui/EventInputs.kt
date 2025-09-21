@@ -2,8 +2,12 @@ package com.example.starbucknotetaker.ui
 
 import android.location.Address
 import android.location.Geocoder
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.DropdownMenu
 import androidx.compose.material.DropdownMenuItem
@@ -11,9 +15,14 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.ExposedDropdownMenuBox
 import androidx.compose.material.ExposedDropdownMenuDefaults
 import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Surface
 import androidx.compose.material.Text
+import androidx.compose.material.Divider
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.runtime.Composable
@@ -26,11 +35,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.zIndex
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
@@ -198,45 +210,66 @@ fun TimeZonePicker(
     }
 
     Column(modifier = modifier) {
-        ExposedDropdownMenuBox(
-            expanded = expanded && filteredZones.isNotEmpty(),
-            onExpandedChange = { isExpanded ->
-                val hasItems = filteredZones.isNotEmpty()
-                expanded = isExpanded && hasItems
-                if (expanded) {
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
+        val showOptions = expanded && filteredZones.isNotEmpty()
+        OutlinedTextField(
+            value = query,
+            onValueChange = { newValue ->
+                query = newValue
+                expanded = true
+                keyboardController?.show()
+            },
+            label = { Text(label) },
+            trailingIcon = {
+                IconButton(
+                    onClick = {
+                        if (filteredZones.isNotEmpty()) {
+                            val nextExpanded = !expanded
+                            expanded = nextExpanded
+                            if (nextExpanded) {
+                                focusRequester.requestFocus()
+                                keyboardController?.show()
+                            }
+                        }
+                    },
+                ) {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = showOptions)
                 }
             },
-        ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { newValue ->
-                    query = newValue
-                    expanded = true
-                    keyboardController?.show()
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { state ->
+                    if (!state.isFocused) {
+                        expanded = false
+                    }
                 },
-                label = { Text(label) },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && filteredZones.isNotEmpty()) },
-                singleLine = true,
+        )
+        if (showOptions) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                elevation = 8.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(focusRequester),
-            )
-            DropdownMenu(
-                expanded = expanded && filteredZones.isNotEmpty(),
-                onDismissRequest = { expanded = false },
-                properties = PopupProperties(focusable = false),
+                    .heightIn(max = 240.dp)
+                    .zIndex(1f),
             ) {
-                filteredZones.forEach { zone ->
-                    DropdownMenuItem(onClick = {
-                        query = zone.id
-                        expanded = false
-                        onZoneChange(zone)
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
-                    }) {
-                        Text(text = formatZoneLabel(zone, locale), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                LazyColumn {
+                    itemsIndexed(filteredZones) { index, zone ->
+                        ZoneSuggestionRow(
+                            text = formatZoneLabel(zone, locale),
+                            onClick = {
+                                query = zone.id
+                                expanded = false
+                                onZoneChange(zone)
+                                focusRequester.requestFocus()
+                                keyboardController?.show()
+                            },
+                        )
+                        if (index < filteredZones.lastIndex) {
+                            Divider()
+                        }
                     }
                 }
             }
@@ -247,6 +280,20 @@ fun TimeZonePicker(
             modifier = Modifier.padding(top = 4.dp),
         )
     }
+}
+
+@Composable
+private fun ZoneSuggestionRow(text: String, onClick: () -> Unit) {
+    Text(
+        text = text,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        style = MaterialTheme.typography.body2.copy(fontWeight = FontWeight.Medium),
+    )
 }
 
 private fun formatZoneLabel(zoneId: ZoneId, locale: Locale): String {

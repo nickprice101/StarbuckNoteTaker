@@ -5,6 +5,9 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 class NoteReminderScheduler(context: Context) {
@@ -17,13 +20,17 @@ class NoteReminderScheduler(context: Context) {
             cancel(note.id)
             return
         }
-        val triggerAt = event.start - TimeUnit.MINUTES.toMillis(reminderMinutes.toLong())
-        val now = System.currentTimeMillis()
-        if (triggerAt <= now) {
+        val eventInstant = Instant.ofEpochMilli(event.start)
+        val zone = runCatching { ZoneId.of(event.timeZone) }.getOrNull()
+        val reminderInstant = zone?.let {
+            eventInstant.atZone(it).minusMinutes(reminderMinutes.toLong()).toInstant()
+        } ?: eventInstant.minus(Duration.ofMinutes(reminderMinutes.toLong()))
+        val nowInstant = Instant.now()
+        val delay = Duration.between(nowInstant, reminderInstant)
+        if (delay <= Duration.ZERO) {
             cancel(note.id)
             return
         }
-        val delay = triggerAt - now
         val data = workDataOf(
             NoteReminderWorker.KEY_NOTE_ID to note.id,
             NoteReminderWorker.KEY_NOTE_TITLE to note.title,
@@ -37,7 +44,7 @@ class NoteReminderScheduler(context: Context) {
         )
 
         val request = OneTimeWorkRequestBuilder<NoteReminderWorker>()
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setInitialDelay(delay.toMillis(), TimeUnit.MILLISECONDS)
             .setInputData(data)
             .addTag(workTag(note.id))
             .build()
