@@ -120,6 +120,11 @@ class NoteViewModel : ViewModel() {
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
         val summarizerSource = buildSummarizerSource(finalContent, event)
+        val initialSummary = if (summarizerSource.isBlank()) {
+            ""
+        } else {
+            summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200)
+        }
         val note = Note(
             title = finalTitle,
             content = finalContent.trim(),
@@ -127,7 +132,7 @@ class NoteViewModel : ViewModel() {
             images = embeddedImages,
             files = embeddedFiles,
             linkPreviews = linkPreviews,
-            summary = summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200),
+            summary = initialSummary,
             event = event,
         )
         _notes.add(note)
@@ -136,17 +141,19 @@ class NoteViewModel : ViewModel() {
         reminderScheduler?.scheduleIfNeeded(note)
         tryEmitPendingReminder()
         val noteId = note.id
-        summarizer?.let { sum ->
-            viewModelScope.launch {
-                val summary = sum.summarize(summarizerSource)
-                val trace = sum.consumeDebugTrace()
-                val index = _notes.indexOfFirst { it.id == noteId }
-                if (index != -1) {
-                    _notes[index] = _notes[index].copy(summary = summary)
-                    pin?.let { store?.saveNotes(_notes, it) }
-                }
-                if (shouldCreateDebugNote(trace)) {
-                    createSummarizerDebugNote(finalTitle, summarizerSource, trace)
+        if (summarizerSource.isNotBlank()) {
+            summarizer?.let { sum ->
+                viewModelScope.launch {
+                    val summary = sum.summarize(summarizerSource)
+                    val trace = sum.consumeDebugTrace()
+                    val index = _notes.indexOfFirst { it.id == noteId }
+                    if (index != -1) {
+                        _notes[index] = _notes[index].copy(summary = summary)
+                        pin?.let { store?.saveNotes(_notes, it) }
+                    }
+                    if (shouldCreateDebugNote(trace)) {
+                        createSummarizerDebugNote(finalTitle, summarizerSource, trace)
+                    }
                 }
             }
         }
@@ -180,6 +187,11 @@ class NoteViewModel : ViewModel() {
             val finalTitle = if (title.isNullOrBlank()) note.title else title
             val finalEvent = event ?: note.event
             val summarizerSource = buildSummarizerSource(content, finalEvent)
+            val initialSummary = if (summarizerSource.isBlank()) {
+                ""
+            } else {
+                summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200)
+            }
             val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
             val updated = note.copy(
                 title = finalTitle,
@@ -187,7 +199,7 @@ class NoteViewModel : ViewModel() {
                 images = images,
                 files = files,
                 linkPreviews = linkPreviews,
-                summary = summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200),
+                summary = initialSummary,
                 event = finalEvent,
                 date = updatedDate,
             )
@@ -197,17 +209,19 @@ class NoteViewModel : ViewModel() {
             reminderScheduler?.scheduleIfNeeded(updated)
             tryEmitPendingReminder()
             val noteId = updated.id
-            summarizer?.let { sum ->
-                viewModelScope.launch {
-                    val summary = sum.summarize(summarizerSource)
-                    val trace = sum.consumeDebugTrace()
-                    val newIndex = _notes.indexOfFirst { it.id == noteId }
-                    if (newIndex != -1) {
-                        _notes[newIndex] = _notes[newIndex].copy(summary = summary)
-                        pin?.let { store?.saveNotes(_notes, it) }
-                    }
-                    if (shouldCreateDebugNote(trace)) {
-                        createSummarizerDebugNote(finalTitle, summarizerSource, trace)
+            if (summarizerSource.isNotBlank()) {
+                summarizer?.let { sum ->
+                    viewModelScope.launch {
+                        val summary = sum.summarize(summarizerSource)
+                        val trace = sum.consumeDebugTrace()
+                        val newIndex = _notes.indexOfFirst { it.id == noteId }
+                        if (newIndex != -1) {
+                            _notes[newIndex] = _notes[newIndex].copy(summary = summary)
+                            pin?.let { store?.saveNotes(_notes, it) }
+                        }
+                        if (shouldCreateDebugNote(trace)) {
+                            createSummarizerDebugNote(finalTitle, summarizerSource, trace)
+                        }
                     }
                 }
             }
@@ -321,8 +335,12 @@ class NoteViewModel : ViewModel() {
     }
 
     private fun buildSummarizerSource(content: String, event: NoteEvent?): String {
+        val trimmedContent = content.trim()
         if (event == null) {
-            return content
+            return trimmedContent
+        }
+        if (trimmedContent.isEmpty()) {
+            return ""
         }
         val zoneId = runCatching { java.time.ZoneId.of(event.timeZone) }
             .getOrDefault(java.time.ZoneId.systemDefault())
@@ -338,10 +356,8 @@ class NoteViewModel : ViewModel() {
                 append(" at ")
                 append(event.location)
             }
-            if (content.isNotBlank()) {
-                append('\n')
-                append(content)
-            }
+            append('\n')
+            append(trimmedContent)
         }
     }
 
