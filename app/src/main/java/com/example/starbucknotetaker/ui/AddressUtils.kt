@@ -7,6 +7,23 @@ internal data class EventLocationDisplay(
     val address: String?,
 )
 
+internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
+    val normalized = raw.trim()
+    if (normalized.isEmpty()) {
+        return EventLocationDisplay(name = raw.trim(), address = null)
+    }
+    val tokens = normalized
+        .split('\n')
+        .flatMap { segment -> segment.split(',') }
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    val primary = tokens.firstOrNull() ?: normalized
+    val secondary = tokens.drop(1)
+        .joinToString(separator = ", ")
+        .takeIf { it.isNotEmpty() }
+    return EventLocationDisplay(name = primary, address = secondary)
+}
+
 internal fun Address.toSuggestion(): String? {
     val components = linkedSetOf<String>()
 
@@ -53,22 +70,81 @@ internal fun Address.toSuggestion(): String? {
     return addressLine.takeUnless { it.isNullOrEmpty() }
 }
 
-internal fun Address.toEventLocationDisplay(fallback: String): EventLocationDisplay? {
-    val normalizedFallback = fallback.trim()
+internal fun Address.toEventLocationDisplay(): EventLocationDisplay? {
     val poiName = extractPoiName()
-    val addressLine = getAddressLine(0)?.trim()?.takeIf { it.isNotEmpty() }
+    val street = listOfNotNull(thoroughfare?.trim(), subThoroughfare?.trim())
+        .filter { it.isNotEmpty() }
+        .joinToString(separator = " ")
+        .takeIf { it.isNotEmpty() }
+    val cityLine = buildList {
+        val postal = postalCode?.trim()
+        if (!postal.isNullOrEmpty()) {
+            add(postal)
+        }
+        val city = locality?.trim()
+        if (!city.isNullOrEmpty()) {
+            add(city)
+        }
+    }.joinToString(separator = " ")
+        .takeIf { it.isNotEmpty() }
+
+    val addressParts = mutableListOf<String>()
+    fun addAddressPart(value: String?) {
+        val cleaned = value?.trim().orEmpty()
+        if (cleaned.isNotEmpty() && cleaned !in addressParts) {
+            addressParts.add(cleaned)
+        }
+    }
+
+    addAddressPart(street)
+    addAddressPart(cityLine)
+    addAddressPart(subLocality?.takeUnless { it.equals(locality, ignoreCase = true) })
+    addAddressPart(subAdminArea?.takeUnless { it.equals(locality, ignoreCase = true) })
+    addAddressPart(adminArea)
+    addAddressPart(countryName)
+
+    if (addressParts.isEmpty()) {
+        val addressLine = getAddressLine(0)?.trim()
+        addressLine?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.forEach { addAddressPart(it) }
+    }
+
     val primary = when {
         !poiName.isNullOrEmpty() -> poiName
-        !addressLine.isNullOrEmpty() -> addressLine
-        normalizedFallback.isNotEmpty() -> normalizedFallback
-        else -> return null
+        addressParts.isNotEmpty() -> addressParts.first()
+        else -> getAddressLine(0)?.trim()?.takeIf { it.isNotEmpty() }
+    } ?: return null
+
+    val secondaryParts = when {
+        !poiName.isNullOrEmpty() -> addressParts
+        addressParts.size > 1 -> addressParts.drop(1)
+        else -> emptyList()
     }
-    val secondary = when {
-        !poiName.isNullOrEmpty() -> addressLine?.takeUnless { it.equals(primary, ignoreCase = true) }
-        primary != normalizedFallback && normalizedFallback.isNotEmpty() -> normalizedFallback
-        else -> null
-    }
-    return EventLocationDisplay(name = primary, address = secondary)
+
+    val secondary = secondaryParts
+        .filter { !it.equals(primary, ignoreCase = true) }
+        .joinToString(separator = ", ")
+        .takeIf { it.isNotEmpty() }
+        ?: getAddressLine(0)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && !it.equals(primary, ignoreCase = true) }
+
+    return EventLocationDisplay(
+        name = primary,
+        address = secondary?.takeUnless { it.equals(primary, ignoreCase = true) }
+    )
+}
+
+internal fun EventLocationDisplay.mergeWithFallback(fallback: EventLocationDisplay): EventLocationDisplay {
+    val mergedName = name.ifBlank { fallback.name }
+    val mergedAddress = (address ?: fallback.address)
+        ?.takeUnless { it.equals(mergedName, ignoreCase = true) }
+    return EventLocationDisplay(
+        name = mergedName.ifBlank { fallback.name },
+        address = mergedAddress
+    )
 }
 
 private fun Address.extractPoiName(): String? {

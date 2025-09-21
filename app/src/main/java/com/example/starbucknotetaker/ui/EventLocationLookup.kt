@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun rememberEventLocationDisplay(location: String?): EventLocationDisplay? {
     val query = location?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    val fallback = remember(query) { EventLocationDisplay(name = query, address = null) }
+    val fallback = remember(query) { fallbackEventLocationDisplay(query) }
     val geocoderAvailable = remember { Geocoder.isPresent() }
     if (!geocoderAvailable) {
         return fallback
@@ -21,12 +21,20 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
     val context = LocalContext.current
     val geocoder = remember(context) { Geocoder(context, Locale.getDefault()) }
     val display by produceState(initialValue = fallback, key1 = query, key2 = geocoder) {
-        val address = withContext(Dispatchers.IO) {
+        val resolved = withContext(Dispatchers.IO) {
             runCatching {
-                geocoder.getFromLocationName(query, 5)?.firstOrNull()
+                geocoder.getFromLocationName(query, 5)
+                    ?.mapNotNull { candidate ->
+                        candidate.toEventLocationDisplay()
+                    }
             }.getOrNull()
+        }.orEmpty()
+        val prioritized = resolved.firstOrNull { candidate ->
+            !candidate.name.equals(fallback.name, ignoreCase = true) ||
+                candidate.address != null
         }
-        value = address?.toEventLocationDisplay(query) ?: fallback
+        val best = prioritized ?: resolved.firstOrNull()
+        value = best?.mergeWithFallback(fallback) ?: fallback
     }
     return display
 }
