@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.MediaStore
@@ -118,7 +119,7 @@ fun NoteDetailScreen(
                             val attachments = preparation.attachments
                             if (shareText.isBlank() && attachments.isEmpty()) {
                                 Toast.makeText(context, "Nothing to share", Toast.LENGTH_SHORT).show()
-                                cleanupSharedFiles(attachments)
+                                cleanupSharedFiles(context, attachments)
                                 return@launch
                             }
                             val baseIntent = buildShareIntent(context, note, shareText, attachments)
@@ -128,12 +129,13 @@ fun NoteDetailScreen(
                                 }
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
+                            grantShareUriPermissions(context, baseIntent, attachments)
                             if (attachments.isNotEmpty()) {
                                 val lifecycle = lifecycleOwner.lifecycle
                                 val observer = object : LifecycleEventObserver {
                                     override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
                                         if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_DESTROY) {
-                                            cleanupSharedFiles(attachments)
+                                            cleanupSharedFiles(context, attachments)
                                             lifecycle.removeObserver(this)
                                         }
                                     }
@@ -143,7 +145,7 @@ fun NoteDetailScreen(
                                     context.startActivity(chooser)
                                 }.onFailure { throwable ->
                                     lifecycle.removeObserver(observer)
-                                    cleanupSharedFiles(attachments)
+                                    cleanupSharedFiles(context, attachments)
                                     val message = if (throwable is ActivityNotFoundException) {
                                         "No apps available to share note."
                                     } else {
@@ -441,11 +443,40 @@ private fun buildShareText(note: Note): String {
     return sections.joinToString(separator = "\n\n").trim()
 }
 
-private fun cleanupSharedFiles(attachments: List<PreparedAttachment>) {
+private fun cleanupSharedFiles(context: Context, attachments: List<PreparedAttachment>) {
     attachments.forEach { attachment ->
+        runCatching {
+            context.revokeUriPermission(attachment.uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
         runCatching {
             if (attachment.file.exists()) {
                 attachment.file.delete()
+            }
+        }
+    }
+}
+
+private fun grantShareUriPermissions(
+    context: Context,
+    intent: Intent,
+    attachments: List<PreparedAttachment>,
+) {
+    if (attachments.isEmpty()) {
+        return
+    }
+    val matches = context.packageManager.queryIntentActivities(
+        intent,
+        PackageManager.MATCH_DEFAULT_ONLY
+    )
+    matches.forEach { resolveInfo ->
+        val packageName = resolveInfo.activityInfo.packageName
+        attachments.forEach { attachment ->
+            runCatching {
+                context.grantUriPermission(
+                    packageName,
+                    attachment.uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
             }
         }
     }
