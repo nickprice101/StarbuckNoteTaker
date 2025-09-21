@@ -229,6 +229,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
     var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
+    var noteToOpenAfterUnlock by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
     var biometricUnlockRequest by remember { mutableStateOf<BiometricUnlockRequest?>(null) }
@@ -247,7 +248,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 biometricUnlockRequest = null
                 pendingOpenNoteId = null
-                navController.navigate("detail/${request.noteId}")
+                noteToOpenAfterUnlock = request.noteId
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -537,7 +538,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onPinConfirmed = {
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     pendingOpenNoteId = null
-                    navController.navigate("detail/$noteId")
+                    noteToOpenAfterUnlock = noteId
                 }
             )
         } else {
@@ -569,6 +570,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         } else {
             pendingUnlockNoteId = null
         }
+    }
+
+    LaunchedEffect(noteToOpenAfterUnlock) {
+        val targetNoteId = noteToOpenAfterUnlock ?: return@LaunchedEffect
+        navController.navigate("detail/$targetNoteId")
+        noteToOpenAfterUnlock = null
     }
 }
 
