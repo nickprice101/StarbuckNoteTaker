@@ -262,10 +262,38 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                super.onAuthenticationError(errorCode, errString)
                 val request = noteViewModel.currentBiometricUnlockRequest()
-                noteViewModel.clearBiometricUnlockRequest()
-                if (request != null) {
-                    pendingOpenNoteId = request.noteId
+                val userCancellation = when (errorCode) {
+                    BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+                    BiometricPrompt.ERROR_USER_CANCELED -> true
+                    else -> false
+                }
+                if (userCancellation) {
+                    noteViewModel.clearBiometricUnlockRequest()
+                    if (request != null) {
+                        pendingOpenNoteId = request.noteId
+                    }
+                    return
+                }
+
+                val systemCancellation = when (errorCode) {
+                    BiometricPrompt.ERROR_CANCELED,
+                    BiometricPrompt.ERROR_TIMEOUT -> true
+                    else -> false
+                }
+                if (!systemCancellation) {
+                    when (errorCode) {
+                        BiometricPrompt.ERROR_HW_NOT_PRESENT,
+                        BiometricPrompt.ERROR_NO_BIOMETRICS,
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
+                        BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED -> {
+                            Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
+                        }
+                        else -> {
+                            // Leave the request intact so a retry can be triggered.
+                        }
+                    }
                 }
             }
         })
