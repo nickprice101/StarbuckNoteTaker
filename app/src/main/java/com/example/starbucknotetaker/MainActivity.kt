@@ -491,7 +491,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                         noteViewModel.setNoteLock(note.id, true)
                         noteViewModel.markNoteTemporarilyUnlocked(note.id)
                     },
-                    onUnlockRequest = { pendingUnlockNoteId = note.id }
+                    onUnlockRequest = { pendingUnlockNoteId = note.id },
+                    openAttachment = { id -> noteViewModel.openAttachment(id) }
                 )
             } else {
                 navController.popBackStack()
@@ -510,7 +511,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     onCancel = { navController.popBackStack() },
                     onDisablePinCheck = {},
                     onEnablePinCheck = {},
-                    summarizerState = summarizerState
+                    summarizerState = summarizerState,
+                    openAttachment = { id -> noteViewModel.openAttachment(id) }
                 )
             } else {
                 navController.popBackStack()

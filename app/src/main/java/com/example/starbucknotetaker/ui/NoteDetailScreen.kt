@@ -67,10 +67,11 @@ fun NoteDetailScreen(
     onEdit: () -> Unit,
     onLockRequest: () -> Unit,
     onUnlockRequest: () -> Unit,
+    openAttachment: suspend (String) -> ByteArray?,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var fullImage by remember { mutableStateOf<String?>(null) }
+    var fullImage by remember { mutableStateOf<ByteArray?>(null) }
     val scope = rememberCoroutineScope()
     Scaffold(topBar = {
         TopAppBar(
@@ -107,7 +108,7 @@ fun NoteDetailScreen(
                 IconButton(
                     onClick = {
                         scope.launch {
-                            val preparation = prepareShareAttachments(context, note)
+                            val preparation = prepareShareAttachments(context, note, openAttachment)
                             if (preparation.errors.isNotEmpty()) {
                                 Toast.makeText(
                                     context,
@@ -208,17 +209,30 @@ fun NoteDetailScreen(
                 when {
                     imagePlaceholder != null -> {
                         val index = imagePlaceholder.groupValues[1].toInt()
-                        note.images.getOrNull(index)?.let { base64 ->
-                            val bytes = remember(base64) { Base64.decode(base64, Base64.DEFAULT) }
-                            val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
-                            Image(
-                                bitmap.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 8.dp)
-                                    .clickable { fullImage = base64 }
-                            )
+                        note.images.getOrNull(index)?.let { image ->
+                            var imageBytes by remember(note.id, index) { mutableStateOf<ByteArray?>(null) }
+                            LaunchedEffect(note.id, index, image.attachmentId, image.data) {
+                                imageBytes = when {
+                                    !image.data.isNullOrBlank() ->
+                                        runCatching { Base64.decode(image.data, Base64.DEFAULT) }.getOrNull()
+                                    !image.attachmentId.isNullOrBlank() ->
+                                        withContext(Dispatchers.IO) { openAttachment(image.attachmentId) }
+                                    else -> null
+                                }
+                            }
+                            imageBytes?.let { bytes ->
+                                val bitmap = remember(bytes) {
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                }
+                                Image(
+                                    bitmap.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 8.dp)
+                                        .clickable { fullImage = bytes }
+                                )
+                            }
                         }
                     }
                     filePlaceholder != null -> {
@@ -229,15 +243,35 @@ fun NoteDetailScreen(
                                     .fillMaxWidth()
                                     .padding(bottom = 8.dp)
                                     .clickable {
-                                        val bytes = Base64.decode(file.data, Base64.DEFAULT)
-                                        val temp = File(context.cacheDir, file.name)
-                                        temp.writeBytes(bytes)
-                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", temp)
-                                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                                            setDataAndType(uri, file.mime)
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        scope.launch {
+                                            val bytes = withContext(Dispatchers.IO) {
+                                                when {
+                                                    !file.data.isNullOrBlank() ->
+                                                        runCatching { Base64.decode(file.data, Base64.DEFAULT) }.getOrNull()
+                                                    !file.attachmentId.isNullOrBlank() -> openAttachment(file.attachmentId)
+                                                    else -> null
+                                                }
+                                            }
+                                            if (bytes != null) {
+                                                val temp = File(context.cacheDir, file.name)
+                                                temp.writeBytes(bytes)
+                                                val uri = FileProvider.getUriForFile(
+                                                    context,
+                                                    "${context.packageName}.fileprovider",
+                                                    temp
+                                                )
+                                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(uri, file.mime)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                runCatching { context.startActivity(intent) }
+                                                    .onFailure {
+                                                        Toast.makeText(context, "No app found to open this file", Toast.LENGTH_SHORT).show()
+                                                    }
+                                            } else {
+                                                Toast.makeText(context, "Couldn't open attachment", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                        context.startActivity(intent)
                                     },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -301,8 +335,7 @@ fun NoteDetailScreen(
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
-                val bytes = remember(img) { Base64.decode(img, Base64.DEFAULT) }
-                val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
+                val bitmap = remember(img) { BitmapFactory.decodeByteArray(img, 0, img.size) }
                 Image(
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = null,
@@ -322,7 +355,7 @@ fun NoteDetailScreen(
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         DropdownMenuItem(onClick = {
-                            val bytesToSave = Base64.decode(img, Base64.DEFAULT)
+                            val bytesToSave = img
                             val name = "note_image_${System.currentTimeMillis()}.png"
                             val values = ContentValues().apply {
                                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
@@ -349,7 +382,11 @@ fun NoteDetailScreen(
     }
 }
 
-private suspend fun prepareShareAttachments(context: Context, note: Note): SharePreparation {
+private suspend fun prepareShareAttachments(
+    context: Context,
+    note: Note,
+    openAttachment: suspend (String) -> ByteArray?,
+): SharePreparation {
     if (note.images.isEmpty() && note.files.isEmpty()) {
         return SharePreparation(emptyList(), emptyList())
     }
@@ -366,9 +403,14 @@ private suspend fun prepareShareAttachments(context: Context, note: Note): Share
         val authority = "${context.packageName}.fileprovider"
         val attachments = mutableListOf<PreparedAttachment>()
         val errors = mutableListOf<String>()
-        note.images.forEachIndexed { index, data ->
+        note.images.forEachIndexed { index, image ->
             runCatching {
-                val bytes = Base64.decode(data, Base64.DEFAULT)
+                val bytes = when {
+                    !image.data.isNullOrBlank() ->
+                        runCatching { Base64.decode(image.data, Base64.DEFAULT) }.getOrNull()
+                    !image.attachmentId.isNullOrBlank() -> openAttachment(image.attachmentId)
+                    else -> null
+                } ?: error("Missing image data")
                 val file = writeAttachmentFile(directory, "image_${index + 1}.png", bytes)
                 val uri = FileProvider.getUriForFile(context, authority, file)
                 attachments += PreparedAttachment(file, uri, "image/png")
@@ -378,7 +420,12 @@ private suspend fun prepareShareAttachments(context: Context, note: Note): Share
         }
         note.files.forEach { embedded ->
             runCatching {
-                val bytes = Base64.decode(embedded.data, Base64.DEFAULT)
+                val bytes = when {
+                    !embedded.data.isNullOrBlank() ->
+                        runCatching { Base64.decode(embedded.data, Base64.DEFAULT) }.getOrNull()
+                    !embedded.attachmentId.isNullOrBlank() -> openAttachment(embedded.attachmentId)
+                    else -> null
+                } ?: error("Missing attachment data")
                 val fileName = sanitizeFilename(embedded.name).ifBlank { "attachment" }
                 val file = writeAttachmentFile(directory, fileName, bytes)
                 val uri = FileProvider.getUriForFile(context, authority, file)

@@ -1,6 +1,7 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -11,7 +12,10 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-class EncryptedNoteStore(private val context: Context) {
+class EncryptedNoteStore(
+    private val context: Context,
+    private val attachmentStore: AttachmentStore = AttachmentStore(context),
+) {
     private val file = File(context.filesDir, "notes.enc")
     companion object {
         private const val VERSION = 1
@@ -40,24 +44,46 @@ class EncryptedNoteStore(private val context: Context) {
             else -> JSONArray(json)
         }
         val notes = mutableListOf<Note>()
+        var migrated = false
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             val imagesJson = obj.optJSONArray("images") ?: JSONArray()
-            val images = mutableListOf<String>()
+            val images = mutableListOf<NoteImage>()
             for (j in 0 until imagesJson.length()) {
-                images.add(imagesJson.getString(j))
+                when (val entry = imagesJson.get(j)) {
+                    is JSONObject -> {
+                        val attachmentId = entry.optString("id", null)?.takeIf { it.isNotBlank() }
+                        val data = entry.optString("data", null)?.takeIf { it.isNotBlank() }
+                        val resolved = resolveImage(attachmentId, data, pin)
+                        if (resolved.attachmentId != attachmentId) {
+                            migrated = true
+                        }
+                        images.add(resolved)
+                    }
+                    is String -> {
+                        val base64 = entry
+                        val resolved = resolveImage(null, base64, pin)
+                        if (resolved.attachmentId != null) {
+                            migrated = true
+                        }
+                        images.add(resolved)
+                    }
+                    else -> {}
+                }
             }
             val filesJson = obj.optJSONArray("files") ?: JSONArray()
             val files = mutableListOf<NoteFile>()
             for (j in 0 until filesJson.length()) {
                 val f = filesJson.getJSONObject(j)
-                files.add(
-                    NoteFile(
-                        name = f.getString("name"),
-                        mime = f.getString("mime"),
-                        data = f.getString("data"),
-                    )
-                )
+                val name = f.optString("name", "file")
+                val mime = f.optString("mime", "application/octet-stream")
+                val attachmentId = f.optString("id", null)?.takeIf { it.isNotBlank() }
+                val data = f.optString("data", null)?.takeIf { it.isNotBlank() }
+                val resolved = resolveFile(name, mime, attachmentId, data, pin)
+                if (resolved.attachmentId != attachmentId) {
+                    migrated = true
+                }
+                files.add(resolved)
             }
             val linksJson = obj.optJSONArray("linkPreviews") ?: JSONArray()
             val linkPreviews = mutableListOf<NoteLinkPreview>()
@@ -106,6 +132,9 @@ class EncryptedNoteStore(private val context: Context) {
                 )
             )
         }
+        if (migrated) {
+            saveNotes(notes, pin)
+        }
         return notes
     }
 
@@ -118,14 +147,34 @@ class EncryptedNoteStore(private val context: Context) {
             obj.put("content", note.content)
             obj.put("date", note.date)
             val imagesArray = JSONArray()
-            note.images.forEach { imagesArray.put(it) }
+            note.images.forEach { image ->
+                val id = image.attachmentId ?: image.data?.let { data ->
+                    decodeBase64(data)?.let { bytes ->
+                        runCatching { attachmentStore.saveAttachment(pin, bytes) }.getOrNull()
+                    }
+                }
+                if (id != null) {
+                    imagesArray.put(JSONObject().apply { put("id", id) })
+                } else if (!image.data.isNullOrBlank()) {
+                    imagesArray.put(JSONObject().apply { put("data", image.data) })
+                }
+            }
             obj.put("images", imagesArray)
             val filesArray = JSONArray()
             note.files.forEach { f ->
                 val fo = JSONObject()
                 fo.put("name", f.name)
                 fo.put("mime", f.mime)
-                fo.put("data", f.data)
+                val id = f.attachmentId ?: f.data?.let { data ->
+                    decodeBase64(data)?.let { bytes ->
+                        runCatching { attachmentStore.saveAttachment(pin, bytes) }.getOrNull()
+                    }
+                }
+                if (id != null) {
+                    fo.put("id", id)
+                } else if (!f.data.isNullOrBlank()) {
+                    fo.put("data", f.data)
+                }
                 filesArray.put(fo)
             }
             obj.put("files", filesArray)
@@ -170,6 +219,47 @@ class EncryptedNoteStore(private val context: Context) {
         System.arraycopy(iv, 0, output, 16, 12)
         System.arraycopy(cipherText, 0, output, 28, cipherText.size)
         file.writeBytes(output)
+    }
+
+    private fun resolveImage(
+        attachmentId: String?,
+        base64Data: String?,
+        pin: String,
+    ): NoteImage {
+        if (!attachmentId.isNullOrBlank()) {
+            return NoteImage(attachmentId = attachmentId)
+        }
+        val decoded = base64Data?.let(::decodeBase64) ?: return NoteImage(data = base64Data)
+        val id = runCatching { attachmentStore.saveAttachment(pin, decoded) }.getOrNull()
+        return if (id != null) {
+            NoteImage(attachmentId = id)
+        } else {
+            NoteImage(data = base64Data)
+        }
+    }
+
+    private fun resolveFile(
+        name: String,
+        mime: String,
+        attachmentId: String?,
+        base64Data: String?,
+        pin: String,
+    ): NoteFile {
+        if (!attachmentId.isNullOrBlank()) {
+            return NoteFile(name = name, mime = mime, attachmentId = attachmentId)
+        }
+        val decoded = base64Data?.let(::decodeBase64)
+        if (decoded != null) {
+            val id = runCatching { attachmentStore.saveAttachment(pin, decoded) }.getOrNull()
+            if (id != null) {
+                return NoteFile(name = name, mime = mime, attachmentId = id)
+            }
+        }
+        return NoteFile(name = name, mime = mime, data = base64Data)
+    }
+
+    private fun decodeBase64(data: String): ByteArray? {
+        return runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
     }
 
     private fun deriveKey(pin: String, salt: ByteArray): SecretKeySpec {
