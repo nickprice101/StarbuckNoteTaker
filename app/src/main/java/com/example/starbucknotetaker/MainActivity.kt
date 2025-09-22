@@ -21,6 +21,7 @@ import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
@@ -41,6 +42,7 @@ import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.ui.SettingsScreen
+import androidx.lifecycle.withResumed
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
@@ -221,11 +223,13 @@ class MainActivity : AppCompatActivity() {
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val context = LocalContext.current
     val activity = remember(context) { context as AppCompatActivity }
+    val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember(activity) { ContextCompat.getMainExecutor(activity) }
     val biometricManager = remember(activity) { BiometricManager.from(activity) }
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
+    val pendingUnlockNavigationNoteId by noteViewModel.pendingUnlockNavigationNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
@@ -257,7 +261,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 noteViewModel.clearBiometricUnlockRequest()
                 noteViewModel.clearPendingOpenNoteId()
-                openNoteAfterUnlock(request.noteId)
+                noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -364,6 +368,14 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             } finally {
                 pendingBiometricOptIn = false
             }
+        }
+    }
+
+    LaunchedEffect(pendingUnlockNavigationNoteId) {
+        val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
+        lifecycleOwner.lifecycle.withResumed {
+            openNoteAfterUnlock(noteId)
+            noteViewModel.clearPendingUnlockNavigationNoteId()
         }
     }
 
@@ -587,7 +599,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onPinConfirmed = {
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
-                    openNoteAfterUnlock(noteId)
+                    noteViewModel.setPendingUnlockNavigationNoteId(noteId)
                 }
             )
         } else {
