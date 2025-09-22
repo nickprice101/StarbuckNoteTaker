@@ -7,6 +7,13 @@ internal data class EventLocationDisplay(
     val address: String?,
 )
 
+private enum class PrimarySource {
+    Poi,
+    AddressPart,
+    NormalizedFallback,
+    AddressLine,
+}
+
 internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
     val normalized = raw.trim()
     if (normalized.isEmpty()) {
@@ -103,33 +110,88 @@ internal fun Address.toEventLocationDisplay(): EventLocationDisplay? {
     addAddressPart(adminArea)
     addAddressPart(countryName)
 
+    val addressLine = getAddressLine(0)?.trim()?.takeIf { it.isNotEmpty() }
     if (addressParts.isEmpty()) {
-        val addressLine = getAddressLine(0)?.trim()
-        addressLine?.split(',')
+        addressLine
+            ?.split(',')
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
             ?.forEach { addAddressPart(it) }
     }
 
-    val primary = when {
-        !poiName.isNullOrEmpty() -> poiName
-        addressParts.isNotEmpty() -> addressParts.first()
-        else -> getAddressLine(0)?.trim()?.takeIf { it.isNotEmpty() }
-    } ?: return null
+    val fallbackDisplay = addressLine?.let(::fallbackEventLocationDisplay)
+    val normalizedFallbackName = fallbackDisplay?.name?.takeIf { it.isNotBlank() }
+    val normalizedFallbackAddress = fallbackDisplay?.address?.takeUnless { it.isNullOrBlank() }
 
-    val secondaryParts = when {
-        !poiName.isNullOrEmpty() -> addressParts
-        addressParts.size > 1 -> addressParts.drop(1)
-        else -> emptyList()
+    val primarySource: PrimarySource
+    val primary: String = when {
+        !poiName.isNullOrEmpty() -> {
+            primarySource = PrimarySource.Poi
+            poiName
+        }
+        addressParts.isNotEmpty() -> {
+            primarySource = PrimarySource.AddressPart
+            addressParts.first()
+        }
+        normalizedFallbackName != null -> {
+            primarySource = PrimarySource.NormalizedFallback
+            normalizedFallbackName
+        }
+        addressLine != null -> {
+            primarySource = PrimarySource.AddressLine
+            addressLine
+        }
+        else -> {
+            return null
+        }
     }
 
-    val secondary = secondaryParts
-        .filter { !it.equals(primary, ignoreCase = true) }
+    val combinedAddressParts = addressParts
         .joinToString(separator = ", ")
         .takeIf { it.isNotEmpty() }
-        ?: getAddressLine(0)
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() && !it.equals(primary, ignoreCase = true) }
+    val remainingAddressParts = addressParts
+        .drop(1)
+        .joinToString(separator = ", ")
+        .takeIf { it.isNotEmpty() }
+
+    val secondaryCandidates = mutableListOf<String>()
+    fun MutableList<String>.addCandidate(value: String?) {
+        val candidate = value?.trim().orEmpty()
+        if (candidate.isNotEmpty() &&
+            !candidate.equals(primary, ignoreCase = true) &&
+            none { it.equals(candidate, ignoreCase = true) }
+        ) {
+            add(candidate)
+        }
+    }
+
+    when (primarySource) {
+        PrimarySource.Poi -> {
+            secondaryCandidates.addCandidate(combinedAddressParts)
+            secondaryCandidates.addCandidate(normalizedFallbackAddress)
+            secondaryCandidates.addCandidate(addressLine)
+        }
+        PrimarySource.AddressPart -> {
+            secondaryCandidates.addCandidate(remainingAddressParts)
+            if (remainingAddressParts.isNullOrEmpty()) {
+                secondaryCandidates.addCandidate(combinedAddressParts)
+            }
+            secondaryCandidates.addCandidate(normalizedFallbackAddress)
+            secondaryCandidates.addCandidate(addressLine)
+        }
+        PrimarySource.NormalizedFallback -> {
+            secondaryCandidates.addCandidate(addressLine)
+            secondaryCandidates.addCandidate(normalizedFallbackAddress)
+            secondaryCandidates.addCandidate(combinedAddressParts)
+        }
+        PrimarySource.AddressLine -> {
+            secondaryCandidates.addCandidate(combinedAddressParts)
+            secondaryCandidates.addCandidate(normalizedFallbackAddress)
+            secondaryCandidates.addCandidate(remainingAddressParts)
+        }
+    }
+
+    val secondary = secondaryCandidates.firstOrNull()
 
     return EventLocationDisplay(
         name = primary,
