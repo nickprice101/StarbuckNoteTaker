@@ -25,7 +25,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -229,7 +228,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentActivityState = rememberUpdatedState(activity)
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
@@ -381,15 +380,16 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         biometricPrompt.authenticate(promptInfo)
     }
 
-    LaunchedEffect(noteViewModel, lifecycleOwner) {
+    LaunchedEffect(noteViewModel) {
         noteViewModel.pendingUnlockNavigationNoteId.collectLatest { noteId ->
             if (noteId != null) {
+                val currentActivity = currentActivityState.value
                 Log.d(
                     BIOMETRIC_LOG_TAG,
-                    "navigatePendingUnlock requested noteId=${'$'}noteId lifecycle=${'$'}{lifecycleOwner.lifecycle.currentState}"
+                    "navigatePendingUnlock requested noteId=${'$'}noteId lifecycle=${'$'}{currentActivity.lifecycle.currentState}"
                 )
                 navigatePendingUnlock(
-                    lifecycleOwner.lifecycle,
+                    currentActivity.lifecycle,
                     noteViewModel,
                     noteId,
                     openNoteAfterUnlock
