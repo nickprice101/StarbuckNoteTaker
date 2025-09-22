@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
@@ -30,7 +31,8 @@ class Summarizer(
     private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
     private val classifierFactory: (Context) -> NoteNatureClassifier = { NoteNatureClassifier() },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
-    private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
+    private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") },
+    private val classifier: NoteNatureClassifier = NoteNatureClassifier(),
 ) {
     private var encoder: LiteInterpreter? = null
     private var decoder: LiteInterpreter? = null
@@ -175,10 +177,11 @@ class Summarizer(
             val tok = tokenizer
 
             suspend fun fallback(reason: String, throwable: Throwable? = null): String {
-                emitDebug("fallback reason: $reason")
+                val label = classifyFallbackLabel(text, null)
+                emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
-                return fallbackSummary(text)
+                return label.humanReadable
             }
 
             if (enc == null || dec == null || tok == null) {
@@ -416,81 +419,18 @@ class Summarizer(
         }
     }
 
-    fun fallbackSummary(text: String): String {
-        val sentences = extractSentences(text)
-        if (sentences.isEmpty()) {
-            emitDebug("fallback extractive summary using raw text due to missing sentences")
-            return text.take(200)
-        }
+    fun fallbackSummary(text: String): String = fallbackSummary(text, null)
 
-        val keywords = buildKeywordStats(text)
-        val candidates = sentences.mapIndexedNotNull { index, raw ->
-            val trimmed = raw.trim()
-            if (trimmed.isEmpty()) return@mapIndexedNotNull null
-            val words = tokenizeWords(trimmed)
-            val normalized = words.map { normalizeWord(it) }.filter { it.isNotEmpty() }
-            val keywordScore = if (keywords.isEmpty()) 0 else keywords.scoreNewWords(normalized)
-            val diversity = normalized.toSet().size.toDouble()
-            val lengthBonus = normalized.size.coerceAtMost(30) / 30.0
-            val letterBonus = if (words.any { containsLetter(it) }) 0.5 else 0.0
-            val score = keywordScore * 6.0 + diversity + lengthBonus + letterBonus
-            SentenceCandidate(trimmed, score, index)
-        }
-        if (candidates.isEmpty()) {
-            emitDebug("fallback extractive summary unable to score sentences")
-            return text.take(200)
-        }
-
-        val ranked = candidates.sortedWith(
-            compareByDescending<SentenceCandidate> { it.score }.thenBy { it.index }
-        )
-        val top = ranked.take(2).sortedBy { it.index }
-        if (top.isEmpty()) {
-            emitDebug("fallback extractive summary found no top sentences")
-            return text.take(200)
-        }
-
-        top.forEach {
-            emitDebug("fallback sentence[${it.index}] score=${"%.2f".format(it.score)} ${it.text}")
-        }
-
-        val summary = top.joinToString(" ") { candidate ->
-            val endsWithTerminator = candidate.text.lastOrNull()?.let { it in SENTENCE_ENDINGS } ?: false
-            if (endsWithTerminator) candidate.text else "${candidate.text}."
-        }
-        return if (summary.isNotBlank()) summary else text.take(200)
+    fun fallbackSummary(text: String, event: NoteEvent?): String {
+        val label = runBlocking { classifyFallbackLabel(text, event) }
+        return label.humanReadable
     }
 
-    private fun extractSentences(text: String): List<String> {
-        if (text.isBlank()) return emptyList()
-        val trimmed = text.trim()
-        val sentences = mutableListOf<String>()
-        val buffer = StringBuilder()
-        for (ch in trimmed) {
-            buffer.append(ch)
-            if (ch in SENTENCE_ENDINGS) {
-                val candidate = buffer.toString().trim()
-                if (candidate.isNotEmpty()) {
-                    sentences.add(candidate)
-                }
-                buffer.clear()
-            }
-        }
-        val remainder = buffer.toString().trim()
-        if (remainder.isNotEmpty()) {
-            sentences.add(remainder)
-        }
-        if (sentences.isEmpty()) {
-            return trimmed.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        }
-        return sentences
+    private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel {
+        val label = classifier.classify(text, event)
+        emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
+        return label
     }
-
-    private data class SentenceCandidate(
-        val text: String,
-        val score: Double,
-        val index: Int,
-    )
 
     private fun selectNextToken(
         logits: FloatArray,
