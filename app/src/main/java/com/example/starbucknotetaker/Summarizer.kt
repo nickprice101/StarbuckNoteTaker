@@ -180,7 +180,7 @@ class Summarizer(
                 val label = classifyFallbackLabel(text, null)
                 emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
-                _state.emit(SummarizerState.Fallback))
+                _state.emit(SummarizerState.Fallback)
                 return label.humanReadable
             }
 
