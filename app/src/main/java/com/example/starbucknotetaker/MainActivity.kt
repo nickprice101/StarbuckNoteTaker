@@ -269,6 +269,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 noteViewModel.clearBiometricUnlockRequest()
                 noteViewModel.clearPendingOpenNoteId()
+                noteViewModel.clearPendingUnlockNavigationNoteId()
                 noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
             }
 
@@ -639,6 +640,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
                     Log.d(BIOMETRIC_LOG_TAG, "PinPromptDialog pin confirmed noteId=${'$'}noteId")
+                    noteViewModel.clearPendingUnlockNavigationNoteId()
                     noteViewModel.setPendingUnlockNavigationNoteId(noteId)
                 }
             )

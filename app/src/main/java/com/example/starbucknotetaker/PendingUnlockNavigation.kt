@@ -15,25 +15,56 @@ suspend fun navigatePendingUnlock(
     noteId: Long,
     openNoteAfterUnlock: (Long) -> Unit,
 ) {
-    if (noteViewModel.pendingUnlockNavigationNoteId.value != noteId) {
+    val pendingId = noteViewModel.pendingUnlockNavigationNoteId.value
+    logPendingUnlock(
+        "navigatePendingUnlock start noteId=${'$'}noteId pendingId=${'$'}pendingId lifecycle=${'$'}{lifecycle.currentState}"
+    )
+    if (pendingId != noteId) {
+        logPendingUnlock(
+            "navigatePendingUnlock skip_initial_mismatch noteId=${'$'}noteId pendingId=${'$'}pendingId lifecycle=${'$'}{lifecycle.currentState}"
+        )
         return
     }
 
     var navigationAttempted = false
     try {
         lifecycle.whenStateAtLeast(Lifecycle.State.RESUMED) {
-            if (noteViewModel.pendingUnlockNavigationNoteId.value != noteId) {
+            val resumedPendingId = noteViewModel.pendingUnlockNavigationNoteId.value
+            logPendingUnlock(
+                "navigatePendingUnlock resumed noteId=${'$'}noteId pendingId=${'$'}resumedPendingId lifecycle=${'$'}{lifecycle.currentState}"
+            )
+            if (resumedPendingId != noteId) {
+                logPendingUnlock(
+                    "navigatePendingUnlock skip_resumed_mismatch noteId=${'$'}noteId pendingId=${'$'}resumedPendingId lifecycle=${'$'}{lifecycle.currentState}"
+                )
                 return@whenStateAtLeast
             }
 
             navigationAttempted = true
+            logPendingUnlock(
+                "navigatePendingUnlock navigating noteId=${'$'}noteId lifecycle=${'$'}{lifecycle.currentState}"
+            )
             openNoteAfterUnlock(noteId)
         }
     } finally {
-        if (navigationAttempted &&
-            noteViewModel.pendingUnlockNavigationNoteId.value == noteId
-        ) {
+        val currentPendingId = noteViewModel.pendingUnlockNavigationNoteId.value
+        if (navigationAttempted && currentPendingId == noteId) {
+            logPendingUnlock(
+                "navigatePendingUnlock clearing noteId=${'$'}noteId pendingId=${'$'}currentPendingId lifecycle=${'$'}{lifecycle.currentState}"
+            )
             noteViewModel.clearPendingUnlockNavigationNoteId()
+        } else {
+            logPendingUnlock(
+                "navigatePendingUnlock skip_clearing noteId=${'$'}noteId pendingId=${'$'}currentPendingId navigationAttempted=${'$'}navigationAttempted lifecycle=${'$'}{lifecycle.currentState}"
+            )
         }
+    }
+}
+
+private fun logPendingUnlock(message: String) {
+    try {
+        android.util.Log.d(BIOMETRIC_LOG_TAG, message)
+    } catch (_: RuntimeException) {
+        // android.util.Log throws at runtime in plain unit tests; ignore logging in that environment.
     }
 }

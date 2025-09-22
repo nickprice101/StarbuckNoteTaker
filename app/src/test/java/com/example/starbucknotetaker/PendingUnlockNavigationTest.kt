@@ -67,4 +67,37 @@ class PendingUnlockNavigationTest {
             }
         }
     }
+
+    @Test
+    fun pendingUnlockNavigationNavigatesAfterStaleIdCleared() {
+        runTest {
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            Dispatchers.setMain(dispatcher)
+            try {
+                val viewModel = NoteViewModel(SavedStateHandle())
+                val noteId = 7L
+
+                viewModel.setPendingUnlockNavigationNoteId(noteId)
+                assertEquals(noteId, viewModel.pendingUnlockNavigationNoteId.value)
+
+                viewModel.clearPendingUnlockNavigationNoteId()
+                viewModel.setPendingUnlockNavigationNoteId(noteId)
+
+                val resumedLifecycleOwner = TestLifecycleOwner(Lifecycle.State.RESUMED)
+                var navigationCount = 0
+
+                navigatePendingUnlock(
+                    lifecycle = resumedLifecycleOwner.lifecycle,
+                    noteViewModel = viewModel,
+                    noteId = noteId,
+                    openNoteAfterUnlock = { navigationCount++ },
+                )
+
+                assertEquals(1, navigationCount)
+                assertNull(viewModel.pendingUnlockNavigationNoteId.value)
+            } finally {
+                Dispatchers.resetMain()
+            }
+        }
+    }
 }
