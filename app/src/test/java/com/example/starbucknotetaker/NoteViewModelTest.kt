@@ -1,5 +1,6 @@
 package com.example.starbucknotetaker
 
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -36,7 +37,7 @@ class NoteViewModelTest {
         whenever(summarizer.summarize(any())).thenReturn("mocked summary")
         whenever(summarizer.consumeDebugTrace()).thenReturn(emptyList())
 
-        val viewModel = NoteViewModel()
+        val viewModel = NoteViewModel(SavedStateHandle())
         setField(viewModel, "summarizer", summarizer)
 
         viewModel.addNote("Title", "Content", emptyList(), emptyList(), emptyList())
