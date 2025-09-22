@@ -50,6 +50,23 @@ class NoteViewModelTest {
         assertEquals("mocked summary", viewModel.notes[0].summary)
     }
 
+    @Test
+    fun pendingUnlockNavigationNoteIdPersistsAcrossSavedState() = runTest(dispatcher.scheduler) {
+        val handle = SavedStateHandle()
+        val viewModel = NoteViewModel(handle)
+
+        viewModel.setPendingUnlockNavigationNoteId(123L)
+        assertEquals(123L, viewModel.pendingUnlockNavigationNoteId.value)
+
+        val restoredHandle = SavedStateHandle(handle.keys().associateWith { key -> handle.get<Any?>(key) })
+        val restoredViewModel = NoteViewModel(restoredHandle)
+
+        assertEquals(123L, restoredViewModel.pendingUnlockNavigationNoteId.value)
+
+        restoredViewModel.clearPendingUnlockNavigationNoteId()
+        assertEquals(null, restoredViewModel.pendingUnlockNavigationNoteId.value)
+    }
+
     private fun setField(target: Any, name: String, value: Any?) {
         val field = target.javaClass.getDeclaredField(name)
         field.isAccessible = true
