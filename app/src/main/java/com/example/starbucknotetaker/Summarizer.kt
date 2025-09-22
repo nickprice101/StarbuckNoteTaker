@@ -32,7 +32,7 @@ class Summarizer(
     private val classifierFactory: (Context) -> NoteNatureClassifier = { NoteNatureClassifier() },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") },
-    classifier: NoteNatureClassifier = NoteNatureClassifier(),
+    classifier: NoteNatureClassifier? = null,
 ) {
     private var encoder: LiteInterpreter? = null
     private var decoder: LiteInterpreter? = null
@@ -180,7 +180,7 @@ class Summarizer(
                 val label = classifyFallbackLabel(text, null)
                 emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
-                _state.emit(SummarizerState.Fallback)
+                _state.emit(SummarizerState.Fallback))
                 return label.humanReadable
             }
 
