@@ -225,10 +225,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricManager = remember(activity) { BiometricManager.from(activity) }
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
+    val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
-    var pendingOpenNoteId by remember { mutableStateOf<Long?>(null) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
     val biometricUnlockRequest by noteViewModel.biometricUnlockRequest.collectAsState()
@@ -257,7 +257,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 val request = noteViewModel.currentBiometricUnlockRequest() ?: return
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 noteViewModel.clearBiometricUnlockRequest()
-                pendingOpenNoteId = null
+                noteViewModel.clearPendingOpenNoteId()
                 noteIdToOpenAfterUnlock = request.noteId
             }
 
@@ -272,7 +272,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 if (userCancellation) {
                     noteViewModel.clearBiometricUnlockRequest()
                     if (request != null) {
-                        pendingOpenNoteId = request.noteId
+                        noteViewModel.setPendingOpenNoteId(request.noteId)
                     }
                     return
                 }
@@ -370,7 +370,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             if (note == null) {
                 Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
             } else if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
-                pendingOpenNoteId = note.id
+                noteViewModel.setPendingOpenNoteId(note.id)
             } else {
                 navController.navigate("detail/$noteId") {
                     launchSingleTop = true
@@ -419,10 +419,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onOpenNote = { note ->
                     if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                         if (canUseBiometric) {
-                            pendingOpenNoteId = null
+                            noteViewModel.clearPendingOpenNoteId()
                             noteViewModel.requestBiometricUnlock(note.id, note.title)
                         } else {
-                            pendingOpenNoteId = note.id
+                            noteViewModel.setPendingOpenNoteId(note.id)
                         }
                     } else {
                         navController.navigate("detail/${note.id}")
@@ -573,20 +573,20 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 pinManager = pinManager,
                 showBiometricOption = canUseBiometric,
                 onBiometricRequested = {
-                    pendingOpenNoteId = null
+                    noteViewModel.clearPendingOpenNoteId()
                     if (canUseBiometric) {
                         noteViewModel.requestBiometricUnlock(noteId, note.title)
                     }
                 },
-                onDismiss = { pendingOpenNoteId = null },
+                onDismiss = { noteViewModel.clearPendingOpenNoteId() },
                 onPinConfirmed = {
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
-                    pendingOpenNoteId = null
+                    noteViewModel.clearPendingOpenNoteId()
                     noteIdToOpenAfterUnlock = noteId
                 }
             )
         } else {
-            pendingOpenNoteId = null
+            noteViewModel.clearPendingOpenNoteId()
         }
     }
 
