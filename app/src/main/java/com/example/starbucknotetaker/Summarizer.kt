@@ -28,12 +28,14 @@ class Summarizer(
     private val spFactory: (Context) -> SentencePieceProcessor = { SentencePieceProcessor() },
     private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensureTokenizer(it) },
     private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
+    private val classifierFactory: (Context) -> NoteNatureClassifier = { NoteNatureClassifier() },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") }
 ) {
     private var encoder: LiteInterpreter? = null
     private var decoder: LiteInterpreter? = null
     private var tokenizer: SentencePieceProcessor? = null
+    private var classifier: NoteNatureClassifier? = null
 
     sealed class SummarizerState {
         object Loading : SummarizerState()
@@ -54,6 +56,7 @@ class Summarizer(
     }
 
     private suspend fun loadModelsIfNeeded() {
+        ensureClassifier()
         if (encoder != null && decoder != null && tokenizer != null) return
         emitDebug("loading summarizer models")
         _state.emit(SummarizerState.Loading)
@@ -94,6 +97,21 @@ class Summarizer(
 
     private var nativeTokenizerLoaded = false
 
+    private fun ensureClassifier(): NoteNatureClassifier? {
+        val existing = classifier
+        if (existing != null) return existing
+        return try {
+            emitDebug("initializing note nature classifier")
+            classifierFactory(context).also {
+                classifier = it
+                emitDebug("note nature classifier ready")
+            }
+        } catch (t: Throwable) {
+            logger("failed to initialize note nature classifier", t)
+            null
+        }
+    }
+
     /**
      * Attempts to load the native SentencePiece tokenizer library.
      * Returns true if the library was loaded successfully.
@@ -129,6 +147,28 @@ class Summarizer(
         debugTrace.set(trace)
         try {
             emitDebug("summarizing text of length ${text.length}")
+            val classifierInstance = ensureClassifier()
+            if (classifierInstance != null) {
+                try {
+                    val label = classifierInstance.classify(text, null)
+                    emitDebug(
+                        "classifier label=${label.type} confidence=${String.format(Locale.US, "%.3f", label.confidence)}"
+                    )
+                    if (label.humanReadable.isNotBlank() && label.confidence > 0.0) {
+                        val trimmed = trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+                        emitDebug("classifier summary output: $trimmed")
+                        _state.emit(SummarizerState.Ready)
+                        return@withContext trimmed
+                    }
+                    emitDebug("classifier confidence insufficient; continuing with generative summary")
+                } catch (t: Throwable) {
+                    logger("summarizer classifier inference failed", t)
+                    emitDebug("classifier failed, continuing with generative summary")
+                }
+            } else {
+                emitDebug("classifier unavailable; continuing with generative summary")
+            }
+
             loadModelsIfNeeded()
             val enc = encoder
             val dec = decoder
@@ -822,9 +862,18 @@ class Summarizer(
         encoder?.close()
         decoder?.close()
         tokenizer?.close()
+        val closableClassifier = classifier as? AutoCloseable
+        if (closableClassifier != null) {
+            try {
+                closableClassifier.close()
+            } catch (t: Throwable) {
+                logger("failed to close note nature classifier", t)
+            }
+        }
         encoder = null
         decoder = null
         tokenizer = null
+        classifier = null
     }
 
     private fun argmax(arr: FloatArray): Int {
@@ -980,7 +1029,26 @@ class Summarizer(
         private const val EOS_ID = 1
         private const val VOCAB_SIZE = 32128
         private const val MAX_TOKEN_CHOICES = 8
-        private val WORD_SPLIT_REGEX = Regex("\\s+")
+        private const val CLASSIFIER_WORD_LIMIT = 15
+        private const val ELLIPSIS = "…"
+        internal val WORD_SPLIT_REGEX = Regex("\\s+")
+        internal fun trimToWordLimit(text: String, wordLimit: Int = CLASSIFIER_WORD_LIMIT): String {
+            if (wordLimit <= 0) return ""
+            val normalized = text.trim()
+            if (normalized.isEmpty()) return normalized
+            val words = WORD_SPLIT_REGEX.split(normalized).filter { it.isNotEmpty() }
+            if (words.size <= wordLimit) {
+                return words.joinToString(" ")
+            }
+            val trimmedWords = words.take(wordLimit)
+            val candidate = trimmedWords.joinToString(" ")
+            return candidate + ELLIPSIS
+        }
+
+        internal fun wordCount(text: String): Int {
+            if (text.isBlank()) return 0
+            return WORD_SPLIT_REGEX.split(text.trim()).count { it.isNotEmpty() }
+        }
         private const val MAX_REPEAT_WORD_RUN = 2
         private const val MIN_WORDS_FOR_UNIQUENESS = 6
         private const val MIN_UNIQUE_WORDS = 3

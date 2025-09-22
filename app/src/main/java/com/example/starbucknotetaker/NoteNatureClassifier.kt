@@ -20,9 +20,9 @@ import kotlin.math.max
  * matches, structural cues (such as bullet lists), and optional calendar event metadata. When no
  * category achieves a reasonable score the classifier returns a general-purpose label.
  */
-class NoteNatureClassifier {
+open class NoteNatureClassifier {
 
-    suspend fun classify(text: String, event: NoteEvent?): NoteNatureLabel {
+    open suspend fun classify(text: String, event: NoteEvent?): NoteNatureLabel {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) {
             return FALLBACK_LABEL
@@ -60,7 +60,8 @@ class NoteNatureClassifier {
         }
 
         val type = best.key
-        return NoteNatureLabel(type, type.humanReadable)
+        val confidence = relativeScore.coerceIn(0.0, 1.0)
+        return NoteNatureLabel(type, type.humanReadable, confidence)
     }
 
     private fun normalizeTokens(text: String): List<String> {
@@ -113,7 +114,11 @@ class NoteNatureClassifier {
     }
 
     companion object {
-        private val FALLBACK_LABEL = NoteNatureLabel(NoteNatureType.GENERAL_NOTE, NoteNatureType.GENERAL_NOTE.humanReadable)
+        private val FALLBACK_LABEL = NoteNatureLabel(
+            NoteNatureType.GENERAL_NOTE,
+            NoteNatureType.GENERAL_NOTE.humanReadable,
+            0.0
+        )
 
         private const val MIN_ABSOLUTE_SCORE = 2.0
         private const val MIN_RELATIVE_SCORE = 0.25
@@ -315,7 +320,8 @@ class NoteNatureClassifier {
  */
 data class NoteNatureLabel(
     val type: NoteNatureType,
-    val humanReadable: String
+    val humanReadable: String,
+    val confidence: Double
 )
 
 /**
