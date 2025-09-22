@@ -226,6 +226,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
+    val noteIdToOpenAfterUnlock by noteViewModel.noteIdToOpenAfterUnlock.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
@@ -240,7 +241,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
     val startDestination = if (isPinSet) "list" else "pin_setup"
-    var noteIdToOpenAfterUnlock by remember { mutableStateOf<Long?>(null) }
     val openNoteAfterUnlock: (Long) -> Unit = { noteId ->
         val note = noteViewModel.getNoteById(noteId)
         if (note != null) {
@@ -258,7 +258,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 noteViewModel.clearBiometricUnlockRequest()
                 noteViewModel.clearPendingOpenNoteId()
-                noteIdToOpenAfterUnlock = request.noteId
+                noteViewModel.setNoteIdToOpenAfterUnlock(request.noteId)
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -371,7 +371,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     LaunchedEffect(noteIdToOpenAfterUnlock) {
         val noteId = noteIdToOpenAfterUnlock ?: return@LaunchedEffect
         openNoteAfterUnlock(noteId)
-        noteIdToOpenAfterUnlock = null
+        noteViewModel.clearNoteIdToOpenAfterUnlock()
     }
 
     LaunchedEffect(noteViewModel) {
@@ -479,9 +479,9 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         composable("detail/{noteId}") { backStackEntry ->
             val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
             val note = noteId?.let { noteViewModel.getNoteById(it) }
-            if (note != null) {
+            if (noteId != null && note != null) {
                 DisposableEffect(noteId) {
-                    onDispose { noteId?.let { noteViewModel.relockNote(it) } }
+                    onDispose { noteViewModel.relockNote(noteId) }
                 }
                 NoteDetailScreen(
                     note = note,
@@ -500,7 +500,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         composable("edit/{noteId}") { backStackEntry ->
             val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
             val note = noteId?.let { noteViewModel.getNoteById(it) }
-            if (note != null && noteId != null) {
+            if (noteId != null && note != null) {
                 EditNoteScreen(
                     note = note,
                     onSave = { title, content, images, files, linkPreviews, event ->
@@ -592,7 +592,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onPinConfirmed = {
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
-                    noteIdToOpenAfterUnlock = noteId
+                    noteViewModel.setNoteIdToOpenAfterUnlock(noteId)
                 }
             )
         } else {
