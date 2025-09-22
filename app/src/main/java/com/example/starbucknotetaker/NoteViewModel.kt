@@ -3,6 +3,7 @@ package com.example.starbucknotetaker
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
+import android.util.Log
 import android.util.Patterns
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -52,6 +53,11 @@ class NoteViewModel(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val reminderNavigation: SharedFlow<Long> = reminderNavigationEvents.asSharedFlow()
+    private val _biometricUnlockEvents = MutableSharedFlow<BiometricUnlockRequest>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val biometricUnlockEvents: SharedFlow<BiometricUnlockRequest> = _biometricUnlockEvents.asSharedFlow()
     private var pendingReminderNoteId: Long? = null
     private val _pendingShare = MutableStateFlow<PendingShare?>(null)
     val pendingShare: StateFlow<PendingShare?> = _pendingShare
@@ -116,7 +122,20 @@ class NoteViewModel(
     }
 
     fun requestBiometricUnlock(noteId: Long, title: String) {
-        _biometricUnlockRequest.value = BiometricUnlockRequest(noteId, title)
+        val request = BiometricUnlockRequest(noteId, title)
+        _biometricUnlockRequest.value = request
+        val emitted = _biometricUnlockEvents.tryEmit(request)
+        if (emitted) {
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "requestBiometricUnlock noteId=${'$'}noteId title=\"${'$'}title\" token=${'$'}{request.token} delivery=delivered"
+            )
+        } else {
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "requestBiometricUnlock noteId=${'$'}noteId title=\"${'$'}title\" token=${'$'}{request.token} delivery=buffer_overflow"
+            )
+        }
     }
 
     fun clearBiometricUnlockRequest() {
