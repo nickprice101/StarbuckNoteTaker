@@ -40,6 +40,7 @@ class NoteViewModel(
     private var debugNoteCounter = 1
     private var pin: String? = null
     private var store: EncryptedNoteStore? = null
+    private var attachmentStore: AttachmentStore? = null
     private var context: Context? = null
     private var summarizer: Summarizer? = null
     private var reminderScheduler: NoteReminderScheduler? = null
@@ -63,10 +64,13 @@ class NoteViewModel(
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
-        this.context = context.applicationContext
-        val s = EncryptedNoteStore(context)
+        val appContext = context.applicationContext
+        this.context = appContext
+        val attachments = AttachmentStore(appContext)
+        attachmentStore = attachments
+        val s = EncryptedNoteStore(context, attachments)
         store = s
-        reminderScheduler = NoteReminderScheduler(context.applicationContext)
+        reminderScheduler = NoteReminderScheduler(appContext)
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
         unlockedNoteIds.clear()
@@ -204,7 +208,9 @@ class NoteViewModel(
     fun deleteNote(id: Long) {
         val index = _notes.indexOfFirst { it.id == id }
         if (index != -1) {
+            val note = _notes[index]
             reminderScheduler?.cancel(id)
+            deleteAttachmentsFor(note)
             _notes.removeAt(index)
             unlockedNoteIds.remove(id)
             if (pendingReminderNoteId == id) {
@@ -218,7 +224,7 @@ class NoteViewModel(
         id: Long,
         title: String?,
         content: String,
-        images: List<String>,
+        images: List<NoteImage>,
         files: List<NoteFile>,
         linkPreviews: List<NoteLinkPreview>,
         event: NoteEvent? = null,
@@ -235,11 +241,17 @@ class NoteViewModel(
                 summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200)
             }
             val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
+            val preparedImages = prepareImagesForStorage(images)
+            val preparedFiles = prepareFilesForStorage(files)
+            val removedImageIds = note.images.mapNotNull { it.attachmentId }.toSet() -
+                    preparedImages.mapNotNull { it.attachmentId }.toSet()
+            val removedFileIds = note.files.mapNotNull { it.attachmentId }.toSet() -
+                    preparedFiles.mapNotNull { it.attachmentId }.toSet()
             val updated = note.copy(
                 title = finalTitle,
                 content = content.trim(),
-                images = images,
-                files = files,
+                images = preparedImages,
+                files = preparedFiles,
                 linkPreviews = linkPreviews,
                 summary = initialSummary,
                 event = finalEvent,
@@ -248,6 +260,7 @@ class NoteViewModel(
             _notes[index] = updated
             reorderNotes()
             pin?.let { store?.saveNotes(_notes, it) }
+            deleteAttachments(removedImageIds + removedFileIds)
             reminderScheduler?.scheduleIfNeeded(updated)
             tryEmitPendingReminder()
             val noteId = updated.id
@@ -298,8 +311,92 @@ class NoteViewModel(
     }
 
     fun updateStoredPin(newPin: String) {
+        val oldPin = pin ?: return
+        val attachments = attachmentStore
+        if (attachments != null) {
+            val ids = _notes.flatMap { note ->
+                note.images.mapNotNull { it.attachmentId } + note.files.mapNotNull { it.attachmentId }
+            }.toSet()
+            ids.forEach { id ->
+                runCatching { attachments.reencryptAttachment(oldPin, newPin, id) }
+            }
+        }
         pin = newPin
-        pin?.let { store?.saveNotes(_notes, it) }
+        store?.saveNotes(_notes, newPin)
+    }
+
+    fun openAttachment(id: String): ByteArray? {
+        val currentPin = pin ?: return null
+        val attachments = attachmentStore ?: return null
+        return attachments.openAttachment(currentPin, id)
+    }
+
+    private fun prepareImagesForStorage(images: List<NoteImage>): List<NoteImage> {
+        return images.map { image ->
+            val data = image.data
+            if (!data.isNullOrBlank()) {
+                val attachments = attachmentStore
+                val currentPin = pin
+                if (attachments != null && currentPin != null) {
+                    val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
+                    if (bytes != null) {
+                        val id = runCatching {
+                            attachments.saveAttachment(currentPin, bytes, image.attachmentId)
+                        }.getOrNull()
+                        if (id != null) {
+                            return@map image.copy(attachmentId = id, data = null)
+                        }
+                    }
+                }
+                return@map image
+            }
+            if (image.data?.isBlank() == true) {
+                image.copy(data = null)
+            } else {
+                image
+            }
+        }
+    }
+
+    private fun prepareFilesForStorage(files: List<NoteFile>): List<NoteFile> {
+        return files.map { file ->
+            val data = file.data
+            if (!data.isNullOrBlank()) {
+                val attachments = attachmentStore
+                val currentPin = pin
+                if (attachments != null && currentPin != null) {
+                    val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
+                    if (bytes != null) {
+                        val id = runCatching {
+                            attachments.saveAttachment(currentPin, bytes, file.attachmentId)
+                        }.getOrNull()
+                        if (id != null) {
+                            return@map file.copy(attachmentId = id, data = null)
+                        }
+                    }
+                }
+                return@map file
+            }
+            if (file.data?.isBlank() == true) {
+                file.copy(data = null)
+            } else {
+                file
+            }
+        }
+    }
+
+    private fun deleteAttachments(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val attachments = attachmentStore ?: return
+        ids.forEach { id -> runCatching { attachments.deleteAttachment(id) } }
+    }
+
+    private fun deleteAttachmentsFor(note: Note) {
+        val ids = buildSet {
+            note.images.mapNotNullTo(this) { it.attachmentId }
+            note.files.mapNotNullTo(this) { it.attachmentId }
+        }
+        deleteAttachments(ids)
     }
 
     private fun processNewNoteContent(
@@ -307,15 +404,20 @@ class NoteViewModel(
         images: List<Pair<Uri, Int>>,
         files: List<Uri>,
     ): ProcessedNoteContent {
-        val embeddedImages = mutableListOf<String>()
+        val embeddedImages = mutableListOf<NoteImage>()
         val embeddedFiles = mutableListOf<NoteFile>()
+        val store = attachmentStore
+        val currentPin = pin
         context?.let { ctx ->
             images.forEach { (uri, rotation) ->
                 try {
                     ctx.contentResolver.openInputStream(uri)?.use { input ->
                         val bytes = input.readBytes()
                         val exif = ExifInterface(ByteArrayInputStream(bytes))
-                        val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                        val orientation = exif.getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
                         val exifRotation = when (orientation) {
                             ExifInterface.ORIENTATION_ROTATE_90 -> 90
                             ExifInterface.ORIENTATION_ROTATE_180 -> 180
@@ -326,11 +428,31 @@ class NoteViewModel(
                         var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         if (totalRotation != 0) {
                             val matrix = Matrix().apply { postRotate(totalRotation.toFloat()) }
-                            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                            bitmap = Bitmap.createBitmap(
+                                bitmap,
+                                0,
+                                0,
+                                bitmap.width,
+                                bitmap.height,
+                                matrix,
+                                true
+                            )
                         }
                         val baos = ByteArrayOutputStream()
                         bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                        embeddedImages.add(Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT))
+                        val pngBytes = baos.toByteArray()
+                        val id = if (store != null && currentPin != null) {
+                            runCatching { store.saveAttachment(currentPin, pngBytes) }.getOrNull()
+                        } else {
+                            null
+                        }
+                        embeddedImages.add(
+                            if (id != null) {
+                                NoteImage(attachmentId = id)
+                            } else {
+                                NoteImage(data = Base64.encodeToString(pngBytes, Base64.DEFAULT))
+                            }
+                        )
                     }
                 } catch (_: Exception) {}
             }
@@ -343,11 +465,17 @@ class NoteViewModel(
                             if (idx >= 0 && c.moveToFirst()) c.getString(idx) else "file"
                         } ?: "file"
                         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                        val id = if (store != null && currentPin != null) {
+                            runCatching { store.saveAttachment(currentPin, bytes) }.getOrNull()
+                        } else {
+                            null
+                        }
                         embeddedFiles.add(
                             NoteFile(
                                 name = name,
                                 mime = mime,
-                                data = Base64.encodeToString(bytes, Base64.DEFAULT)
+                                attachmentId = id,
+                                data = if (id == null) Base64.encodeToString(bytes, Base64.DEFAULT) else null,
                             )
                         )
                     }
@@ -362,7 +490,18 @@ class NoteViewModel(
             if (isImageUrl(url)) {
                 try {
                     val bytes = URL(url).readBytes()
-                    embeddedImages.add(Base64.encodeToString(bytes, Base64.DEFAULT))
+                    val id = if (store != null && currentPin != null) {
+                        runCatching { store.saveAttachment(currentPin, bytes) }.getOrNull()
+                    } else {
+                        null
+                    }
+                    embeddedImages.add(
+                        if (id != null) {
+                            NoteImage(attachmentId = id)
+                        } else {
+                            NoteImage(data = Base64.encodeToString(bytes, Base64.DEFAULT))
+                        }
+                    )
                     val idx = embeddedImages.size - 1
                     finalContent = finalContent.replace(url, "[[image:$idx]]")
                 } catch (_: Exception) {}
@@ -405,7 +544,7 @@ class NoteViewModel(
 
     private data class ProcessedNoteContent(
         val text: String,
-        val images: List<String>,
+        val images: List<NoteImage>,
         val files: List<NoteFile>,
     )
 
@@ -430,8 +569,10 @@ class NoteViewModel(
             val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
                 input.readBytes()
             } ?: return false
-            val imported = EncryptedNoteStore(context).loadNotesFromBytes(bytes, archivePin)
+            val attachments = attachmentStore ?: AttachmentStore(context.applicationContext)
+            val imported = EncryptedNoteStore(context, attachments).loadNotesFromBytes(bytes, archivePin)
             if (overwrite) {
+                _notes.forEach { deleteAttachmentsFor(it) }
                 _notes.clear()
             }
             _notes.addAll(imported)

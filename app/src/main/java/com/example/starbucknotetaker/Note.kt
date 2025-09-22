@@ -8,7 +8,7 @@ data class Note(
     val title: String,
     val content: String,
     val date: Long = System.currentTimeMillis(),
-    val images: List<String> = emptyList(),
+    val images: List<NoteImage> = emptyList(),
     val files: List<NoteFile> = emptyList(),
     val linkPreviews: List<NoteLinkPreview> = emptyList(),
     val summary: String = "",
@@ -24,7 +24,19 @@ data class Note(
 data class NoteFile(
     val name: String,
     val mime: String,
-    val data: String,
+    val attachmentId: String? = null,
+    val data: String? = null,
+)
+
+/**
+ * Represents an embedded image within a note. Images are stored externally via
+ * the attachment store and referenced by a stable identifier. The deprecated
+ * [data] property is temporarily retained so legacy notes encoded with base64
+ * blobs can still be opened and migrated.
+ */
+data class NoteImage(
+    val attachmentId: String? = null,
+    val data: String? = null,
 )
 
 /**

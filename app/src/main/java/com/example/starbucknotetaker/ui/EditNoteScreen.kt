@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteFile
+import com.example.starbucknotetaker.NoteImage
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
@@ -67,11 +68,12 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun EditNoteScreen(
     note: Note,
-    onSave: (String?, String, List<String>, List<NoteFile>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
+    onSave: (String?, String, List<NoteImage>, List<NoteFile>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
     onCancel: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
-    summarizerState: Summarizer.SummarizerState
+    summarizerState: Summarizer.SummarizerState,
+    openAttachment: suspend (String) -> ByteArray?,
 ) {
     var title by remember { mutableStateOf(note.title) }
     val blocks = remember {
@@ -86,8 +88,8 @@ fun EditNoteScreen(
                 when {
                     imgPlaceholder != null -> {
                         val idx = imgPlaceholder.groupValues[1].toInt()
-                        note.images.getOrNull(idx)?.let { data ->
-                            add(EditBlock.Image(data))
+                        note.images.getOrNull(idx)?.let { image ->
+                            add(EditBlock.Image(image.attachmentId, image.data.orEmpty()))
                             val textBlock = EditBlock.Text("")
                             add(textBlock)
                             lastTextId = textBlock.id
@@ -318,10 +320,10 @@ fun EditNoteScreen(
                 base64?.let { data ->
                     val last = blocks.lastOrNull()
                     if (last is EditBlock.Text && last.text.isBlank()) {
-                        blocks[blocks.size - 1] = EditBlock.Image(data)
+                        blocks[blocks.size - 1] = EditBlock.Image(null, data)
                         blocks.add(EditBlock.Text(""))
                     } else {
-                        blocks.add(EditBlock.Image(data))
+                        blocks.add(EditBlock.Image(null, data))
                         blocks.add(EditBlock.Text(""))
                     }
                 }
@@ -345,7 +347,7 @@ fun EditNoteScreen(
                             if (idx >= 0 && c.moveToFirst()) c.getString(idx) else "file"
                         } ?: "file"
                         val mime = context.contentResolver.getType(it) ?: "application/octet-stream"
-                        NoteFile(name, mime, Base64.encodeToString(bytes, Base64.DEFAULT))
+                        NoteFile(name, mime, attachmentId = null, data = Base64.encodeToString(bytes, Base64.DEFAULT))
                     }
                 }
                 file?.let { f ->
@@ -433,7 +435,7 @@ fun EditNoteScreen(
                             }
                             idx++
                         }
-                        val images = mutableListOf<String>()
+                        val images = mutableListOf<NoteImage>()
                         val files = mutableListOf<NoteFile>()
                         val linkPreviews = mutableListOf<NoteLinkPreview>()
                         val content = buildString {
@@ -448,7 +450,12 @@ fun EditNoteScreen(
                                         append("[[image:")
                                         append(images.size)
                                         append("]]\n")
-                                        images.add(block.data)
+                                        images.add(
+                                            NoteImage(
+                                                attachmentId = block.attachmentId,
+                                                data = block.data.takeIf { it.isNotBlank() }
+                                            )
+                                        )
                                     }
                                     is EditBlock.File -> {
                                         append("[[file:")
@@ -719,11 +726,24 @@ fun EditNoteScreen(
                         )
                     }
                     is EditBlock.Image -> {
-                        var bitmap by remember(block.data) { mutableStateOf<Bitmap?>(null) }
-                        LaunchedEffect(block.data) {
-                            bitmap = withContext(Dispatchers.IO) {
-                                val bytes = Base64.decode(block.data, Base64.DEFAULT)
-                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        var bitmap by remember(block.id, block.data) { mutableStateOf<Bitmap?>(null) }
+                        LaunchedEffect(block.id, block.attachmentId, block.data) {
+                            if (block.data.isBlank() && block.attachmentId != null) {
+                                val bytes = withContext(Dispatchers.IO) { openAttachment(block.attachmentId) }
+                                if (bytes != null) {
+                                    val encoded = Base64.encodeToString(bytes, Base64.DEFAULT)
+                                    blocks[index] = block.copy(data = encoded)
+                                }
+                            }
+                        }
+                        LaunchedEffect(block.id, block.data) {
+                            bitmap = if (block.data.isNotBlank()) {
+                                withContext(Dispatchers.IO) {
+                                    val bytes = Base64.decode(block.data, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                }
+                            } else {
+                                null
                             }
                         }
                         Box(
@@ -1010,7 +1030,11 @@ private sealed class EditBlock {
     abstract val id: Long
 
     data class Text(val text: String, override val id: Long = nextEditBlockId()) : EditBlock()
-    data class Image(val data: String, override val id: Long = nextEditBlockId()) : EditBlock()
+    data class Image(
+        val attachmentId: String?,
+        val data: String,
+        override val id: Long = nextEditBlockId()
+    ) : EditBlock()
     data class File(val file: NoteFile, override val id: Long = nextEditBlockId()) : EditBlock()
     data class LinkPreview(
         val sourceId: Long,
