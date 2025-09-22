@@ -264,12 +264,26 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 super.onAuthenticationError(errorCode, errString)
                 val request = noteViewModel.currentBiometricUnlockRequest()
-                val userCancellation = when (errorCode) {
+
+                val userExit = when (errorCode) {
                     BiometricPrompt.ERROR_NEGATIVE_BUTTON,
                     BiometricPrompt.ERROR_USER_CANCELED -> true
                     else -> false
                 }
-                if (userCancellation) {
+
+                val hardFailure = when (errorCode) {
+                    BiometricPrompt.ERROR_HW_NOT_PRESENT,
+                    BiometricPrompt.ERROR_NO_BIOMETRICS,
+                    BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
+                    BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
+                    BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL -> true
+                    else -> false
+                }
+
+                if (userExit || hardFailure) {
+                    if (hardFailure) {
+                        Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
+                    }
                     noteViewModel.clearBiometricUnlockRequest()
                     if (request != null) {
                         noteViewModel.setPendingOpenNoteId(request.noteId)
@@ -277,23 +291,19 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     return
                 }
 
-                val systemCancellation = when (errorCode) {
+                val transientError = when (errorCode) {
                     BiometricPrompt.ERROR_CANCELED,
-                    BiometricPrompt.ERROR_TIMEOUT -> true
+                    BiometricPrompt.ERROR_TIMEOUT,
+                    BiometricPrompt.ERROR_LOCKOUT,
+                    BiometricPrompt.ERROR_HW_UNAVAILABLE,
+                    BiometricPrompt.ERROR_UNABLE_TO_PROCESS,
+                    BiometricPrompt.ERROR_NO_SPACE,
+                    BiometricPrompt.ERROR_VENDOR -> true
                     else -> false
                 }
-                if (!systemCancellation) {
-                    when (errorCode) {
-                        BiometricPrompt.ERROR_HW_NOT_PRESENT,
-                        BiometricPrompt.ERROR_NO_BIOMETRICS,
-                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-                        BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED -> {
-                            Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
-                        }
-                        else -> {
-                            // Leave the request intact so a retry can be triggered.
-                        }
-                    }
+
+                if (!transientError || errorCode == BiometricPrompt.ERROR_LOCKOUT) {
+                    Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
                 }
             }
         })
