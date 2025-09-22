@@ -1,0 +1,11 @@
+package com.example.starbucknotetaker
+
+/**
+ * Represents a one-shot biometric unlock request.
+ * token ensures Compose side-effects retrigger even for same note.
+ */
+data class BiometricUnlockRequest(
+    val noteId: Long,
+    val title: String,
+    val token: Long = System.nanoTime()
+)
