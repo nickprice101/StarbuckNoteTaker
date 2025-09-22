@@ -59,8 +59,6 @@ class NoteViewModel(
     val biometricUnlockRequest: StateFlow<BiometricUnlockRequest?> = _biometricUnlockRequest
     val pendingOpenNoteId: StateFlow<Long?> =
         savedStateHandle.getStateFlow(PENDING_OPEN_NOTE_ID_KEY, null)
-    val noteIdToOpenAfterUnlock: StateFlow<Long?> =
-        savedStateHandle.getStateFlow(NOTE_ID_TO_OPEN_AFTER_UNLOCK_KEY, null)
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -135,17 +133,8 @@ class NoteViewModel(
         savedStateHandle[PENDING_OPEN_NOTE_ID_KEY] = null
     }
 
-    fun setNoteIdToOpenAfterUnlock(noteId: Long) {
-        savedStateHandle[NOTE_ID_TO_OPEN_AFTER_UNLOCK_KEY] = noteId
-    }
-
-    fun clearNoteIdToOpenAfterUnlock() {
-        savedStateHandle[NOTE_ID_TO_OPEN_AFTER_UNLOCK_KEY] = null
-    }
-
     private companion object {
         const val PENDING_OPEN_NOTE_ID_KEY = "pending_open_note_id"
-        const val NOTE_ID_TO_OPEN_AFTER_UNLOCK_KEY = "note_id_to_open_after_unlock"
     }
 
     fun addNote(
