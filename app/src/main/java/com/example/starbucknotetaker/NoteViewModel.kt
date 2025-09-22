@@ -12,6 +12,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import androidx.compose.runtime.mutableStateListOf
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.net.URL
@@ -29,7 +30,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 /**
  * ViewModel storing notes in memory.
  */
-class NoteViewModel : ViewModel() {
+class NoteViewModel(
+    private val savedStateHandle: SavedStateHandle,
+) : ViewModel() {
     private val _notes = mutableStateListOf<Note>()
     val notes: List<Note> = _notes
 
@@ -53,8 +56,8 @@ class NoteViewModel : ViewModel() {
     val pendingShare: StateFlow<PendingShare?> = _pendingShare
     private val _biometricUnlockRequest = MutableStateFlow<BiometricUnlockRequest?>(null)
     val biometricUnlockRequest: StateFlow<BiometricUnlockRequest?> = _biometricUnlockRequest
-    private val _pendingOpenNoteId = MutableStateFlow<Long?>(null)
-    val pendingOpenNoteId: StateFlow<Long?> = _pendingOpenNoteId
+    val pendingOpenNoteId: StateFlow<Long?> =
+        savedStateHandle.getStateFlow(PENDING_OPEN_NOTE_ID_KEY, null)
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -119,11 +122,15 @@ class NoteViewModel : ViewModel() {
     }
 
     fun setPendingOpenNoteId(noteId: Long) {
-        _pendingOpenNoteId.value = noteId
+        savedStateHandle[PENDING_OPEN_NOTE_ID_KEY] = noteId
     }
 
     fun clearPendingOpenNoteId() {
-        _pendingOpenNoteId.value = null
+        savedStateHandle[PENDING_OPEN_NOTE_ID_KEY] = null
+    }
+
+    private companion object {
+        const val PENDING_OPEN_NOTE_ID_KEY = "pending_open_note_id"
     }
 
     fun addNote(
