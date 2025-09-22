@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.biometric.BiometricManager
@@ -21,7 +22,6 @@ import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,6 +42,7 @@ import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.ui.SettingsScreen
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.withResumed
 import kotlinx.coroutines.flow.collectLatest
 
@@ -219,11 +220,26 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
+@VisibleForTesting
+internal suspend fun navigatePendingUnlock(
+    lifecycle: Lifecycle,
+    noteViewModel: NoteViewModel,
+    noteId: Long,
+    openNoteAfterUnlock: (Long) -> Unit,
+) {
+    try {
+        lifecycle.withResumed {
+            openNoteAfterUnlock(noteId)
+        }
+    } finally {
+        noteViewModel.clearPendingUnlockNavigationNoteId()
+    }
+}
+
 @Composable
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val context = LocalContext.current
     val activity = remember(context) { context as AppCompatActivity }
-    val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember(activity) { ContextCompat.getMainExecutor(activity) }
     val biometricManager = remember(activity) { BiometricManager.from(activity) }
     val summarizerState by noteViewModel.summarizerState.collectAsState()
@@ -373,10 +389,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     LaunchedEffect(pendingUnlockNavigationNoteId) {
         val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
-        lifecycleOwner.lifecycle.withResumed {
-            openNoteAfterUnlock(noteId)
-            noteViewModel.clearPendingUnlockNavigationNoteId()
-        }
+        navigatePendingUnlock(
+            lifecycle = activity.lifecycle,
+            noteViewModel = noteViewModel,
+            noteId = noteId,
+            openNoteAfterUnlock = openNoteAfterUnlock,
+        )
     }
 
     LaunchedEffect(noteViewModel) {
