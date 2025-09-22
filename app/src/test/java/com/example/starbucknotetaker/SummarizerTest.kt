@@ -9,7 +9,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.verify
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,11 +54,54 @@ class SummarizerTest {
             ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
         )
 
-        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debugSink = { })
+        val classifier = zeroConfidenceClassifier()
+        val summarizer = Summarizer(
+            context,
+            fetcher,
+            nativeLoader = { false },
+            classifierFactory = { classifier },
+            logger = { _, _ -> },
+            debugSink = { }
+        )
 
         val text = "One. Two. Three."
         val result = summarizer.summarize(text)
         assertEquals("One. Two.", result)
+    }
+
+    @Test
+    fun summarizeReturnsClassifierLabelWithinWordLimit() = runBlocking {
+        val labelText = "Meeting recap covering agenda updates action items follow up planning deliverables and scheduling next steps across teams"
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.MEETING_RECAP,
+                labelText,
+                confidence = 0.9
+            )
+        )
+        val fetcher = mock<ModelFetcher>()
+
+        val debugMessages = mutableListOf<String>()
+        val logs = mutableListOf<String>()
+        val summarizer = Summarizer(
+            context,
+            fetcher = fetcher,
+            classifierFactory = { classifier },
+            nativeLoader = { throw AssertionError("native loader should not run during classification") },
+            logger = { message, throwable -> logs.add("$message:${throwable.javaClass.simpleName}:${throwable.message}") },
+            debugSink = { debugMessages.add(it) }
+        )
+
+        val summary = summarizer.summarize("Any note content")
+        val expected = Summarizer.trimToWordLimit(labelText, 15)
+        val trace = summarizer.consumeDebugTrace()
+
+        assertTrue("expected classifier trace but was: $trace logs=$logs", trace.any { it.contains("classifier summary output") })
+        assertEquals(expected, summary)
+        assertTrue(Summarizer.wordCount(summary) <= 15)
+        verify(fetcher, never()).ensureModels(any())
+
+        summarizer.close()
     }
 
     @Test
@@ -86,12 +131,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -151,12 +198,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -205,12 +254,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -266,12 +317,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -335,12 +388,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -406,12 +461,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -481,12 +538,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -544,12 +603,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -592,12 +653,14 @@ class SummarizerTest {
             add(decoder)
         }
 
+        val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
             fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
+            classifierFactory = { classifier },
             logger = { _, _ -> },
             debugSink = { }
         )
@@ -689,6 +752,24 @@ class SummarizerTest {
         field.isAccessible = true
         val flag = field.get(NativeLibraryLoader) as AtomicBoolean
         return flag.get()
+    }
+
+    private fun zeroConfidenceClassifier(): NoteNatureClassifier {
+        return classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.GENERAL_NOTE,
+                NoteNatureType.GENERAL_NOTE.humanReadable,
+                confidence = 0.0
+            )
+        )
+    }
+
+    private fun classifierWithLabel(label: NoteNatureLabel): NoteNatureClassifier {
+        return object : NoteNatureClassifier() {
+            override suspend fun classify(text: String, event: NoteEvent?): NoteNatureLabel {
+                return label
+            }
+        }
     }
 
     private class FakeInterpreter(
