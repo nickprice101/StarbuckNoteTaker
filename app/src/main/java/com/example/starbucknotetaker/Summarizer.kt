@@ -32,12 +32,12 @@ class Summarizer(
     private val classifierFactory: (Context) -> NoteNatureClassifier = { NoteNatureClassifier() },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") },
-    private val classifier: NoteNatureClassifier = NoteNatureClassifier(),
+    classifier: NoteNatureClassifier = NoteNatureClassifier(),
 ) {
     private var encoder: LiteInterpreter? = null
     private var decoder: LiteInterpreter? = null
     private var tokenizer: SentencePieceProcessor? = null
-    private var classifier: NoteNatureClassifier? = null
+    private var classifierRef: NoteNatureClassifier? = classifier
 
     sealed class SummarizerState {
         object Loading : SummarizerState()
@@ -100,12 +100,12 @@ class Summarizer(
     private var nativeTokenizerLoaded = false
 
     private fun ensureClassifier(): NoteNatureClassifier? {
-        val existing = classifier
+        val existing = classifierRef
         if (existing != null) return existing
         return try {
             emitDebug("initializing note nature classifier")
             classifierFactory(context).also {
-                classifier = it
+                classifierRef = it
                 emitDebug("note nature classifier ready")
             }
         } catch (t: Throwable) {
@@ -427,7 +427,17 @@ class Summarizer(
     }
 
     private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel {
-        val label = classifier.classify(text, event)
+        val classifier = ensureClassifier()
+        val label = if (classifier != null) {
+            classifier.classify(text, event)
+        } else {
+            emitDebug("fallback classifier unavailable; defaulting to general note label")
+            NoteNatureLabel(
+                NoteNatureType.GENERAL_NOTE,
+                NoteNatureType.GENERAL_NOTE.humanReadable,
+                0.0
+            )
+        }
         emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
         return label
     }
@@ -802,7 +812,7 @@ class Summarizer(
         encoder?.close()
         decoder?.close()
         tokenizer?.close()
-        val closableClassifier = classifier as? AutoCloseable
+        val closableClassifier = classifierRef as? AutoCloseable
         if (closableClassifier != null) {
             try {
                 closableClassifier.close()
@@ -813,7 +823,7 @@ class Summarizer(
         encoder = null
         decoder = null
         tokenizer = null
-        classifier = null
+        classifierRef = null
     }
 
     private fun argmax(arr: FloatArray): Int {
