@@ -32,6 +32,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.withResumed
 import com.example.starbucknotetaker.ui.AddNoteScreen
 import com.example.starbucknotetaker.ui.NoteEntryMode
 import com.example.starbucknotetaker.ui.NoteDetailScreen
@@ -370,8 +371,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     LaunchedEffect(noteIdToOpenAfterUnlock) {
         val noteId = noteIdToOpenAfterUnlock ?: return@LaunchedEffect
-        openNoteAfterUnlock(noteId)
-        noteViewModel.clearNoteIdToOpenAfterUnlock()
+        activity.lifecycle.withResumed {
+            openNoteAfterUnlock(noteId)
+            noteViewModel.clearNoteIdToOpenAfterUnlock()
+        }
     }
 
     LaunchedEffect(noteViewModel) {
