@@ -15,15 +15,15 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.material.AlertDialog
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.AlertDialog
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -34,16 +34,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.starbucknotetaker.ui.AddNoteScreen
-import com.example.starbucknotetaker.ui.NoteEntryMode
+import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.NoteDetailScreen
+import com.example.starbucknotetaker.ui.NoteEntryMode
 import com.example.starbucknotetaker.ui.NoteListScreen
 import com.example.starbucknotetaker.ui.PinEnterScreen
 import com.example.starbucknotetaker.ui.PinSetupScreen
-import com.example.starbucknotetaker.ui.EditNoteScreen
-import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.ui.SettingsScreen
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.withResumed
+import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
@@ -179,7 +177,6 @@ class MainActivity : AppCompatActivity() {
             try {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } catch (_: SecurityException) {
-                // Ignore if the URI cannot grant persistable permissions
             }
         }
     }
@@ -220,22 +217,6 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-@VisibleForTesting
-internal suspend fun navigatePendingUnlock(
-    lifecycle: Lifecycle,
-    noteViewModel: NoteViewModel,
-    noteId: Long,
-    openNoteAfterUnlock: (Long) -> Unit,
-) {
-    try {
-        lifecycle.withResumed {
-            openNoteAfterUnlock(noteId)
-        }
-    } finally {
-        noteViewModel.clearPendingUnlockNavigationNoteId()
-    }
-}
-
 @Composable
 fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
     val context = LocalContext.current
@@ -245,7 +226,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
-    val pendingUnlockNavigationNoteId by noteViewModel.pendingUnlockNavigationNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
@@ -260,6 +240,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
     val startDestination = if (isPinSet) "list" else "pin_setup"
+
     val openNoteAfterUnlock: (Long) -> Unit = { noteId ->
         val note = noteViewModel.getNoteById(noteId)
         if (note != null) {
@@ -270,6 +251,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
         }
     }
+
     val biometricPrompt = remember(activity, executor) {
         BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -277,7 +259,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 noteViewModel.clearBiometricUnlockRequest()
                 noteViewModel.clearPendingOpenNoteId()
-                noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
+                openNoteAfterUnlock(request.noteId)
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -362,7 +344,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    LaunchedEffect(biometricUnlockRequest) {
+    // Keyed on the unique token to guarantee retriggering for same note
+    LaunchedEffect(biometricUnlockRequest?.token) {
         val request = biometricUnlockRequest ?: return@LaunchedEffect
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock note")
@@ -385,16 +368,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 pendingBiometricOptIn = false
             }
         }
-    }
-
-    LaunchedEffect(pendingUnlockNavigationNoteId) {
-        val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
-        navigatePendingUnlock(
-            lifecycle = activity.lifecycle,
-            noteViewModel = noteViewModel,
-            noteId = noteId,
-            openNoteAfterUnlock = openNoteAfterUnlock,
-        )
     }
 
     LaunchedEffect(noteViewModel) {
@@ -617,7 +590,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onPinConfirmed = {
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
-                    noteViewModel.setPendingUnlockNavigationNoteId(noteId)
+                    openNoteAfterUnlock(noteId)
                 }
             )
         } else {
@@ -650,7 +623,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             pendingUnlockNoteId = null
         }
     }
-
 }
 
 @Composable
