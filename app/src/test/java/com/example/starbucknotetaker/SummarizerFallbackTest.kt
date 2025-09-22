@@ -3,7 +3,7 @@ package com.example.starbucknotetaker
 import android.content.Context
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
@@ -13,7 +13,7 @@ import org.mockito.kotlin.whenever
 class SummarizerFallbackTest {
 
     @Test
-    fun fallbackTraceIncludesReasonAndSentences() = runTest {
+    fun fallbackTraceIncludesReasonAndClassifierCategory() = runTest {
         val context = mock<Context>()
         val fetcher = mock<ModelFetcher>()
         runBlocking {
@@ -33,20 +33,19 @@ class SummarizerFallbackTest {
         val source = "First sentence has coffee beans. Second sentence talks about roasting beans. Third sentence is ignored."
         val summary = summarizer.summarize(source)
 
-        assertFalse(summary.isBlank())
+        assertEquals(NoteNatureType.GENERAL_NOTE.humanReadable, summary)
 
         val trace = summarizer.consumeDebugTrace()
         assertTrue(
             "Expected fallback reason to appear in trace, got: $trace",
-            trace.any { it.contains("fallback reason: models unavailable") }
+            trace.any { it.contains("fallback reason: models unavailable; classifier=GENERAL_NOTE") }
         )
         assertTrue(
-            "Expected fallback sentence log with actual text, got: $trace",
-            trace.any { it.contains("fallback sentence[0]") && it.contains("coffee beans") }
-        )
-        assertTrue(
-            "Expected fallback sentence log with actual text, got: $trace",
-            trace.any { it.contains("fallback sentence[1]") && it.contains("roasting beans") }
+            "Expected fallback classifier label to appear in trace, got: $trace",
+            trace.any {
+                it.contains("fallback classifier label: GENERAL_NOTE") &&
+                        it.contains(NoteNatureType.GENERAL_NOTE.humanReadable)
+            }
         )
     }
 }

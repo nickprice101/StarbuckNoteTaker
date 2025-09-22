@@ -13,6 +13,7 @@ import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.whenever
 import org.junit.Assert.assertEquals
 
@@ -33,7 +34,7 @@ class NoteViewModelTest {
     @Test
     fun addNoteUpdatesSummaryFromSummarizer() = runTest(dispatcher.scheduler) {
         val summarizer = mock<Summarizer>()
-        whenever(summarizer.fallbackSummary(any())).thenReturn("initial summary")
+        whenever(summarizer.fallbackSummary(any(), anyOrNull())).thenReturn(NoteNatureType.GENERAL_NOTE.humanReadable)
         whenever(summarizer.summarize(any())).thenReturn("mocked summary")
         whenever(summarizer.consumeDebugTrace()).thenReturn(emptyList())
 
@@ -41,6 +42,8 @@ class NoteViewModelTest {
         setField(viewModel, "summarizer", summarizer)
 
         viewModel.addNote("Title", "Content", emptyList(), emptyList(), emptyList())
+
+        assertEquals(NoteNatureType.GENERAL_NOTE.humanReadable, viewModel.notes[0].summary)
 
         advanceUntilIdle()
 

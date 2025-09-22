@@ -169,7 +169,7 @@ class NoteViewModel(
         val initialSummary = if (summarizerSource.isBlank()) {
             ""
         } else {
-            summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200)
+            summarizer?.let { it.fallbackSummary(summarizerSource, event) } ?: summarizerSource.take(200)
         }
         val note = Note(
             title = finalTitle,
@@ -238,7 +238,7 @@ class NoteViewModel(
             val initialSummary = if (summarizerSource.isBlank()) {
                 ""
             } else {
-                summarizer?.let { it.fallbackSummary(summarizerSource) } ?: summarizerSource.take(200)
+                summarizer?.let { it.fallbackSummary(summarizerSource, finalEvent) } ?: summarizerSource.take(200)
             }
             val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
             val preparedImages = prepareImagesForStorage(images)
