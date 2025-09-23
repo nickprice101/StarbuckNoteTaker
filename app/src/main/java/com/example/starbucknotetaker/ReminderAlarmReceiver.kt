@@ -15,9 +15,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.TaskStackBuilder
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -35,20 +32,23 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
         val wakeLock = acquireWakeLock(appContext, payload.noteId)
-        CoroutineScope(Dispatchers.Default).launch {
-            try {
+        try {
+            if (payload.fallbackToNotification) {
                 showNotification(appContext, payload)
-                Log.d(TAG, "onReceive: displayed notification noteId=${payload.noteId}")
-            } catch (t: Throwable) {
-                Log.e(TAG, "onReceive: failed to display notification", t)
-            } finally {
-                wakeLock?.let { lock ->
-                    if (lock.isHeld) {
-                        lock.release()
-                    }
-                }
-                pendingResult.finish()
+                Log.d(TAG, "onReceive: fallback notification shown noteId=${payload.noteId}")
+            } else {
+                ReminderAlarmService.start(appContext, payload)
+                Log.d(TAG, "onReceive: started full-screen alarm noteId=${payload.noteId}")
             }
+        } catch (t: Throwable) {
+            Log.e(TAG, "onReceive: failed to handle reminder", t)
+        } finally {
+            wakeLock?.let { lock ->
+                if (lock.isHeld) {
+                    lock.release()
+                }
+            }
+            pendingResult.finish()
         }
     }
 
@@ -142,46 +142,29 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "ReminderAlarmReceiver"
         const val ACTION_SHOW_NOTE_REMINDER = "com.example.starbucknotetaker.action.SHOW_NOTE_REMINDER"
-        private const val EXTRA_NOTE_ID = "extra_note_id"
-        private const val EXTRA_NOTE_TITLE = "extra_note_title"
-        private const val EXTRA_NOTE_SUMMARY = "extra_note_summary"
-        private const val EXTRA_EVENT_START = "extra_event_start"
-        private const val EXTRA_EVENT_TIME_ZONE = "extra_event_time_zone"
-        private const val EXTRA_EVENT_ALL_DAY = "extra_event_all_day"
-        private const val EXTRA_EVENT_LOCATION = "extra_event_location"
-        private const val EXTRA_NOTE_LOCKED = "extra_note_locked"
-        private const val EXTRA_REMINDER_MINUTES = "extra_reminder_minutes"
         private const val CHANNEL_ID = "note-reminders"
         private const val WAKE_LOCK_TAG = "StarbuckNoteTaker:ReminderWakeLock"
         private const val WAKE_LOCK_TIMEOUT_MS = 10_000L
         private val DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a")
         private val DATE_FORMAT = DateTimeFormatter.ofPattern("MMM d, yyyy")
 
-        fun createIntent(context: Context, note: Note): Intent {
-            val event = note.event ?: throw IllegalArgumentException("Note must have event to schedule reminder")
+        fun createIntent(context: Context, note: Note, fallbackToNotification: Boolean): Intent {
+            val payload = ReminderPayload.fromNote(note, fallbackToNotification)
+            return createIntent(context, payload)
+        }
+
+        fun createIntent(context: Context, payload: ReminderPayload): Intent {
             return Intent(context, ReminderAlarmReceiver::class.java).apply {
                 action = ACTION_SHOW_NOTE_REMINDER
-                putExtrasFrom(event, note)
+                payload.fillIntent(this)
             }
         }
 
         fun createBaseIntent(context: Context, noteId: Long): Intent {
             return Intent(context, ReminderAlarmReceiver::class.java).apply {
                 action = ACTION_SHOW_NOTE_REMINDER
-                putExtra(EXTRA_NOTE_ID, noteId)
+                putExtra(ReminderPayload.EXTRA_NOTE_ID, noteId)
             }
-        }
-
-        private fun Intent.putExtrasFrom(event: NoteEvent, note: Note) {
-            putExtra(EXTRA_NOTE_ID, note.id)
-            putExtra(EXTRA_NOTE_TITLE, note.title)
-            putExtra(EXTRA_NOTE_SUMMARY, note.summary)
-            putExtra(EXTRA_EVENT_START, event.start)
-            putExtra(EXTRA_EVENT_TIME_ZONE, event.timeZone)
-            putExtra(EXTRA_EVENT_ALL_DAY, event.allDay)
-            putExtra(EXTRA_EVENT_LOCATION, event.location)
-            putExtra(EXTRA_NOTE_LOCKED, note.isLocked)
-            putExtra(EXTRA_REMINDER_MINUTES, event.reminderMinutesBeforeStart ?: 0)
         }
 
         private fun ensureChannel(context: Context) {
@@ -199,42 +182,4 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         }
     }
 
-    private data class ReminderPayload(
-        val noteId: Long,
-        val title: String,
-        val summary: String,
-        val eventStart: Long,
-        val timeZoneId: String,
-        val allDay: Boolean,
-        val location: String?,
-        val isLocked: Boolean,
-        val reminderMinutes: Int,
-    ) {
-        companion object {
-            fun fromIntent(intent: Intent): ReminderPayload? {
-                val noteId = intent.getLongExtra(EXTRA_NOTE_ID, -1L)
-                if (noteId <= 0) return null
-                val title = intent.getStringExtra(EXTRA_NOTE_TITLE) ?: return null
-                val summary = intent.getStringExtra(EXTRA_NOTE_SUMMARY).orEmpty()
-                val eventStart = intent.getLongExtra(EXTRA_EVENT_START, -1L)
-                if (eventStart <= 0) return null
-                val timeZoneId = intent.getStringExtra(EXTRA_EVENT_TIME_ZONE) ?: ZoneId.systemDefault().id
-                val allDay = intent.getBooleanExtra(EXTRA_EVENT_ALL_DAY, false)
-                val location = intent.getStringExtra(EXTRA_EVENT_LOCATION).takeIf { !it.isNullOrBlank() }
-                val isLocked = intent.getBooleanExtra(EXTRA_NOTE_LOCKED, false)
-                val reminderMinutes = intent.getIntExtra(EXTRA_REMINDER_MINUTES, 0)
-                return ReminderPayload(
-                    noteId = noteId,
-                    title = title,
-                    summary = summary,
-                    eventStart = eventStart,
-                    timeZoneId = timeZoneId,
-                    allDay = allDay,
-                    location = location,
-                    isLocked = isLocked,
-                    reminderMinutes = reminderMinutes,
-                )
-            }
-        }
-    }
 }
