@@ -356,7 +356,6 @@ class BiometricNavigationTest {
         val launchedPrompts = Collections.synchronizedList(mutableListOf<String>())
         val biometricLogs = Collections.synchronizedList(mutableListOf<String>())
         val pendingOptInCallback = AtomicReference<(() -> Unit)?>(null)
-        var createdNoteId: Long? = null
 
         BiometricPromptTestHooks.disableOptInReplayGuard = disableReplayGuard
         BiometricPromptTestHooks.logListener = { message ->
@@ -410,7 +409,6 @@ class BiometricNavigationTest {
                     event = null,
                 )
                 val noteId = viewModel.notes.first { it.title == noteTitle }.id
-                createdNoteId = noteId
                 viewModel.setNoteLock(noteId, true)
             }
 
@@ -424,16 +422,15 @@ class BiometricNavigationTest {
                 pendingOptInCallback.get() != null
             }
 
-            composeTestRule.onNodeWithText(noteTitle).performClick()
-
-            composeTestRule.activityRule.scenario.onActivity { activity ->
-                val noteId = createdNoteId ?: error("Note was not created")
-                val viewModel = activity.getNoteViewModelForTest()
-                viewModel.requestBiometricUnlock(noteId, noteTitle)
+            val suppressedLogsBeforeClick = biometricLogs.count {
+                it.contains("biometric unlock request suppressed")
             }
 
+            composeTestRule.onNodeWithText(noteTitle).performClick()
+
             composeTestRule.waitUntil(timeoutMillis = 5_000) {
-                biometricLogs.any { it.contains("biometric unlock request suppressed") }
+                biometricLogs.count { it.contains("biometric unlock request suppressed") } >
+                    suppressedLogsBeforeClick
             }
 
             composeTestRule.runOnUiThread {
