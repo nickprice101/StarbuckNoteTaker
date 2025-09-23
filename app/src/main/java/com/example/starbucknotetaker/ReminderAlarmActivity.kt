@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.VisibleForTesting
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,6 +64,11 @@ class ReminderAlarmActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         payloadState.value = ReminderPayload.fromIntent(intent)
+    }
+
+    @VisibleForTesting
+    internal fun handleNewIntentForTest(intent: Intent) {
+        onNewIntent(intent)
     }
 
     private fun configureForLockscreen() {

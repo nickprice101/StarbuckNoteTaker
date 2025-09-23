@@ -2,10 +2,11 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.rule.ActivityScenarioRule
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,17 +29,17 @@ class ReminderAlarmExperienceTest {
     )
 
     @get:Rule
-    val composeRule = createAndroidComposeRule(
-        ActivityScenarioRule(
-            ReminderAlarmActivity.createIntent(context, initialPayload)
-        )
-    )
+    val composeRule = createAndroidComposeRule<ReminderAlarmActivity>()
 
     @Test
     fun coldStartDisplaysReminderDetails() {
+        composeRule.activityRule.scenario.onActivity { activity ->
+            activity.handleNewIntentForTest(ReminderAlarmActivity.createIntent(activity, initialPayload))
+        }
+        composeRule.waitForIdle()
         composeRule.onNodeWithText(initialPayload.title).assertExists()
         composeRule.onNodeWithText(context.getString(R.string.reminder_alarm_action_dismiss)).performClick()
-        composeRule.waitUntil {
+        composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.activityRule.scenario.state == Lifecycle.State.DESTROYED
         }
     }
@@ -51,8 +52,13 @@ class ReminderAlarmExperienceTest {
             summary = "Review status",
         )
         composeRule.activityRule.scenario.onActivity { activity ->
-            activity.onNewIntent(ReminderAlarmActivity.createIntent(activity, updatedPayload))
+            activity.handleNewIntentForTest(ReminderAlarmActivity.createIntent(activity, initialPayload))
         }
+        composeRule.waitForIdle()
+        composeRule.activityRule.scenario.onActivity { activity ->
+            activity.handleNewIntentForTest(ReminderAlarmActivity.createIntent(activity, updatedPayload))
+        }
+        composeRule.waitForIdle()
         composeRule.onNodeWithText(updatedPayload.title).assertExists()
     }
 }
