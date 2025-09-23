@@ -260,7 +260,9 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             BiometricPromptTestHooks.notifyBiometricLog(guardLog)
         }
         val hasActiveFlow = previous && pendingRequest != null
-        if (hasActiveFlow && matchesCurrentFlow) {
+        val guardDisabled = BiometricPromptTestHooks.disableOptInReplayGuard
+        val shouldRetrigger = hasActiveFlow && matchesCurrentFlow && !guardDisabled
+        if (shouldRetrigger) {
             val currentRequest = checkNotNull(pendingRequest)
             pendingBiometricOptIn = false
             val pendingAfter = pendingBiometricOptIn
@@ -275,9 +277,14 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             BiometricPromptTestHooks.notifyBiometricLog(logMessage)
         } else {
             val action = if (hasActiveFlow) {
-                when {
-                    activeRequestToken == null -> "left_pending_missing_active_token"
-                    else -> "left_pending_token_mismatch"
+                if (guardDisabled) {
+                    pendingBiometricOptIn = false
+                    "idle"
+                } else {
+                    when {
+                        activeRequestToken == null -> "left_pending_missing_active_token"
+                        else -> "left_pending_token_mismatch"
+                    }
                 }
             } else {
                 pendingBiometricOptIn = false

@@ -16,6 +16,9 @@ object BiometricPromptTestHooks {
     @Volatile
     var logListener: ((String) -> Unit)? = null
 
+    @Volatile
+    var disableOptInReplayGuard: Boolean = false
+
     fun notifyBiometricLog(message: String) {
         logListener?.invoke(message)
     }
@@ -25,5 +28,6 @@ object BiometricPromptTestHooks {
         interceptAuthenticate = null
         overrideCanAuthenticate = null
         logListener = null
+        disableOptInReplayGuard = false
     }
 }

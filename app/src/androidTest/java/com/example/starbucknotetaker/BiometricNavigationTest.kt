@@ -10,12 +10,15 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -88,7 +91,7 @@ class BiometricNavigationTest {
             val title = promptInfo.title.toString()
             launchedPrompts += title
             assertEquals("Unlock note", title)
-            callback.onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult(null))
+            callback.onAuthenticationSucceeded(createAuthenticationResult())
             true
         }
 
@@ -106,69 +109,81 @@ class BiometricNavigationTest {
 
     @Test
     fun unlockRequestRetriggersAfterOptInClears() {
-        val prefs = context.getSharedPreferences("pin_prefs", Context.MODE_PRIVATE)
-        prefs.edit().clear().commit()
-        context.getFileStreamPath("notes.enc")?.delete()
-
-        composeTestRule.activityRule.scenario.recreate()
-
         val noteTitle = "Opt-in retry note"
         val noteContent = "Opt-in retry content"
-        val launchedPrompts = mutableListOf<String>()
-        var createdNoteId: Long? = null
 
-        BiometricPromptTestHooks.interceptAuthenticate = { promptInfo, callback ->
-            val promptTitle = promptInfo.title.toString()
-            launchedPrompts += promptTitle
-            when (promptTitle) {
-                "Enable biometric unlock" -> {
-                    composeTestRule.activityRule.scenario.onActivity { activity ->
-                        val viewModel = activity.getNoteViewModelForTest()
-                        if (createdNoteId == null) {
-                            viewModel.addNote(
-                                title = noteTitle,
-                                content = noteContent,
-                                images = emptyList(),
-                                files = emptyList(),
-                                linkPreviews = emptyList(),
-                                event = null,
-                            )
-                            val noteId = viewModel.notes.first { it.title == noteTitle }.id
-                            createdNoteId = noteId
-                            viewModel.setNoteLock(noteId, true)
-                        }
-                        val noteId = createdNoteId ?: error("note not created")
-                        viewModel.requestBiometricUnlock(noteId, noteTitle)
-                    }
-                    callback.onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult(null))
-                    true
-                }
-                "Unlock note" -> {
-                    callback.onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult(null))
-                    true
-                }
-                else -> false
+        val result = runOptInUnlockFlow(
+            disableReplayGuard = false,
+            noteTitle = noteTitle,
+            noteContent = noteContent,
+        )
+
+        assertTrue("Expected the locked note to open after opt-in", result.noteDisplayed)
+        assertEquals(listOf("Enable biometric unlock", "Unlock note"), result.launchedPrompts)
+
+        val suppressedLogs = result.biometricLogs.filter {
+            it.contains("biometric unlock request suppressed")
+        }
+        assertTrue("Expected the unlock request to be suppressed while opt-in was pending", suppressedLogs.isNotEmpty())
+
+        val clearLogs = result.biometricLogs.filter {
+            it.contains("clearPendingBiometricOptIn") && it.contains("previous=true")
+        }
+        assertTrue("Expected clearPendingBiometricOptIn logs with previous=true", clearLogs.isNotEmpty())
+        assertTrue(clearLogs.none { it.contains("action=idle") })
+
+        val lastClearIndex = result.biometricLogs.withIndex().indexOfLast { (index, log) ->
+            index >= 0 && log.contains("clearPendingBiometricOptIn") && log.contains("previous=true")
+        }
+        val replayLaunchIndex = result.biometricLogs.withIndex().indexOfFirst { (index, log) ->
+            index > lastClearIndex && log.contains("Launching biometric prompt") && log.contains("pendingOptIn=false")
+        }
+        assertTrue(
+            "Expected Launching biometric prompt…pendingOptIn=false after opt-in cleared",
+            replayLaunchIndex != -1
+        )
+    }
+
+    @Test
+    fun unlockRequestReplayGuardResolvesRegression() {
+        val regression = runOptInUnlockFlow(
+            disableReplayGuard = true,
+            noteTitle = "Opt-in regression note",
+            noteContent = "Opt-in regression content",
+        )
+
+        assertTrue(regression.launchedPrompts.contains("Enable biometric unlock"))
+        assertTrue(
+            regression.biometricLogs.any {
+                it.contains("clearPendingBiometricOptIn") &&
+                    it.contains("previous=true") &&
+                    it.contains("action=idle")
             }
-        }
+        )
+        assertTrue(regression.biometricLogs.none {
+            it.contains("Launching biometric prompt") && it.contains("pendingOptIn=false")
+        })
+        assertTrue("Expected navigation to be blocked when the guard is disabled", !regression.noteDisplayed)
 
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty()
-        }
-        composeTestRule.onNode(hasSetTextAction()).performTextInput("1234")
-        composeTestRule.onNodeWithText("Next").performClick()
-        composeTestRule.onNode(hasSetTextAction()).performTextInput("1234")
-        composeTestRule.onNodeWithText("Save").performClick()
+        val resolved = runOptInUnlockFlow(
+            disableReplayGuard = false,
+            noteTitle = "Opt-in regression note resolved",
+            noteContent = "Opt-in regression content resolved",
+        )
 
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodesWithText("Enable biometric unlock?").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeTestRule.onNodeWithText("Enable").performClick()
-
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodesWithText(noteContent).fetchSemanticsNodes().isNotEmpty()
-        }
-        composeTestRule.onNodeWithText(noteContent).assertIsDisplayed()
-        assertEquals(listOf("Enable biometric unlock", "Unlock note"), launchedPrompts)
+        assertTrue("Expected the guard to restore navigation", resolved.noteDisplayed)
+        assertTrue(
+            resolved.biometricLogs.any {
+                it.contains("Launching biometric prompt") && it.contains("pendingOptIn=false")
+            }
+        )
+        assertTrue(
+            resolved.biometricLogs.none {
+                it.contains("clearPendingBiometricOptIn") &&
+                    it.contains("previous=true") &&
+                    it.contains("action=idle")
+            }
+        )
     }
 
     @Test
@@ -189,7 +204,7 @@ class BiometricNavigationTest {
                 "Enable biometric unlock",
                 "Disable biometric unlock",
                 "Unlock note" -> {
-                    callback.onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult(null))
+                    callback.onAuthenticationSucceeded(createAuthenticationResult())
                     true
                 }
                 else -> false
@@ -311,5 +326,142 @@ class BiometricNavigationTest {
         val launchLogsAfterToggle = biometricLogs.filter { it.contains("Launching biometric prompt noteId") }
         assertTrue(launchLogsAfterToggle.takeLast(2).all { it.contains("pendingOptIn=false") })
         assertTrue(biometricLogs.none { it.contains("biometric unlock request suppressed") })
+    }
+
+    private data class BiometricOptInFlowResult(
+        val launchedPrompts: List<String>,
+        val biometricLogs: List<String>,
+        val noteDisplayed: Boolean,
+    )
+
+    private fun createAuthenticationResult(): BiometricPrompt.AuthenticationResult {
+        val constructor = BiometricPrompt.AuthenticationResult::class.java.getDeclaredConstructor(
+            BiometricPrompt.CryptoObject::class.java
+        )
+        constructor.isAccessible = true
+        return constructor.newInstance(null)
+    }
+
+    private fun runOptInUnlockFlow(
+        disableReplayGuard: Boolean,
+        noteTitle: String,
+        noteContent: String,
+    ): BiometricOptInFlowResult {
+        val prefs = context.getSharedPreferences("pin_prefs", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        context.getFileStreamPath("notes.enc")?.delete()
+
+        composeTestRule.activityRule.scenario.recreate()
+
+        val launchedPrompts = Collections.synchronizedList(mutableListOf<String>())
+        val biometricLogs = Collections.synchronizedList(mutableListOf<String>())
+        val pendingOptInCallback = AtomicReference<(() -> Unit)?>(null)
+        var createdNoteId: Long? = null
+
+        BiometricPromptTestHooks.disableOptInReplayGuard = disableReplayGuard
+        BiometricPromptTestHooks.logListener = { message ->
+            if (
+                message.contains("clearPendingBiometricOptIn") ||
+                message.contains("biometric unlock request suppressed") ||
+                message.contains("Launching biometric prompt")
+            ) {
+                biometricLogs += message
+            }
+        }
+        BiometricPromptTestHooks.interceptAuthenticate = { promptInfo, callback ->
+            val promptTitle = promptInfo.title.toString()
+            launchedPrompts += promptTitle
+            when (promptTitle) {
+                "Enable biometric unlock" -> {
+                    pendingOptInCallback.set {
+                        callback.onAuthenticationSucceeded(createAuthenticationResult())
+                    }
+                    true
+                }
+                "Unlock note" -> {
+                    callback.onAuthenticationSucceeded(createAuthenticationResult())
+                    true
+                }
+                else -> false
+            }
+        }
+
+        try {
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                composeTestRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeTestRule.onNode(hasSetTextAction()).performTextInput("1234")
+            composeTestRule.onNodeWithText("Next").performClick()
+            composeTestRule.onNode(hasSetTextAction()).performTextInput("1234")
+            composeTestRule.onNodeWithText("Save").performClick()
+
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                composeTestRule.onAllNodesWithText("Enable biometric unlock?").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            composeTestRule.activityRule.scenario.onActivity { activity ->
+                val viewModel = activity.getNoteViewModelForTest()
+                viewModel.addNote(
+                    title = noteTitle,
+                    content = noteContent,
+                    images = emptyList(),
+                    files = emptyList(),
+                    linkPreviews = emptyList(),
+                    event = null,
+                )
+                val noteId = viewModel.notes.first { it.title == noteTitle }.id
+                createdNoteId = noteId
+                viewModel.setNoteLock(noteId, true)
+            }
+
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                composeTestRule.onAllNodesWithText(noteTitle).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            composeTestRule.onNodeWithText("Enable").performClick()
+
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                pendingOptInCallback.get() != null
+            }
+
+            composeTestRule.onNodeWithText(noteTitle).performClick()
+
+            composeTestRule.activityRule.scenario.onActivity { activity ->
+                val noteId = createdNoteId ?: error("Note was not created")
+                val viewModel = activity.getNoteViewModelForTest()
+                viewModel.requestBiometricUnlock(noteId, noteTitle)
+            }
+
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                biometricLogs.any { it.contains("biometric unlock request suppressed") }
+            }
+
+            composeTestRule.runOnUiThread {
+                pendingOptInCallback.getAndSet(null)?.invoke()
+            }
+
+            composeTestRule.waitForIdle()
+
+            val noteDisplayed = runCatching {
+                composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                    composeTestRule.onAllNodesWithText(noteContent).fetchSemanticsNodes().isNotEmpty()
+                }
+                true
+            }.getOrDefault(false)
+
+            if (noteDisplayed) {
+                composeTestRule.onNodeWithText(noteContent).assertIsDisplayed()
+            }
+
+            return BiometricOptInFlowResult(
+                launchedPrompts = launchedPrompts.toList(),
+                biometricLogs = biometricLogs.toList(),
+                noteDisplayed = noteDisplayed,
+            )
+        } finally {
+            BiometricPromptTestHooks.interceptAuthenticate = null
+            BiometricPromptTestHooks.logListener = null
+            BiometricPromptTestHooks.disableOptInReplayGuard = false
+        }
     }
 }
