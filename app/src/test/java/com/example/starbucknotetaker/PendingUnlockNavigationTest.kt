@@ -6,13 +6,18 @@ import androidx.lifecycle.testing.TestLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -92,6 +97,51 @@ class PendingUnlockNavigationTest {
                     noteId = noteId,
                     openNoteAfterUnlock = { navigationCount++ },
                 )
+
+                assertEquals(1, navigationCount)
+                assertNull(viewModel.pendingUnlockNavigationNoteId.value)
+            } finally {
+                Dispatchers.resetMain()
+            }
+        }
+    }
+
+    @Test
+    fun pendingUnlockNavigationNavigatesWhenInitialValueIsNull() {
+        runTest {
+            val dispatcher = UnconfinedTestDispatcher(testScheduler)
+            Dispatchers.setMain(dispatcher)
+            try {
+                val lifecycleOwner = TestLifecycleOwner(Lifecycle.State.CREATED)
+                val viewModel = NoteViewModel(SavedStateHandle())
+                val noteId = 99L
+
+                viewModel.setPendingUnlockNavigationNoteId(noteId)
+                viewModel.clearPendingUnlockNavigationNoteId()
+
+                var navigationCount = 0
+
+                val navigation = async(start = CoroutineStart.UNDISPATCHED) {
+                    navigatePendingUnlock(
+                        lifecycle = lifecycleOwner.lifecycle,
+                        noteViewModel = viewModel,
+                        noteId = noteId,
+                        openNoteAfterUnlock = { navigationCount++ },
+                    )
+                }
+
+                testScheduler.runCurrent()
+
+                assertTrue(navigation.isActive)
+
+                viewModel.setPendingUnlockNavigationNoteId(noteId)
+                lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+                lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_START)
+                lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+
+                testScheduler.advanceUntilIdle()
+
+                navigation.await()
 
                 assertEquals(1, navigationCount)
                 assertNull(viewModel.pendingUnlockNavigationNoteId.value)
