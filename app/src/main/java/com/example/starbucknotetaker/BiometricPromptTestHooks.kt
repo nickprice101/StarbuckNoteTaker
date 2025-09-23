@@ -13,9 +13,17 @@ object BiometricPromptTestHooks {
     @Volatile
     var overrideCanAuthenticate: Int? = null
 
+    @Volatile
+    var logListener: ((String) -> Unit)? = null
+
+    fun notifyBiometricLog(message: String) {
+        logListener?.invoke(message)
+    }
+
     @VisibleForTesting
     fun reset() {
         interceptAuthenticate = null
         overrideCanAuthenticate = null
+        logListener = null
     }
 }
