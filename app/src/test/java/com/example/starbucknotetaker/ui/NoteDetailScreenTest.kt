@@ -2,6 +2,7 @@ package com.example.starbucknotetaker.ui
 
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
+import com.example.starbucknotetaker.ui.EventLocationDisplay
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +33,29 @@ class NoteDetailScreenTest {
     }
 
     @Test
+    fun `event summary prefers provided location display`() {
+        val event = NoteEvent(
+            start = 1_700_000_000_000,
+            end = 1_700_000_360_000,
+            allDay = false,
+            timeZone = "UTC",
+            location = "Lijnbaansgracht 234A, Amsterdam",
+            reminderMinutesBeforeStart = null,
+        )
+        val display = EventLocationDisplay(
+            name = "Melkweg",
+            address = "Lijnbaansgracht 234A, Amsterdam",
+        )
+
+        val summary = invokeBuildEventSummary(event, display)
+        val lines = summary.lines()
+        val locationIndex = lines.indexOfFirst { it.startsWith("Location:") }
+
+        assertTrue("Location line not found in summary: $summary", locationIndex >= 0)
+        assertEquals("Location: Melkweg", lines[locationIndex])
+    }
+
+    @Test
     fun `share text uses formatted event summary`() {
         val event = NoteEvent(
             start = 1_700_000_000_000,
@@ -55,26 +79,40 @@ class NoteDetailScreenTest {
         )
     }
 
-    private fun invokeBuildEventSummary(event: NoteEvent): String {
+    private fun invokeBuildEventSummary(
+        event: NoteEvent,
+        display: EventLocationDisplay? = null,
+    ): String {
         val method = buildEventSummaryMethod
-        return method.invoke(null, event) as String
+        return method.invoke(null, event, display) as String
     }
 
-    private fun invokeBuildShareText(note: Note): String {
+    private fun invokeBuildShareText(
+        note: Note,
+        display: EventLocationDisplay? = null,
+    ): String {
         val method = buildShareTextMethod
-        return method.invoke(null, note) as String
+        return method.invoke(null, note, display) as String
     }
 
     private val buildEventSummaryMethod: Method by lazy {
         val clazz = Class.forName("com.example.starbucknotetaker.ui.NoteDetailScreenKt")
-        clazz.getDeclaredMethod("buildEventSummary", NoteEvent::class.java).apply {
+        clazz.getDeclaredMethod(
+            "buildEventSummary",
+            NoteEvent::class.java,
+            EventLocationDisplay::class.java,
+        ).apply {
             isAccessible = true
         }
     }
 
     private val buildShareTextMethod: Method by lazy {
         val clazz = Class.forName("com.example.starbucknotetaker.ui.NoteDetailScreenKt")
-        clazz.getDeclaredMethod("buildShareText", Note::class.java).apply {
+        clazz.getDeclaredMethod(
+            "buildShareText",
+            Note::class.java,
+            EventLocationDisplay::class.java,
+        ).apply {
             isAccessible = true
         }
     }
