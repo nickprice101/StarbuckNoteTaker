@@ -266,14 +266,15 @@ class BiometricNavigationTest {
                 val viewModel = activity.getNoteViewModelForTest()
                 val noteId = viewModel.notes.first { it.title == noteTitle }.id
                 viewModel.requestBiometricUnlock(noteId, noteTitle)
+                pendingOptInCallback.getAndSet(null)?.invoke()
             }
 
             composeTestRule.waitUntil(timeoutMillis = 5_000) {
-                biometricLogs.any { it.contains("biometric unlock request suppressed") }
-            }
-
-            composeTestRule.activityRule.scenario.onActivity {
-                pendingOptInCallback.getAndSet(null)?.invoke()
+                biometricLogs.any {
+                    it.contains("clearPendingBiometricOptIn") &&
+                        it.contains("action=retrigger") &&
+                        it.contains("pendingAfter=false")
+                }
             }
 
             composeTestRule.waitUntil(timeoutMillis = 5_000) {
@@ -283,16 +284,13 @@ class BiometricNavigationTest {
             }
             composeTestRule.onNodeWithText(noteContent).assertIsDisplayed()
 
-            val suppressedLogs = biometricLogs.filter { it.contains("biometric unlock request suppressed") }
-            assertTrue(
-                "Expected unlock request to be suppressed while opt-in was pending",
-                suppressedLogs.isNotEmpty()
-            )
             val clearLogs = biometricLogs.filter { it.contains("clearPendingBiometricOptIn") }
             assertTrue("Expected clearPendingBiometricOptIn logs", clearLogs.isNotEmpty())
             assertTrue(
-                "Expected pendingAfter=false after opt-in clears",
-                clearLogs.any { it.contains("pendingAfter=false") }
+                "Expected clearPendingBiometricOptIn action=retrigger pendingAfter=false entry",
+                clearLogs.any {
+                    it.contains("action=retrigger") && it.contains("pendingAfter=false")
+                }
             )
 
             assertEquals(listOf("Enable biometric unlock", "Unlock note"), launchedPrompts)
