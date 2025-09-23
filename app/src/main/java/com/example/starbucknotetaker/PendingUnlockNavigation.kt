@@ -33,7 +33,7 @@ suspend fun navigatePendingUnlock(
             logPendingUnlock(
                 "navigatePendingUnlock resumed noteId=${'$'}noteId pendingId=${'$'}resumedPendingId lifecycle=${'$'}{lifecycle.currentState}"
             )
-            if (resumedPendingId != noteId) {
+            if (resumedPendingId != null && resumedPendingId != noteId) {
                 logPendingUnlock(
                     "navigatePendingUnlock skip_resumed_mismatch noteId=${'$'}noteId pendingId=${'$'}resumedPendingId lifecycle=${'$'}{lifecycle.currentState}"
                 )

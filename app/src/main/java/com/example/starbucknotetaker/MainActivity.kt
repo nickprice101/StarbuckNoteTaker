@@ -48,6 +48,9 @@ import kotlinx.coroutines.flow.collectLatest
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
 
+    @VisibleForTesting
+    internal fun getNoteViewModelForTest(): NoteViewModel = noteViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -236,10 +239,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricUnlockRequest by noteViewModel.biometricUnlockRequest.collectAsState()
     var showBiometricOptIn by remember { mutableStateOf(false) }
     var pendingBiometricOptIn by remember { mutableStateOf(false) }
-    val biometricStatus = biometricManager.canAuthenticate(
-        BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.BIOMETRIC_WEAK
-    )
+    val biometricStatusOverride = BiometricPromptTestHooks.overrideCanAuthenticate
+    if (biometricStatusOverride != null) {
+        Log.d(BIOMETRIC_LOG_TAG, "Using biometricStatus override value=${'$'}biometricStatusOverride")
+    }
+    val biometricStatus = biometricStatusOverride
+        ?: biometricManager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.BIOMETRIC_WEAK
+        )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
     val startDestination = if (isPinSet) "list" else "pin_setup"
     var biometricPromptTrigger by remember { mutableLongStateOf(0L) }
@@ -261,16 +269,51 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    val biometricPrompt = remember(activity, executor) {
-        BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+    val launchedBiometricRequest = remember { mutableStateOf<BiometricUnlockRequest?>(null) }
+    val launchedBiometricRequestState = rememberUpdatedState(launchedBiometricRequest.value)
+
+    val biometricAuthenticationCallback = remember(noteViewModel) {
+        object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                val request = noteViewModel.currentBiometricUnlockRequest() ?: return
-                Log.d(BIOMETRIC_LOG_TAG, "onAuthenticationSucceeded noteId=${'$'}{request.noteId}")
+                val currentRequest = noteViewModel.currentBiometricUnlockRequest()
+                val capturedRequest = launchedBiometricRequestState.value
+                Log.d(
+                    BIOMETRIC_LOG_TAG,
+                    "onAuthenticationSucceeded callback currentRequest=${'$'}{currentRequest?.noteId} capturedRequest=${'$'}{capturedRequest?.noteId}"
+                )
+
+                val request = currentRequest ?: capturedRequest
+                if (request == null) {
+                    launchedBiometricRequest.value = null
+                    Log.e(BIOMETRIC_LOG_TAG, "onAuthenticationSucceeded abort missing request")
+                    return
+                }
+
+                if (currentRequest == null) {
+                    Log.w(
+                        BIOMETRIC_LOG_TAG,
+                        "onAuthenticationSucceeded recovered_captured_request noteId=${'$'}{request.noteId}"
+                    )
+                }
+
                 noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                 noteViewModel.clearBiometricUnlockRequest()
                 noteViewModel.clearPendingOpenNoteId()
                 noteViewModel.clearPendingUnlockNavigationNoteId()
                 noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
+                val pendingAfterSet = noteViewModel.pendingUnlockNavigationNoteId.value
+                if (pendingAfterSet != request.noteId) {
+                    Log.w(
+                        BIOMETRIC_LOG_TAG,
+                        "onAuthenticationSucceeded pending_after_set_mismatch pending=${'$'}pendingAfterSet expected=${'$'}{request.noteId}"
+                    )
+                } else {
+                    Log.d(
+                        BIOMETRIC_LOG_TAG,
+                        "onAuthenticationSucceeded pending_after_set=${'$'}pendingAfterSet expected=${'$'}{request.noteId}"
+                    )
+                }
+                launchedBiometricRequest.value = null
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -322,7 +365,11 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
                 }
             }
-        })
+        }
+    }
+
+    val biometricPrompt = remember(activity, executor, biometricAuthenticationCallback) {
+        BiometricPrompt(activity, executor, biometricAuthenticationCallback)
     }
 
     val biometricOptInPrompt = remember(activity, executor) {
@@ -371,14 +418,30 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         val request = biometricUnlockRequest ?: return@LaunchedEffect
         Log.d(
             BIOMETRIC_LOG_TAG,
-            "Launching biometric prompt noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger"
+            "Launching biometric prompt noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger}"
         )
+        launchedBiometricRequest.value = request
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock note")
             .setSubtitle("Authenticate to open \"${request.title}\".")
             .setNegativeButtonText("Use PIN")
             .build()
-        biometricPrompt.authenticate(promptInfo)
+        val intercepted = BiometricPromptTestHooks.interceptAuthenticate?.let { handler ->
+            runCatching { handler(promptInfo, biometricAuthenticationCallback) }
+                .onFailure { throwable ->
+                    Log.e(BIOMETRIC_LOG_TAG, "biometricPrompt intercept failed", throwable)
+                }
+                .getOrDefault(false)
+        } ?: false
+        if (intercepted) {
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "Launching biometric prompt intercepted noteId=${'$'}{request.noteId} token=${'$'}{request.token}"
+            )
+        } else {
+            biometricPrompt.authenticate(promptInfo)
+        }
+
     }
 
     LaunchedEffect(noteViewModel) {
