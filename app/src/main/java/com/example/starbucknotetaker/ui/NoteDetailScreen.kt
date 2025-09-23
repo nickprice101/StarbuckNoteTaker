@@ -571,7 +571,12 @@ private fun buildEventSummary(event: NoteEvent): String {
             }
         }
         event.location?.takeIf { it.isNotBlank() }?.let { location ->
-            appendLine("Location: $location")
+            val display = fallbackEventLocationDisplay(location)
+            val name = display.name.takeIf { it.isNotBlank() } ?: location.trim()
+            appendLine("Location: $name")
+            display.address
+                ?.takeUnless { it.isBlank() || it.equals(name, ignoreCase = true) }
+                ?.let { appendLine(it) }
         }
         event.reminderMinutesBeforeStart?.let { minutes ->
             appendLine("Reminder: ${formatReminderOffsetMinutes(minutes)}")
