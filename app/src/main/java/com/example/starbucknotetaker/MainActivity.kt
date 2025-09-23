@@ -245,20 +245,28 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         val previous = pendingBiometricOptIn
         val triggerBefore = biometricPromptTrigger
         val pendingRequest = noteViewModel.currentBiometricUnlockRequest()
+        val activeRequestToken = biometricUnlockRequest?.token
+        val matchesCurrentFlow = pendingRequest != null && activeRequestToken != null && pendingRequest.token == activeRequestToken
         pendingBiometricOptIn = false
         val pendingAfter = pendingBiometricOptIn
-        if (pendingRequest != null) {
+        if (previous && pendingRequest != null && matchesCurrentFlow) {
             val triggerAfter = triggerBefore + 1
             biometricPromptTrigger = triggerAfter
+            val logMessage =
+                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=${pendingRequest.noteId} requestToken=${pendingRequest.token} activeToken=$activeRequestToken matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore triggerAfter=$triggerAfter action=retrigger"
             Log.d(
                 BIOMETRIC_LOG_TAG,
-                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=${pendingRequest.noteId} requestToken=${pendingRequest.token} triggerBefore=$triggerBefore triggerAfter=$triggerAfter action=retrigger"
+                logMessage
             )
+            BiometricPromptTestHooks.notifyBiometricLog(logMessage)
         } else {
+            val logMessage =
+                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=${pendingRequest?.noteId} requestToken=${pendingRequest?.token} activeToken=$activeRequestToken matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore action=idle"
             Log.d(
                 BIOMETRIC_LOG_TAG,
-                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=null requestToken=null triggerBefore=$triggerBefore action=idle"
+                logMessage
             )
+            BiometricPromptTestHooks.notifyBiometricLog(logMessage)
         }
     }
 
@@ -462,16 +470,22 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         if (biometricPromptTrigger == 0L) return@LaunchedEffect
         val request = biometricUnlockRequest ?: return@LaunchedEffect
         if (pendingBiometricOptIn) {
+            val logMessage =
+                "biometric unlock request suppressed noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger pendingOptIn=true"
             Log.w(
                 BIOMETRIC_LOG_TAG,
-                "biometric unlock request suppressed noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger pendingOptIn=true"
+                logMessage
             )
+            BiometricPromptTestHooks.notifyBiometricLog(logMessage)
             return@LaunchedEffect
         }
+        val logMessage =
+            "Launching biometric prompt noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger pendingOptIn=${'$'}pendingBiometricOptIn"
         Log.d(
             BIOMETRIC_LOG_TAG,
-            "Launching biometric prompt noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger} pendingOptIn=${'$'}pendingBiometricOptIn"
+            logMessage
         )
+        BiometricPromptTestHooks.notifyBiometricLog(logMessage)
         launchedBiometricRequest.value = request
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock note")

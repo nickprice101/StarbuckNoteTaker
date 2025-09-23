@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.PinManager
@@ -287,6 +288,7 @@ fun SettingsScreen(
                         )
                     }
                     Switch(
+                        modifier = Modifier.testTag("biometric_toggle"),
                         checked = biometricChecked,
                         onCheckedChange = { checked ->
                             if (biometricInProgress) return@Switch
