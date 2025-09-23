@@ -73,6 +73,7 @@ fun NoteDetailScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var fullImage by remember { mutableStateOf<ByteArray?>(null) }
     val scope = rememberCoroutineScope()
+    val eventLocationDisplay = rememberEventLocationDisplay(note.event?.location)
     Scaffold(topBar = {
         TopAppBar(
             title = {
@@ -116,7 +117,7 @@ fun NoteDetailScreen(
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
-                            val shareText = buildShareText(note)
+                            val shareText = buildShareText(note, eventLocationDisplay)
                             val attachments = preparation.attachments
                             if (shareText.isBlank() && attachments.isEmpty()) {
                                 Toast.makeText(context, "Nothing to share", Toast.LENGTH_SHORT).show()
@@ -197,7 +198,7 @@ fun NoteDetailScreen(
                 .padding(16.dp)
         ) {
             note.event?.let { event ->
-                EventDetailsCard(event)
+                EventDetailsCard(event, eventLocationDisplay)
                 Spacer(modifier = Modifier.height(16.dp))
             }
             val lines = remember(note.content) { note.content.lines() }
@@ -489,8 +490,13 @@ private fun buildShareIntent(
     return intent
 }
 
-private fun buildShareText(note: Note): String {
-    val eventSummary = note.event?.let { buildEventSummary(it) }?.takeIf { it.isNotBlank() }
+private fun buildShareText(
+    note: Note,
+    eventLocationDisplay: EventLocationDisplay?,
+): String {
+    val eventSummary = note.event
+        ?.let { buildEventSummary(it, eventLocationDisplay) }
+        ?.takeIf { it.isNotBlank() }
     val cleanedContent = attachmentPlaceholderRegex.replace(note.content, "").trim()
     val sections = mutableListOf<String>()
     if (cleanedContent.isNotBlank()) {
@@ -542,7 +548,10 @@ private fun grantShareUriPermissions(
     }
 }
 
-private fun buildEventSummary(event: NoteEvent): String {
+private fun buildEventSummary(
+    event: NoteEvent,
+    locationDisplay: EventLocationDisplay?,
+): String {
     val zoneId = runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
     val start = Instant.ofEpochMilli(event.start).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
     val end = Instant.ofEpochMilli(event.end).atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
@@ -571,11 +580,15 @@ private fun buildEventSummary(event: NoteEvent): String {
             }
         }
         event.location?.takeIf { it.isNotBlank() }?.let { location ->
-            val display = fallbackEventLocationDisplay(location)
-            val name = display.name.takeIf { it.isNotBlank() } ?: location.trim()
+            val fallback = fallbackEventLocationDisplay(location)
+            val name = locationDisplay?.name?.takeIf { it.isNotBlank() }
+                ?: fallback.name.takeIf { it.isNotBlank() }
+                ?: location.trim()
             appendLine("Location: $name")
-            display.address
-                ?.takeUnless { it.isBlank() || it.equals(name, ignoreCase = true) }
+            val address = locationDisplay?.address?.takeUnless { it.isNullOrBlank() }
+                ?: fallback.address?.takeUnless { it.isNullOrBlank() }
+            address
+                ?.takeUnless { it.equals(name, ignoreCase = true) }
                 ?.let { appendLine(it) }
         }
         event.reminderMinutesBeforeStart?.let { minutes ->
@@ -624,7 +637,10 @@ private val detailDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern
 private val detailTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 @Composable
-private fun EventDetailsCard(event: NoteEvent) {
+private fun EventDetailsCard(
+    event: NoteEvent,
+    locationDisplay: EventLocationDisplay?,
+) {
     val zoneId = remember(event.timeZone) {
         runCatching { ZoneId.of(event.timeZone) }.getOrDefault(ZoneId.systemDefault())
     }
@@ -666,11 +682,12 @@ private fun EventDetailsCard(event: NoteEvent) {
                 }
             }
             event.location?.takeIf { it.isNotBlank() }?.let { location ->
-                val locationDisplay = rememberEventLocationDisplay(location)
+                val display = locationDisplay ?: fallbackEventLocationDisplay(location)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Location: ${locationDisplay?.name ?: location}")
-                val secondary = locationDisplay?.address
-                    ?.takeIf { !it.equals(locationDisplay.name, ignoreCase = true) }
+                val name = display.name.takeIf { it.isNotBlank() } ?: location.trim()
+                Text("Location: $name")
+                val secondary = display.address
+                    ?.takeIf { it.isNotBlank() && !it.equals(name, ignoreCase = true) }
                 secondary?.let { address ->
                     Text(address)
                 }
