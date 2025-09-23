@@ -239,14 +239,27 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricUnlockRequest by noteViewModel.biometricUnlockRequest.collectAsState()
     var showBiometricOptIn by remember { mutableStateOf(false) }
     var pendingBiometricOptIn by remember { mutableStateOf(false) }
+    var biometricPromptTrigger by remember { mutableLongStateOf(0L) }
 
     fun clearPendingBiometricOptIn(reason: String) {
         val previous = pendingBiometricOptIn
+        val triggerBefore = biometricPromptTrigger
+        val pendingRequest = noteViewModel.currentBiometricUnlockRequest()
         pendingBiometricOptIn = false
-        Log.d(
-            BIOMETRIC_LOG_TAG,
-            "clearPendingBiometricOptIn reason=$reason previous=$previous"
-        )
+        val pendingAfter = pendingBiometricOptIn
+        if (pendingRequest != null) {
+            val triggerAfter = triggerBefore + 1
+            biometricPromptTrigger = triggerAfter
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=${pendingRequest.noteId} requestToken=${pendingRequest.token} triggerBefore=$triggerBefore triggerAfter=$triggerAfter action=retrigger"
+            )
+        } else {
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=null requestToken=null triggerBefore=$triggerBefore action=idle"
+            )
+        }
     }
 
     fun confirmPendingBiometricOptIn(reason: String) {
@@ -270,7 +283,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
     val startDestination = if (isPinSet) "list" else "pin_setup"
-    var biometricPromptTrigger by remember { mutableLongStateOf(0L) }
 
     val openNoteAfterUnlock: (Long) -> Unit = { noteId ->
         Log.d(BIOMETRIC_LOG_TAG, "openNoteAfterUnlock start noteId=${'$'}noteId")
@@ -392,8 +404,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         BiometricPrompt(activity, executor, biometricAuthenticationCallback)
     }
 
-    val biometricOptInPrompt = remember(activity, executor) {
-        BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+    val biometricOptInAuthenticationCallback = remember(noteViewModel) {
+        object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 val reason = "opt_in_authenticated"
                 Log.d(
@@ -419,7 +431,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     Toast.makeText(context, errString, Toast.LENGTH_SHORT).show()
                 }
             }
-        })
+        }
+    }
+    val biometricOptInPrompt = remember(activity, executor, biometricOptInAuthenticationCallback) {
+        BiometricPrompt(activity, executor, biometricOptInAuthenticationCallback)
     }
 
     LaunchedEffect(isPinSet) {
@@ -510,7 +525,21 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 BIOMETRIC_LOG_TAG,
                 "Launching biometric opt-in prompt guard pendingOptIn=${'$'}pendingBiometricOptIn"
             )
-            biometricOptInPrompt.authenticate(promptInfo)
+            val intercepted = BiometricPromptTestHooks.interceptAuthenticate?.let { handler ->
+                runCatching { handler(promptInfo, biometricOptInAuthenticationCallback) }
+                    .onFailure { throwable ->
+                        Log.e(BIOMETRIC_LOG_TAG, "biometricOptInPrompt intercept failed", throwable)
+                    }
+                    .getOrDefault(false)
+            } ?: false
+            if (intercepted) {
+                Log.d(
+                    BIOMETRIC_LOG_TAG,
+                    "Launching biometric opt-in prompt intercepted pendingOptIn=${'$'}pendingBiometricOptIn"
+                )
+            } else {
+                biometricOptInPrompt.authenticate(promptInfo)
+            }
         }
     }
 
