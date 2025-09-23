@@ -281,9 +281,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     pendingBiometricOptIn = false
                     "idle"
                 } else {
+                    pendingBiometricOptIn = false
                     when {
-                        activeRequestToken == null -> "left_pending_missing_active_token"
-                        else -> "left_pending_token_mismatch"
+                        activeRequestToken == null -> "force_clear_missing_active_token"
+                        else -> "force_clear_token_mismatch"
                     }
                 }
             } else {
