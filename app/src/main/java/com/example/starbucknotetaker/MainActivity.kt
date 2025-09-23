@@ -239,6 +239,26 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricUnlockRequest by noteViewModel.biometricUnlockRequest.collectAsState()
     var showBiometricOptIn by remember { mutableStateOf(false) }
     var pendingBiometricOptIn by remember { mutableStateOf(false) }
+
+    fun clearPendingBiometricOptIn(reason: String) {
+        val previous = pendingBiometricOptIn
+        pendingBiometricOptIn = false
+        Log.d(
+            BIOMETRIC_LOG_TAG,
+            "clearPendingBiometricOptIn reason=$reason previous=$previous"
+        )
+    }
+
+    fun confirmPendingBiometricOptIn(reason: String) {
+        check(!pendingBiometricOptIn) {
+            "confirmPendingBiometricOptIn while pending"
+        }
+        pendingBiometricOptIn = true
+        Log.d(
+            BIOMETRIC_LOG_TAG,
+            "confirmPendingBiometricOptIn reason=$reason"
+        )
+    }
     val biometricStatusOverride = BiometricPromptTestHooks.overrideCanAuthenticate
     if (biometricStatusOverride != null) {
         Log.d(BIOMETRIC_LOG_TAG, "Using biometricStatus override value=${'$'}biometricStatusOverride")
@@ -377,12 +397,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 pinManager.setBiometricEnabled(true)
                 biometricsEnabled = true
-                pendingBiometricOptIn = false
+                clearPendingBiometricOptIn("opt_in_authenticated")
                 Toast.makeText(context, "Biometric unlock enabled", Toast.LENGTH_SHORT).show()
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                pendingBiometricOptIn = false
+                clearPendingBiometricOptIn("opt_in_error_${'$'}errorCode")
                 if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
                     errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
                 ) {
@@ -416,9 +436,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     LaunchedEffect(biometricPromptTrigger, biometricUnlockRequest?.token) {
         if (biometricPromptTrigger == 0L) return@LaunchedEffect
         val request = biometricUnlockRequest ?: return@LaunchedEffect
+        check(!pendingBiometricOptIn) {
+            "biometric unlock requested while opt-in pending"
+        }
         Log.d(
             BIOMETRIC_LOG_TAG,
-            "Launching biometric prompt noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger}"
+            "Launching biometric prompt noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger} pendingOptIn=${'$'}pendingBiometricOptIn"
         )
         launchedBiometricRequest.value = request
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
@@ -469,10 +492,14 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 .setSubtitle("Confirm your biometrics to enable unlocking notes.")
                 .setNegativeButtonText("Cancel")
                 .build()
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "Launching biometric opt-in prompt"
+            )
             try {
                 biometricOptInPrompt.authenticate(promptInfo)
             } finally {
-                pendingBiometricOptIn = false
+                clearPendingBiometricOptIn("opt_in_prompt_complete")
             }
         }
     }
@@ -537,6 +564,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                         if (canUseBiometric) {
                             noteViewModel.clearPendingOpenNoteId()
+                            clearPendingBiometricOptIn("note_list_unlock_request")
                             noteViewModel.requestBiometricUnlock(note.id, note.title)
                         } else {
                             noteViewModel.setPendingOpenNoteId(note.id)
@@ -644,7 +672,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         AlertDialog(
             onDismissRequest = {
                 showBiometricOptIn = false
-                pendingBiometricOptIn = false
+                clearPendingBiometricOptIn("opt_in_dialog_dismiss_request")
                 pinManager.setBiometricEnabled(false)
                 biometricsEnabled = false
             },
@@ -656,7 +684,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 TextButton(onClick = {
                     showBiometricOptIn = false
                     if (biometricStatus == BiometricManager.BIOMETRIC_SUCCESS) {
-                        pendingBiometricOptIn = true
+                        confirmPendingBiometricOptIn("opt_in_dialog_confirm")
                     } else {
                         Toast.makeText(
                             context,
@@ -673,7 +701,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             dismissButton = {
                 TextButton(onClick = {
                     showBiometricOptIn = false
-                    pendingBiometricOptIn = false
+                    clearPendingBiometricOptIn("opt_in_dialog_dismiss_button")
                     pinManager.setBiometricEnabled(false)
                     biometricsEnabled = false
                 }) {
@@ -694,6 +722,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onBiometricRequested = {
                     noteViewModel.clearPendingOpenNoteId()
                     if (canUseBiometric) {
+                        clearPendingBiometricOptIn("pin_prompt_biometric_request")
                         Log.d(BIOMETRIC_LOG_TAG, "PinPromptDialog biometric requested noteId=${'$'}noteId")
                         noteViewModel.requestBiometricUnlock(noteId, note.title)
                     }

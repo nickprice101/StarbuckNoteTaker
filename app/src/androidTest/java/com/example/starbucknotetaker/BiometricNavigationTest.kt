@@ -16,6 +16,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.Assert.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class BiometricNavigationTest {
@@ -76,7 +77,9 @@ class BiometricNavigationTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
-        BiometricPromptTestHooks.interceptAuthenticate = { _, callback ->
+        BiometricPromptTestHooks.interceptAuthenticate = { promptInfo, callback ->
+            val title = promptInfo.title.toString()
+            assertEquals("Unlock note", title)
             callback.onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult(null))
             true
         }
