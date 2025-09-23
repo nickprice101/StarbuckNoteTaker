@@ -44,7 +44,7 @@ class NoteViewModel(
     private var attachmentStore: AttachmentStore? = null
     private var context: Context? = null
     private var summarizer: Summarizer? = null
-    private var reminderScheduler: NoteReminderScheduler? = null
+    private var reminderScheduler: NoteAlarmScheduler? = null
     private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
     val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
     private val unlockedNoteIds = mutableStateListOf<Long>()
@@ -76,7 +76,7 @@ class NoteViewModel(
         attachmentStore = attachments
         val s = EncryptedNoteStore(context, attachments)
         store = s
-        reminderScheduler = NoteReminderScheduler(appContext)
+        reminderScheduler = NoteAlarmScheduler(appContext)
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
         unlockedNoteIds.clear()
