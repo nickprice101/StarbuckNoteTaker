@@ -237,81 +237,27 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
     val biometricUnlockRequest by noteViewModel.biometricUnlockRequest.collectAsState()
+    val biometricUnlockRequestState = rememberUpdatedState(biometricUnlockRequest)
+    val biometricOptInReplayGuard = remember(noteViewModel) {
+        BiometricOptInReplayGuard(
+            logger = { message -> Log.d(BIOMETRIC_LOG_TAG, message) },
+            notifyBiometricLog = { message -> BiometricPromptTestHooks.notifyBiometricLog(message) },
+            currentBiometricUnlockRequest = { noteViewModel.currentBiometricUnlockRequest() },
+            currentActiveRequestToken = { biometricUnlockRequestState.value?.token },
+        )
+    }
     var showBiometricOptIn by remember { mutableStateOf(false) }
-    var pendingBiometricOptIn by remember { mutableStateOf(false) }
-    var biometricPromptTrigger by remember { mutableLongStateOf(0L) }
+    val pendingBiometricOptIn by biometricOptInReplayGuard.pendingOptIn
+    val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
 
     fun clearPendingBiometricOptIn(reason: String) {
-        val previous = pendingBiometricOptIn
-        val triggerBefore = biometricPromptTrigger
-        val pendingRequest = noteViewModel.currentBiometricUnlockRequest()
-        val activeRequestToken = biometricUnlockRequest?.token
-        val matchesCurrentFlow = pendingRequest != null && activeRequestToken != null && pendingRequest.token == activeRequestToken
-        if (
-            previous &&
-            (reason == "note_list_unlock_request" || reason == "pin_prompt_biometric_request")
-        ) {
-            val guardLog =
-                "biometricOptInReplayGuard reason=$reason previous=$previous requestNoteId=${pendingRequest?.noteId} requestToken=${pendingRequest?.token} activeToken=$activeRequestToken matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore action=observe"
-            Log.d(
-                BIOMETRIC_LOG_TAG,
-                guardLog
-            )
-            BiometricPromptTestHooks.notifyBiometricLog(guardLog)
-        }
-        val hasActiveFlow = previous && pendingRequest != null
-        val guardDisabled = BiometricPromptTestHooks.disableOptInReplayGuard
-        val shouldRetrigger = hasActiveFlow && matchesCurrentFlow && !guardDisabled
-        if (shouldRetrigger) {
-            val currentRequest = checkNotNull(pendingRequest)
-            pendingBiometricOptIn = false
-            val pendingAfter = pendingBiometricOptIn
-            val triggerAfter = triggerBefore + 1
-            biometricPromptTrigger = triggerAfter
-            val logMessage =
-                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=${currentRequest.noteId} requestToken=${currentRequest.token} activeToken=$activeRequestToken matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore triggerAfter=$triggerAfter action=retrigger"
-            Log.d(
-                BIOMETRIC_LOG_TAG,
-                logMessage
-            )
-            BiometricPromptTestHooks.notifyBiometricLog(logMessage)
-        } else {
-            val action = if (hasActiveFlow) {
-                if (guardDisabled) {
-                    pendingBiometricOptIn = false
-                    "idle"
-                } else {
-                    pendingBiometricOptIn = false
-                    when {
-                        activeRequestToken == null -> "force_clear_missing_active_token"
-                        else -> "force_clear_token_mismatch"
-                    }
-                }
-            } else {
-                pendingBiometricOptIn = false
-                if (previous) "idle" else "noop"
-            }
-            val pendingAfter = pendingBiometricOptIn
-            val logMessage =
-                "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=$pendingAfter requestNoteId=${pendingRequest?.noteId} requestToken=${pendingRequest?.token} activeToken=$activeRequestToken matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore action=$action"
-            Log.d(
-                BIOMETRIC_LOG_TAG,
-                logMessage
-            )
-            BiometricPromptTestHooks.notifyBiometricLog(logMessage)
-        }
+        biometricOptInReplayGuard.clearPendingOptIn(reason)
     }
 
     fun confirmPendingBiometricOptIn(reason: String) {
-        check(!pendingBiometricOptIn) {
-            "confirmPendingBiometricOptIn while pending"
-        }
-        pendingBiometricOptIn = true
-        Log.d(
-            BIOMETRIC_LOG_TAG,
-            "confirmPendingBiometricOptIn reason=$reason"
-        )
+        biometricOptInReplayGuard.confirmPendingOptIn(reason)
     }
+
     val biometricStatusOverride = BiometricPromptTestHooks.overrideCanAuthenticate
     if (biometricStatusOverride != null) {
         Log.d(BIOMETRIC_LOG_TAG, "Using biometricStatus override value=${'$'}biometricStatusOverride")
@@ -491,9 +437,9 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    LaunchedEffect(noteViewModel) {
+    LaunchedEffect(noteViewModel, biometricOptInReplayGuard) {
         noteViewModel.biometricUnlockEvents.collectLatest {
-            biometricPromptTrigger++
+            biometricOptInReplayGuard.onBiometricUnlockEvent()
         }
     }
 
