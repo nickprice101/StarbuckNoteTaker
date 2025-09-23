@@ -5,4 +5,20 @@
     <string name="reminder_notification_title">Upcoming event: %1$s</string>
     <string name="reminder_notification_locked_body">Unlock with your PIN to view details.</string>
     <string name="reminder_notification_subtext">Reminder %1$s</string>
+    <string name="reminder_alarm_channel_name">Alarm reminders</string>
+    <string name="reminder_alarm_channel_description">Full-screen alarms for note reminders.</string>
+    <string name="reminder_alarm_title">Reminder: %1$s</string>
+    <string name="reminder_alarm_body">Tap to review or snooze this reminder.</string>
+    <string name="reminder_alarm_action_snooze">Snooze %1$d min</string>
+    <string name="reminder_alarm_action_dismiss">Dismiss</string>
+    <string name="reminder_alarm_action_close">Close</string>
+    <string name="reminder_alarm_heading">Event reminder</string>
+    <string name="reminder_alarm_default_title">Upcoming event</string>
+    <string name="reminder_alarm_locked_content">Unlock the note to view its contents.</string>
+    <string name="reminder_alarm_missing_payload">Reminder details were unavailable.</string>
+    <string name="reminder_alarm_snoozed">Snoozed for %1$d minutes</string>
+    <string name="reminder_notification_permission_required">Notification permission is required to enable reminders.</string>
+    <string name="reminder_exact_alarm_permission_denied">Exact alarms are still disabled. Reminders will arrive as notifications.</string>
+    <string name="reminder_exact_alarm_permission_needed">Allow exact alarms to enable full-screen reminders.</string>
+    <string name="reminder_exact_alarm_permission_action">Open alarm settings</string>
 </resources>

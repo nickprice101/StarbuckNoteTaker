@@ -3,6 +3,7 @@ package com.example.starbucknotetaker
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import java.time.Duration
 import java.time.Instant
@@ -46,11 +47,17 @@ class NoteAlarmScheduler(private val context: Context) {
             existing.cancel()
         }
 
-        val pendingIntent = createPendingIntent(note)
-        manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        val canUseExact = canScheduleExactAlarms(context)
+        val payload = ReminderPayload.fromNote(note, fallbackToNotification = !canUseExact)
+        val pendingIntent = ReminderAlarmService.createAlarmPendingIntent(context, payload)
+        if (canUseExact) {
+            manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        } else {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        }
         Log.d(
             TAG,
-            "scheduleIfNeeded: scheduled noteId=${note.id} reschedule=${existing != null} triggerAt=${triggerAtMillis} minutesBefore=${reminderMinutes}"
+            "scheduleIfNeeded: scheduled noteId=${note.id} reschedule=${existing != null} triggerAt=${triggerAtMillis} minutesBefore=${reminderMinutes} fallback=${!canUseExact}"
         )
     }
 
@@ -70,16 +77,6 @@ class NoteAlarmScheduler(private val context: Context) {
         notes.forEach { note -> scheduleIfNeeded(note) }
     }
 
-    private fun createPendingIntent(note: Note): PendingIntent {
-        val intent = ReminderAlarmReceiver.createIntent(context, note)
-        return PendingIntent.getBroadcast(
-            context,
-            note.id.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
     private fun existingPendingIntent(noteId: Long): PendingIntent? {
         val intent = ReminderAlarmReceiver.createBaseIntent(context, noteId)
         return PendingIntent.getBroadcast(
@@ -92,5 +89,14 @@ class NoteAlarmScheduler(private val context: Context) {
 
     companion object {
         private const val TAG = "NoteAlarmScheduler"
+
+        fun canScheduleExactAlarms(context: Context): Boolean {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return false
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                runCatching { alarmManager.canScheduleExactAlarms() }.getOrDefault(false)
+            } else {
+                true
+            }
+        }
     }
 }

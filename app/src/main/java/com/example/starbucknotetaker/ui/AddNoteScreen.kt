@@ -8,12 +8,14 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,10 +36,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
+import com.example.starbucknotetaker.NoteAlarmScheduler
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.REMINDER_MINUTE_OPTIONS
 import com.example.starbucknotetaker.NoteLinkPreview
@@ -45,6 +49,7 @@ import com.example.starbucknotetaker.Summarizer
 import com.example.starbucknotetaker.UrlDetection
 import com.example.starbucknotetaker.extractUrls
 import com.example.starbucknotetaker.PendingShare
+import com.example.starbucknotetaker.R
 import androidx.core.content.ContextCompat
 import java.time.Instant
 import java.time.ZoneId
@@ -126,21 +131,45 @@ fun AddNoteScreen(
     var reminderMinutes by remember(initialEvent) {
         mutableStateOf(initialEvent?.reminderMinutesBeforeStart ?: REMINDER_MINUTE_OPTIONS.getOrElse(4) { 30 })
     }
-    var pendingReminderPermission by remember { mutableStateOf(false) }
+    var awaitingReminderEnable by remember { mutableStateOf(false) }
+    var canScheduleExactAlarm by remember { mutableStateOf(NoteAlarmScheduler.canScheduleExactAlarms(context)) }
+    val exactAlarmPermissionLauncher =
+        rememberLauncherForActivityResult(StartActivityForResult()) {
+            canScheduleExactAlarm = NoteAlarmScheduler.canScheduleExactAlarms(context)
+            if (awaitingReminderEnable) {
+                if (!canScheduleExactAlarm) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.reminder_exact_alarm_permission_denied),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                reminderEnabled = true
+                awaitingReminderEnable = false
+            }
+        }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (pendingReminderPermission) {
+            if (awaitingReminderEnable) {
                 if (granted) {
-                    reminderEnabled = true
+                    val launched = requestExactAlarmPermission(
+                        context = context,
+                        updateCanSchedule = { canScheduleExactAlarm = it },
+                        onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
+                    )
+                    if (!launched) {
+                        reminderEnabled = true
+                        awaitingReminderEnable = false
+                    }
                 } else {
                     Toast.makeText(
                         context,
-                        "Notification permission is required to enable reminders",
+                        context.getString(R.string.reminder_notification_permission_required),
                         Toast.LENGTH_LONG
                     ).show()
                     reminderEnabled = false
+                    awaitingReminderEnable = false
                 }
-                pendingReminderPermission = false
             }
         }
 
@@ -569,23 +598,48 @@ fun AddNoteScreen(
                                 checked = reminderEnabled,
                                 onCheckedChange = { checked ->
                                     if (checked) {
+                                        awaitingReminderEnable = true
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                             val granted = ContextCompat.checkSelfPermission(
                                                 context,
                                                 Manifest.permission.POST_NOTIFICATIONS
                                             ) == PackageManager.PERMISSION_GRANTED
                                             if (!granted) {
-                                                pendingReminderPermission = true
                                                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                                 return@Switch
                                             }
                                         }
-                                        reminderEnabled = true
+                                        val launched = requestExactAlarmPermission(
+                                            context = context,
+                                            updateCanSchedule = { canScheduleExactAlarm = it },
+                                            onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
+                                        )
+                                        if (!launched) {
+                                            reminderEnabled = true
+                                            awaitingReminderEnable = false
+                                        }
                                     } else {
+                                        awaitingReminderEnable = false
                                         reminderEnabled = false
                                     }
                                 }
                             )
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canScheduleExactAlarm) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.reminder_exact_alarm_permission_needed),
+                                style = MaterialTheme.typography.body2,
+                            )
+                            TextButton(onClick = {
+                                requestExactAlarmPermission(
+                                    context = context,
+                                    updateCanSchedule = { canScheduleExactAlarm = it },
+                                    onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
+                                )
+                            }) {
+                                Text(text = stringResource(R.string.reminder_exact_alarm_permission_action))
+                            }
                         }
                         if (reminderEnabled) {
                             Spacer(modifier = Modifier.height(8.dp))
