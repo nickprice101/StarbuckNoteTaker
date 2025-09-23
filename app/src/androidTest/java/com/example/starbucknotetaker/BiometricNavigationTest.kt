@@ -77,8 +77,10 @@ class BiometricNavigationTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
+        val launchedPrompts = mutableListOf<String>()
         BiometricPromptTestHooks.interceptAuthenticate = { promptInfo, callback ->
             val title = promptInfo.title.toString()
+            launchedPrompts += title
             assertEquals("Unlock note", title)
             callback.onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult(null))
             true
@@ -93,5 +95,6 @@ class BiometricNavigationTest {
         }
 
         composeTestRule.onNodeWithText(content).assertIsDisplayed()
+        assertEquals(listOf("Unlock note"), launchedPrompts)
     }
 }

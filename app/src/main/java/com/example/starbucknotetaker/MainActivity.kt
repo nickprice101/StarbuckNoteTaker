@@ -395,14 +395,24 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricOptInPrompt = remember(activity, executor) {
         BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                val reason = "opt_in_authenticated"
+                Log.d(
+                    BIOMETRIC_LOG_TAG,
+                    "biometricOptInPrompt onAuthenticationSucceeded reason=${'$'}reason pendingOptIn=${'$'}pendingBiometricOptIn"
+                )
                 pinManager.setBiometricEnabled(true)
                 biometricsEnabled = true
-                clearPendingBiometricOptIn("opt_in_authenticated")
+                clearPendingBiometricOptIn(reason)
                 Toast.makeText(context, "Biometric unlock enabled", Toast.LENGTH_SHORT).show()
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                clearPendingBiometricOptIn("opt_in_error_${'$'}errorCode")
+                val reason = "opt_in_error_${'$'}errorCode"
+                Log.d(
+                    BIOMETRIC_LOG_TAG,
+                    "biometricOptInPrompt onAuthenticationError reason=${'$'}reason pendingOptIn=${'$'}pendingBiometricOptIn"
+                )
+                clearPendingBiometricOptIn(reason)
                 if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
                     errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
                 ) {
@@ -433,11 +443,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     }
 
     // Keyed on the current request token and dedicated trigger to avoid stale captures
-    LaunchedEffect(biometricPromptTrigger, biometricUnlockRequest?.token) {
+    LaunchedEffect(biometricPromptTrigger, biometricUnlockRequest?.token, pendingBiometricOptIn) {
         if (biometricPromptTrigger == 0L) return@LaunchedEffect
         val request = biometricUnlockRequest ?: return@LaunchedEffect
-        check(!pendingBiometricOptIn) {
-            "biometric unlock requested while opt-in pending"
+        if (pendingBiometricOptIn) {
+            Log.w(
+                BIOMETRIC_LOG_TAG,
+                "biometric unlock request suppressed noteId=${'$'}{request.noteId} token=${'$'}{request.token} trigger=${'$'}biometricPromptTrigger pendingOptIn=true"
+            )
+            return@LaunchedEffect
         }
         Log.d(
             BIOMETRIC_LOG_TAG,
@@ -494,13 +508,9 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 .build()
             Log.d(
                 BIOMETRIC_LOG_TAG,
-                "Launching biometric opt-in prompt"
+                "Launching biometric opt-in prompt guard pendingOptIn=${'$'}pendingBiometricOptIn"
             )
-            try {
-                biometricOptInPrompt.authenticate(promptInfo)
-            } finally {
-                clearPendingBiometricOptIn("opt_in_prompt_complete")
-            }
+            biometricOptInPrompt.authenticate(promptInfo)
         }
     }
 
