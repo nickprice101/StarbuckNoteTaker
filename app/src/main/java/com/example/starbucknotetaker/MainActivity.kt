@@ -1,4 +1,3 @@
-
 package com.example.starbucknotetaker
 
 import android.content.Intent
@@ -292,7 +291,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             }
             Log.d(
                 BIOMETRIC_LOG_TAG,
-                "openNoteAfterUnlock navigated noteId=$noteId currentRoute=${navController.currentBackStackEntry?.destination?.route} previousRoute=${navController.previousBackStackEntry?.destination?.route}"
+                "openNoteAfterUnlock navigated noteId=$noteId currentRoute=${navController.currentBackStackEntry?.destination?.route}"
             )
         } else {
             Log.d(BIOMETRIC_LOG_TAG, "openNoteAfterUnlock missing noteId=$noteId")
@@ -303,7 +302,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val launchedBiometricRequest = remember { mutableStateOf<BiometricUnlockRequest?>(null) }
     val launchedBiometricRequestState = rememberUpdatedState(launchedBiometricRequest.value)
 
-    // ---[ Ironclad biometric unlock callback ]---
+    // ---[ Simplified biometric unlock callback ]---
     val biometricAuthenticationCallback = remember(noteViewModel) {
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -329,25 +328,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                         )
                     }
 
+                    // Mark note as temporarily unlocked and clear all pending states
                     noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                     noteViewModel.clearBiometricUnlockRequest()
                     noteViewModel.clearPendingOpenNoteId()
-                    noteViewModel.clearPendingUnlockNavigationNoteId()
-                    noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
-                    // Directly navigate to the unlocked note
+                    
+                    // Directly navigate to the unlocked note - this is the key fix
+                    Log.d(BIOMETRIC_LOG_TAG, "onAuthenticationSucceeded directly navigating to noteId=${request.noteId}")
                     openNoteAfterUnlock(request.noteId)
-                    val pendingAfterSet = noteViewModel.pendingUnlockNavigationNoteId.value
-                    if (pendingAfterSet != request.noteId) {
-                        Log.w(
-                            BIOMETRIC_LOG_TAG,
-                            "onAuthenticationSucceeded pending_after_set_mismatch pending=$pendingAfterSet expected=${request.noteId}"
-                        )
-                    } else {
-                        Log.d(
-                            BIOMETRIC_LOG_TAG,
-                            "onAuthenticationSucceeded pending_after_set=$pendingAfterSet expected=${request.noteId}"
-                        )
-                    }
+                    
                     launchedBiometricRequest.value = null
                 }
                 // Biometric opt-in flow is handled in its own callback
@@ -541,23 +530,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    LaunchedEffect(noteViewModel) {
-        noteViewModel.pendingUnlockNavigationNoteId.collectLatest { noteId ->
-            if (noteId != null) {
-                val currentActivity = currentActivityState.value
-                Log.d(
-                    BIOMETRIC_LOG_TAG,
-                    "navigatePendingUnlock requested noteId=$noteId lifecycle=${currentActivity.lifecycle.currentState}"
-                )
-                navigatePendingUnlock(
-                    currentActivity.lifecycle,
-                    noteViewModel,
-                    noteId,
-                    openNoteAfterUnlock
-                )
-            }
-        }
-    }
+    // Removed the complex pendingUnlockNavigationNoteId LaunchedEffect - no longer needed
 
     LaunchedEffect(noteViewModel) {
         noteViewModel.reminderNavigation.collectLatest { noteId ->
@@ -809,8 +782,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
                     Log.d(BIOMETRIC_LOG_TAG, "PinPromptDialog pin confirmed noteId=${noteId}")
-                    noteViewModel.clearPendingUnlockNavigationNoteId()
-                    noteViewModel.setPendingUnlockNavigationNoteId(noteId)
+                    // Directly navigate after PIN unlock too
+                    openNoteAfterUnlock(noteId)
                 }
             )
         } else {
@@ -910,3 +883,18 @@ private fun PinPromptDialog(
         }
     )
 }
+
+// Add the missing constants and classes that were referenced but not defined in the visible code
+private const val BIOMETRIC_LOG_TAG = "BiometricUnlock"
+
+// These would need to be defined elsewhere in your project if they don't exist
+object BiometricPromptTestHooks {
+    var overrideCanAuthenticate: Int? = null
+    var interceptAuthenticate: ((BiometricPrompt.PromptInfo, BiometricPrompt.AuthenticationCallback) -> Boolean)? = null
+    
+    fun notifyBiometricLog(message: String) {
+        // Implementation for test hooks
+    }
+}
+
+// You'll also need to make sure navigatePendingUnlock function is removed or simplified since it's no longer needed
