@@ -43,6 +43,7 @@ import com.example.starbucknotetaker.ui.PinEnterScreen
 import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.SettingsScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
+import com.example.starbucknotetaker.BiometricOptInReplayGuard.ClearAction
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
@@ -250,8 +251,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val pendingBiometricOptIn by biometricOptInReplayGuard.pendingOptIn
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
 
-    fun clearPendingBiometricOptIn(reason: String) {
-        biometricOptInReplayGuard.clearPendingOptIn(reason)
+    fun clearPendingBiometricOptIn(reason: String): BiometricOptInReplayGuard.ClearResult {
+        val result = biometricOptInReplayGuard.clearPendingOptIn(reason)
+        val logMessage =
+            "clearPendingBiometricOptIn result reason=${reason} action=${result.action} " +
+                "pendingOptIn=${result.pendingOptIn} promptTrigger=${result.promptTrigger} " +
+                "matchesCurrentFlow=${result.matchesCurrentFlow} hasActiveFlow=${result.hasActiveFlow}"
+        Log.d(BIOMETRIC_LOG_TAG, logMessage)
+        BiometricPromptTestHooks.notifyBiometricLog(logMessage)
+        return result
     }
 
     fun confirmPendingBiometricOptIn(reason: String) {
@@ -595,7 +603,18 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                         if (canUseBiometric) {
                             noteViewModel.clearPendingOpenNoteId()
-                            clearPendingBiometricOptIn("note_list_unlock_request")
+                            val clearResult = clearPendingBiometricOptIn("note_list_unlock_request")
+                            val replayRequired = clearResult.action == ClearAction.FORCE_CLEAR_MISSING_ACTIVE_TOKEN ||
+                                clearResult.action == ClearAction.FORCE_CLEAR_TOKEN_MISMATCH
+                            if (replayRequired) {
+                                launchedBiometricRequest.value = null
+                                noteViewModel.clearBiometricUnlockRequest()
+                                val retryLog =
+                                    "reposting biometric unlock after force clear reason=note_list_unlock_request " +
+                                        "action=${clearResult.action} noteId=${note.id}"
+                                Log.d(BIOMETRIC_LOG_TAG, retryLog)
+                                BiometricPromptTestHooks.notifyBiometricLog(retryLog)
+                            }
                             noteViewModel.requestBiometricUnlock(note.id, note.title)
                         } else {
                             noteViewModel.setPendingOpenNoteId(note.id)
@@ -753,7 +772,18 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 onBiometricRequested = {
                     noteViewModel.clearPendingOpenNoteId()
                     if (canUseBiometric) {
-                        clearPendingBiometricOptIn("pin_prompt_biometric_request")
+                        val clearResult = clearPendingBiometricOptIn("pin_prompt_biometric_request")
+                        val replayRequired = clearResult.action == ClearAction.FORCE_CLEAR_MISSING_ACTIVE_TOKEN ||
+                            clearResult.action == ClearAction.FORCE_CLEAR_TOKEN_MISMATCH
+                        if (replayRequired) {
+                            launchedBiometricRequest.value = null
+                            noteViewModel.clearBiometricUnlockRequest()
+                            val retryLog =
+                                "reposting biometric unlock after force clear reason=pin_prompt_biometric_request " +
+                                    "action=${clearResult.action} noteId=${'$'}noteId"
+                            Log.d(BIOMETRIC_LOG_TAG, retryLog)
+                            BiometricPromptTestHooks.notifyBiometricLog(retryLog)
+                        }
                         Log.d(BIOMETRIC_LOG_TAG, "PinPromptDialog biometric requested noteId=${'$'}noteId")
                         noteViewModel.requestBiometricUnlock(noteId, note.title)
                     }

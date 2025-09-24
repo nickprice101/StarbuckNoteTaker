@@ -83,4 +83,70 @@ class BiometricOptInReplayGuardTest {
         assertTrue(result.hasActiveFlow)
         assertTrue(logMessages.any { it.contains("action=idle") })
     }
+
+    @Test
+    fun clearPendingOptIn_forceClearsWhenActiveTokenMissing() {
+        val logMessages = mutableListOf<String>()
+        val notifiedMessages = mutableListOf<String>()
+        val request = BiometricUnlockRequest(
+            noteId = 42L,
+            title = "Secret",
+            token = 5L,
+        )
+        var currentRequest: BiometricUnlockRequest? = request
+        var activeToken: Long? = null
+        val guard = BiometricOptInReplayGuard(
+            logger = { logMessages += it },
+            notifyBiometricLog = { notifiedMessages += it },
+            currentBiometricUnlockRequest = { currentRequest },
+            currentActiveRequestToken = { activeToken },
+        )
+
+        guard.confirmPendingOptIn("opt_in_dialog_confirm")
+        val result = guard.clearPendingOptIn("note_list_unlock_request")
+
+        assertEquals(
+            BiometricOptInReplayGuard.ClearAction.FORCE_CLEAR_MISSING_ACTIVE_TOKEN,
+            result.action,
+        )
+        assertEquals(0L, result.promptTrigger)
+        assertFalse(result.pendingOptIn)
+        assertTrue(result.hasActiveFlow)
+        assertFalse(result.matchesCurrentFlow)
+        assertTrue(logMessages.any { it.contains("force_clear_missing_active_token") })
+        assertTrue(notifiedMessages.any { it.contains("force_clear_missing_active_token") })
+    }
+
+    @Test
+    fun clearPendingOptIn_forceClearsWhenTokenMismatch() {
+        val logMessages = mutableListOf<String>()
+        val notifiedMessages = mutableListOf<String>()
+        val request = BiometricUnlockRequest(
+            noteId = 99L,
+            title = "Secret",
+            token = 3L,
+        )
+        var currentRequest: BiometricUnlockRequest? = request
+        var activeToken: Long? = request.token + 1L
+        val guard = BiometricOptInReplayGuard(
+            logger = { logMessages += it },
+            notifyBiometricLog = { notifiedMessages += it },
+            currentBiometricUnlockRequest = { currentRequest },
+            currentActiveRequestToken = { activeToken },
+        )
+
+        guard.confirmPendingOptIn("opt_in_dialog_confirm")
+        val result = guard.clearPendingOptIn("pin_prompt_biometric_request")
+
+        assertEquals(
+            BiometricOptInReplayGuard.ClearAction.FORCE_CLEAR_TOKEN_MISMATCH,
+            result.action,
+        )
+        assertEquals(0L, result.promptTrigger)
+        assertFalse(result.pendingOptIn)
+        assertTrue(result.hasActiveFlow)
+        assertFalse(result.matchesCurrentFlow)
+        assertTrue(logMessages.any { it.contains("force_clear_token_mismatch") })
+        assertTrue(notifiedMessages.any { it.contains("force_clear_token_mismatch") })
+    }
 }
