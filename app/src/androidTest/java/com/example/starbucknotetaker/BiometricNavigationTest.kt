@@ -145,6 +145,61 @@ class BiometricNavigationTest {
     }
 
     @Test
+    fun unlockRequestRepostsAfterForceClearedOptIn() {
+        val noteTitle = "Opt-in force clear note"
+        val noteContent = "Opt-in force clear content"
+
+        val result = runOptInUnlockFlow(
+            disableReplayGuard = false,
+            noteTitle = noteTitle,
+            noteContent = noteContent,
+            beforeOptInConfirmation = {
+                composeTestRule.activityRule.scenario.onActivity { activity ->
+                    val viewModel = activity.getNoteViewModelForTest()
+                    val noteId = viewModel.notes.first { it.title == noteTitle }.id
+                    viewModel.clearBiometricUnlockRequest()
+                    viewModel.requestBiometricUnlock(noteId, noteTitle)
+                }
+            },
+        )
+
+        assertTrue("Expected the locked note to open after opt-in", result.noteDisplayed)
+
+        val forceClearIndex = result.biometricLogs.indexOfFirst { log ->
+            log.contains("clearPendingBiometricOptIn result") &&
+                log.contains("note_list_unlock_request") &&
+                log.contains("FORCE_CLEAR")
+        }
+        assertTrue(
+            "Expected clearPendingBiometricOptIn to report a force clear action",
+            forceClearIndex != -1
+        )
+
+        assertTrue(
+            "Expected a reposting log after the force clear action",
+            result.biometricLogs.any {
+                it.contains("reposting biometric unlock after force clear reason=note_list_unlock_request")
+            }
+        )
+
+        val relaunchLogIndex = result.biometricLogs.withIndex().indexOfFirst { (index, log) ->
+            index > forceClearIndex &&
+                log.contains("Launching biometric prompt") &&
+                log.contains("pendingOptIn=false")
+        }
+        assertTrue(
+            "Expected biometric prompt to relaunch after force clear",
+            relaunchLogIndex != -1
+        )
+
+        val unlockPromptCount = result.launchedPrompts.count { it == "Unlock note" }
+        assertTrue(
+            "Expected Unlock note prompt to launch after forced clear",
+            unlockPromptCount >= 1
+        )
+    }
+
+    @Test
     fun unlockRequestReplayGuardResolvesRegression() {
         val regression = runOptInUnlockFlow(
             disableReplayGuard = true,
@@ -460,6 +515,7 @@ class BiometricNavigationTest {
         disableReplayGuard: Boolean,
         noteTitle: String,
         noteContent: String,
+        beforeOptInConfirmation: (() -> Unit)? = null,
     ): BiometricOptInFlowResult {
         val prefs = context.getSharedPreferences("pin_prefs", Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
@@ -476,7 +532,8 @@ class BiometricNavigationTest {
             if (
                 message.contains("clearPendingBiometricOptIn") ||
                 message.contains("biometric unlock request suppressed") ||
-                message.contains("Launching biometric prompt")
+                message.contains("Launching biometric prompt") ||
+                message.contains("reposting biometric unlock after force clear")
             ) {
                 biometricLogs += message
             }
@@ -487,6 +544,7 @@ class BiometricNavigationTest {
             when (promptTitle) {
                 "Enable biometric unlock" -> {
                     pendingOptInCallback.set {
+                        beforeOptInConfirmation?.invoke()
                         callback.onAuthenticationSucceeded(createAuthenticationResult())
                     }
                     true
