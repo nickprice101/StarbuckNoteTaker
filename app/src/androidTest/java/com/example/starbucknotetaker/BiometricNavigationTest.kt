@@ -182,6 +182,14 @@ class BiometricNavigationTest {
             }
         )
 
+        assertTrue(
+            "Expected opt-in mismatch fallback to retrigger unlock",
+            result.biometricLogs.any {
+                it.contains("clearPendingBiometricOptIn reason=opt_in_authenticated") &&
+                    it.contains("fallback=opt_in_mismatch")
+            }
+        )
+
         val relaunchLogIndex = result.biometricLogs.withIndex().indexOfFirst { (index, log) ->
             index > forceClearIndex &&
                 log.contains("Launching biometric prompt") &&

@@ -66,10 +66,14 @@ class BiometricOptInReplayGuard(
 
         val hasActiveFlow = previous && pendingRequest != null
         val guardDisabled = isGuardDisabled()
+        val mismatchedFlow = hasActiveFlow && !matchesCurrentFlow
+        val isOptInResult = reason.startsWith("opt_in_")
         val shouldRetrigger = hasActiveFlow && matchesCurrentFlow && !guardDisabled
+        val shouldForceReplayAfterOptIn =
+            isOptInResult && mismatchedFlow && !guardDisabled && pendingRequest != null
         val action: ClearAction
 
-        if (shouldRetrigger) {
+        if (shouldRetrigger || shouldForceReplayAfterOptIn) {
             val currentRequest = checkNotNull(pendingRequest)
             _pendingOptIn.value = false
             val triggerAfter = triggerBefore + 1
@@ -78,7 +82,8 @@ class BiometricOptInReplayGuard(
             val logMessage =
                 "clearPendingBiometricOptIn reason=$reason previous=$previous pendingAfter=${_pendingOptIn.value} " +
                     "requestNoteId=${currentRequest.noteId} requestToken=${currentRequest.token} activeToken=$activeRequestToken " +
-                    "matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore triggerAfter=$triggerAfter action=retrigger"
+                    "matchesCurrentFlow=$matchesCurrentFlow triggerBefore=$triggerBefore triggerAfter=$triggerAfter action=retrigger" +
+                    if (shouldForceReplayAfterOptIn) " fallback=opt_in_mismatch" else ""
             log(logMessage)
         } else {
             val logAction = when {

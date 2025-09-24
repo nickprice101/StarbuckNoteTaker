@@ -149,4 +149,34 @@ class BiometricOptInReplayGuardTest {
         assertTrue(logMessages.any { it.contains("force_clear_token_mismatch") })
         assertTrue(notifiedMessages.any { it.contains("force_clear_token_mismatch") })
     }
+
+    @Test
+    fun clearPendingOptIn_retriggersAfterOptInMismatch() {
+        val logMessages = mutableListOf<String>()
+        val notifiedMessages = mutableListOf<String>()
+        val request = BiometricUnlockRequest(
+            noteId = 123L,
+            title = "Secret",
+            token = 8L,
+        )
+        var currentRequest: BiometricUnlockRequest? = request
+        var activeToken: Long? = null
+        val guard = BiometricOptInReplayGuard(
+            logger = { logMessages += it },
+            notifyBiometricLog = { notifiedMessages += it },
+            currentBiometricUnlockRequest = { currentRequest },
+            currentActiveRequestToken = { activeToken },
+        )
+
+        guard.confirmPendingOptIn("opt_in_dialog_confirm")
+        val result = guard.clearPendingOptIn("opt_in_authenticated")
+
+        assertEquals(BiometricOptInReplayGuard.ClearAction.RETRIGGER, result.action)
+        assertEquals(1L, result.promptTrigger)
+        assertFalse(result.pendingOptIn)
+        assertTrue(result.hasActiveFlow)
+        assertFalse(result.matchesCurrentFlow)
+        assertTrue(logMessages.any { it.contains("fallback=opt_in_mismatch") })
+        assertTrue(notifiedMessages.any { it.contains("fallback=opt_in_mismatch") })
+    }
 }
