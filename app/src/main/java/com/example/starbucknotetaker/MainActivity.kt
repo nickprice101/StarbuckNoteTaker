@@ -334,6 +334,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     noteViewModel.clearPendingOpenNoteId()
                     noteViewModel.clearPendingUnlockNavigationNoteId()
                     noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
+                    // Directly navigate to the unlocked note
+                    openNoteAfterUnlock(request.noteId)
                     val pendingAfterSet = noteViewModel.pendingUnlockNavigationNoteId.value
                     if (pendingAfterSet != request.noteId) {
                         Log.w(
