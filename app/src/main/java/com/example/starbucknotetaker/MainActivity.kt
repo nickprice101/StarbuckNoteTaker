@@ -884,17 +884,3 @@ private fun PinPromptDialog(
     )
 }
 
-// Add the missing constants and classes that were referenced but not defined in the visible code
-private const val BIOMETRIC_LOG_TAG = "BiometricUnlock"
-
-// These would need to be defined elsewhere in your project if they don't exist
-object BiometricPromptTestHooks {
-    var overrideCanAuthenticate: Int? = null
-    var interceptAuthenticate: ((BiometricPrompt.PromptInfo, BiometricPrompt.AuthenticationCallback) -> Boolean)? = null
-    
-    fun notifyBiometricLog(message: String) {
-        // Implementation for test hooks
-    }
-}
-
-// You'll also need to make sure navigatePendingUnlock function is removed or simplified since it's no longer needed
