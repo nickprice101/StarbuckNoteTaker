@@ -1,3 +1,6 @@
+import com.android.build.gradle.internal.tasks.MergeNativeLibsTask
+import org.gradle.process.ExecSpec
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
@@ -38,6 +41,28 @@ def resolveNdkHostTag(File ndkDir) {
         throw new GradleException("Unable to locate an NDK prebuilt directory under ${prebuiltDir}")
     }
     return fallback.name
+}
+
+def alignNativeLibrariesAction = { Project gradleProject, Collection<File> nativeLibraries ->
+    if (nativeLibraries == null || nativeLibraries.isEmpty()) {
+        return
+    }
+
+    def alignmentScript = gradleProject.rootProject.file('scripts/align_elf_segments.py')
+    if (!alignmentScript.exists()) {
+        throw new GradleException("Unable to find native alignment script at ${alignmentScript}")
+    }
+
+    nativeLibraries.each { File library ->
+        if (!library.exists()) {
+            return
+        }
+
+        gradleProject.exec { ExecSpec spec ->
+            spec.executable = 'python3'
+            spec.args = [alignmentScript.absolutePath, library.absolutePath]
+        }
+    }
 }
 
 android {
@@ -226,4 +251,13 @@ tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.config
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
     dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
+}
+
+tasks.withType(MergeNativeLibsTask).configureEach { task ->
+    task.notCompatibleWithConfigurationCache('Aligns native libraries using an external script')
+    doLast {
+        def outputDir = task.outputDir.get().asFile
+        def alignedLibraries = task.project.fileTree(dir: outputDir, include: ['**/*.so']).files
+        alignNativeLibrariesAction(task.project, alignedLibraries)
+    }
 }
