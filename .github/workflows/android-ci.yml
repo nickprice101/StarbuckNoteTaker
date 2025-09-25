@@ -61,11 +61,11 @@ jobs:
           mkdir -p build-out
           VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
           cp app/build/outputs/apk/debug/app-debug.apk \
-            "build-out/StarbuckNoteTaker-${VERSION_NAME}-debug.apk"
+            "build-out/StarbuckNoteTaker-${VERSION_NAME}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StarbuckNoteTaker-1.0.${{ github.run_number }}-debug
-          path: build-out/StarbuckNoteTaker-1.0.${{ github.run_number }}-debug.apk
+          name: StarbuckNoteTaker-1.0.${{ github.run_number }}
+          path: build-out/StarbuckNoteTaker-1.0.${{ github.run_number }}.apk
           if-no-files-found: error
