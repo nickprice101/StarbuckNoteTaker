@@ -253,6 +253,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     }
     var showBiometricOptIn by remember { mutableStateOf(false) }
     val pendingBiometricOptIn by biometricOptInReplayGuard.pendingOptIn
+    val pendingBiometricOptInState = rememberUpdatedState(pendingBiometricOptIn)
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
     val lifecycleOwner = LocalLifecycleOwner.current
     
@@ -266,8 +267,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     var lastBiometricSuccess by remember { mutableStateOf("") }
 
     // ---[ Ironclad biometric flow distinction helpers ]---
-    fun isBiometricOptInFlowActive(): Boolean = pendingBiometricOptIn
-    fun isBiometricUnlockFlowActive(): Boolean = biometricUnlockRequest != null && !pendingBiometricOptIn
+    fun isBiometricOptInFlowActive(): Boolean = pendingBiometricOptInState.value
+    fun isBiometricUnlockFlowActive(): Boolean {
+        val pendingOptIn = pendingBiometricOptInState.value
+        val activeRequest = biometricUnlockRequestState.value
+        return activeRequest != null && !pendingOptIn
+    }
 
     fun clearPendingBiometricOptIn(reason: String): BiometricOptInReplayGuard.ClearResult {
         val result = biometricOptInReplayGuard.clearPendingOptIn(reason)
@@ -377,11 +382,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Current navigation route: ${navController.currentBackStackEntry?.destination?.route}")
                 Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Activity state: ${activity.lifecycle.currentState}")
                 
+                val pendingOptIn = pendingBiometricOptInState.value
+                val activeRequest = biometricUnlockRequestState.value
+                val unlockFlowActive = activeRequest != null && !pendingOptIn
+
                 // Only handle unlock flow
-                if (isBiometricUnlockFlowActive()) {
+                if (unlockFlowActive) {
                     val currentRequest = noteViewModel.currentBiometricUnlockRequest()
                     val capturedRequest = launchedBiometricRequestState.value
-                    
+
                     Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Unlock flow active - currentRequest=${currentRequest?.noteId} capturedRequest=${capturedRequest?.noteId}")
 
                     val request = currentRequest ?: capturedRequest
@@ -415,9 +424,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
                     launchedBiometricRequest.value = null
                     Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Biometric unlock sequence completed for noteId=${request.noteId}")
-                    
+
                 } else {
-                    Log.w(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Biometric unlock flow not active - ignoring success")
+                    Log.w(
+                        BIOMETRIC_LOG_TAG,
+                        "DEBUG_BIO: Biometric unlock flow not active - ignoring success (pendingOptIn=$pendingOptIn, activeRequestNoteId=${activeRequest?.noteId})"
+                    )
                 }
             }
 
