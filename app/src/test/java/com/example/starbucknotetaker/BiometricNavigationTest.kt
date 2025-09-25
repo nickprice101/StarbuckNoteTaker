@@ -9,12 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
-
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
 class BiometricNavigationTest {
     @Before
     fun setUp() {
@@ -39,13 +33,17 @@ class BiometricNavigationTest {
         handleBiometricUnlockSuccess(
             noteViewModel = viewModel,
             request = request,
-            openNoteAfterUnlock = { navigationTargets += it },
+            queueUnlockNavigation = { noteId ->
+                navigationTargets += noteId
+                viewModel.setPendingUnlockNavigationNoteId(noteId)
+            },
         )
 
         assertTrue(viewModel.isNoteTemporarilyUnlocked(noteId))
         assertNull(viewModel.currentBiometricUnlockRequest())
         assertNull(viewModel.pendingOpenNoteId.value)
         assertEquals(listOf(noteId), navigationTargets)
+        assertEquals(noteId, viewModel.pendingUnlockNavigationNoteId.value)
     }
 
     @Test
@@ -61,7 +59,7 @@ class BiometricNavigationTest {
         handleBiometricUnlockSuccess(
             noteViewModel = viewModel,
             request = request,
-            openNoteAfterUnlock = {},
+            queueUnlockNavigation = {},
         )
 
         assertTrue(capturedLogs.any { "noteId=$noteId" in it })
@@ -85,12 +83,16 @@ class BiometricNavigationTest {
         handleBiometricUnlockSuccess(
             noteViewModel = biometricViewModel,
             request = request,
-            openNoteAfterUnlock = { navigationTargets += it },
+            queueUnlockNavigation = { noteId ->
+                navigationTargets += noteId
+                biometricViewModel.setPendingUnlockNavigationNoteId(noteId)
+            },
         )
 
         assertTrue(biometricViewModel.isNoteTemporarilyUnlocked(noteId))
         assertEquals(pinViewModel.pendingOpenNoteId.value, biometricViewModel.pendingOpenNoteId.value)
         assertEquals(listOf(noteId), navigationTargets)
+        assertEquals(noteId, biometricViewModel.pendingUnlockNavigationNoteId.value)
     }
 }
 

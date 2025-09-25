@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -250,6 +251,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     var showBiometricOptIn by remember { mutableStateOf(false) }
     val pendingBiometricOptIn by biometricOptInReplayGuard.pendingOptIn
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val pendingUnlockNavigationNoteId by noteViewModel.pendingUnlockNavigationNoteId.collectAsState()
 
     // ---[ Ironclad biometric flow distinction helpers ]---
     fun isBiometricOptInFlowActive(): Boolean = pendingBiometricOptIn
@@ -299,6 +302,21 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
+    val queueUnlockNavigation: (Long) -> Unit = { noteId ->
+        Log.d(BIOMETRIC_LOG_TAG, "queueUnlockNavigation noteId=$noteId")
+        noteViewModel.setPendingUnlockNavigationNoteId(noteId)
+    }
+
+    LaunchedEffect(pendingUnlockNavigationNoteId) {
+        val pendingId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
+        navigatePendingUnlock(
+            lifecycle = lifecycleOwner.lifecycle,
+            noteViewModel = noteViewModel,
+            noteId = pendingId,
+            openNoteAfterUnlock = openNoteAfterUnlock,
+        )
+    }
+
     val launchedBiometricRequest = remember { mutableStateOf<BiometricUnlockRequest?>(null) }
     val launchedBiometricRequestState = rememberUpdatedState(launchedBiometricRequest.value)
 
@@ -331,7 +349,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     handleBiometricUnlockSuccess(
                         noteViewModel = noteViewModel,
                         request = request,
-                        openNoteAfterUnlock = openNoteAfterUnlock,
+                        queueUnlockNavigation = queueUnlockNavigation,
                     )
                     
                     launchedBiometricRequest.value = null
@@ -779,8 +797,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
                     Log.d(BIOMETRIC_LOG_TAG, "PinPromptDialog pin confirmed noteId=${noteId}")
-                    // Directly navigate after PIN unlock too
-                    openNoteAfterUnlock(noteId)
+                    queueUnlockNavigation(noteId)
                 }
             )
         } else {
@@ -885,15 +902,19 @@ private fun PinPromptDialog(
 internal fun handleBiometricUnlockSuccess(
     noteViewModel: NoteViewModel,
     request: BiometricUnlockRequest,
-    openNoteAfterUnlock: (Long) -> Unit,
+    queueUnlockNavigation: (Long) -> Unit,
 ) {
     noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
     noteViewModel.clearBiometricUnlockRequest()
     noteViewModel.clearPendingOpenNoteId()
 
-    val logMessage = "onAuthenticationSucceeded directly navigating to noteId=${request.noteId}"
-    Log.d(BIOMETRIC_LOG_TAG, logMessage)
+    val logMessage = "onAuthenticationSucceeded queueing navigation to noteId=${request.noteId}"
+    try {
+        Log.d(BIOMETRIC_LOG_TAG, logMessage)
+    } catch (_: RuntimeException) {
+        // android.util.Log throws at runtime in plain unit tests; ignore logging in that environment.
+    }
     BiometricPromptTestHooks.notifyBiometricLog(logMessage)
 
-    openNoteAfterUnlock(request.noteId)
+    queueUnlockNavigation(request.noteId)
 }
