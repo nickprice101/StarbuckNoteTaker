@@ -328,14 +328,11 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                         )
                     }
 
-                    // Mark note as temporarily unlocked and clear all pending states
-                    noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
-                    noteViewModel.clearBiometricUnlockRequest()
-                    noteViewModel.clearPendingOpenNoteId()
-                    
-                    // Directly navigate to the unlocked note - this is the key fix
-                    Log.d(BIOMETRIC_LOG_TAG, "onAuthenticationSucceeded directly navigating to noteId=${request.noteId}")
-                    openNoteAfterUnlock(request.noteId)
+                    handleBiometricUnlockSuccess(
+                        noteViewModel = noteViewModel,
+                        request = request,
+                        openNoteAfterUnlock = openNoteAfterUnlock,
+                    )
                     
                     launchedBiometricRequest.value = null
                 }
@@ -884,3 +881,19 @@ private fun PinPromptDialog(
     )
 }
 
+@VisibleForTesting
+internal fun handleBiometricUnlockSuccess(
+    noteViewModel: NoteViewModel,
+    request: BiometricUnlockRequest,
+    openNoteAfterUnlock: (Long) -> Unit,
+) {
+    noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
+    noteViewModel.clearBiometricUnlockRequest()
+    noteViewModel.clearPendingOpenNoteId()
+
+    val logMessage = "onAuthenticationSucceeded directly navigating to noteId=${request.noteId}"
+    Log.d(BIOMETRIC_LOG_TAG, logMessage)
+    BiometricPromptTestHooks.notifyBiometricLog(logMessage)
+
+    openNoteAfterUnlock(request.noteId)
+}
