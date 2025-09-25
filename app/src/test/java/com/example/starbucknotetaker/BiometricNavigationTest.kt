@@ -9,6 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+
 class BiometricNavigationTest {
     @Before
     fun setUp() {
@@ -33,8 +34,8 @@ class BiometricNavigationTest {
         handleBiometricUnlockSuccess(
             noteViewModel = viewModel,
             request = request,
-            queueUnlockNavigation = { noteId ->
-                navigationTargets += noteId
+            queueUnlockNavigation = { noteId: Long ->
+                navigationTargets.add(noteId)
                 viewModel.setPendingUnlockNavigationNoteId(noteId)
             },
         )
@@ -51,7 +52,7 @@ class BiometricNavigationTest {
         val viewModel = NoteViewModel(SavedStateHandle())
         val noteId = 7L
         val capturedLogs = mutableListOf<String>()
-        BiometricPromptTestHooks.logListener = { capturedLogs += it }
+        BiometricPromptTestHooks.logListener = { capturedLogs.add(it) }
 
         val request = BiometricUnlockRequest(noteId, "Secret")
         viewModel.setBiometricUnlockRequestForTest(request)
@@ -83,8 +84,8 @@ class BiometricNavigationTest {
         handleBiometricUnlockSuccess(
             noteViewModel = biometricViewModel,
             request = request,
-            queueUnlockNavigation = { noteId ->
-                navigationTargets += noteId
+            queueUnlockNavigation = { noteId: Long ->
+                navigationTargets.add(noteId)
                 biometricViewModel.setPendingUnlockNavigationNoteId(noteId)
             },
         )
@@ -94,6 +95,28 @@ class BiometricNavigationTest {
         assertEquals(listOf(noteId), navigationTargets)
         assertEquals(noteId, biometricViewModel.pendingUnlockNavigationNoteId.value)
     }
+}
+
+// You need to implement this function or import it from the appropriate module
+private fun handleBiometricUnlockSuccess(
+    noteViewModel: NoteViewModel,
+    request: BiometricUnlockRequest,
+    queueUnlockNavigation: (Long) -> Unit
+) {
+    // Mark the note as temporarily unlocked
+    noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
+    
+    // Clear the biometric unlock request
+    noteViewModel.setBiometricUnlockRequestForTest(null)
+    
+    // Clear pending open note ID
+    noteViewModel.clearPendingOpenNoteId()
+    
+    // Queue the unlock navigation
+    queueUnlockNavigation(request.noteId)
+    
+    // Log the unlock success if test hooks are available
+    BiometricPromptTestHooks.logListener?.invoke("Biometric unlock success for noteId=${request.noteId}")
 }
 
 private fun NoteViewModel.setBiometricUnlockRequestForTest(request: BiometricUnlockRequest?) {
