@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -256,6 +257,18 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val pendingBiometricOptInState = rememberUpdatedState(pendingBiometricOptIn)
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
     val lifecycleOwner = LocalLifecycleOwner.current
+    var awaitingResumeAfterBiometric by remember { mutableStateOf(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        val lifecycle = lifecycleOwner.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                awaitingResumeAfterBiometric = false
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     
     // DEBUG: Navigation state tracking
     var navigationAttempts by remember { mutableStateOf(0) }
@@ -351,8 +364,15 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    LaunchedEffect(pendingUnlockNavigationNoteId) {
+    LaunchedEffect(pendingUnlockNavigationNoteId, awaitingResumeAfterBiometric) {
         val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
+        if (awaitingResumeAfterBiometric) {
+            Log.d(
+                BIOMETRIC_LOG_TAG,
+                "DEBUG_NAV: Deferring pending unlock navigation until resume noteId=$noteId"
+            )
+            return@LaunchedEffect
+        }
         navigatePendingUnlock(
             lifecycle = lifecycleOwner.lifecycle,
             noteViewModel = noteViewModel,
@@ -580,6 +600,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             )
         } else {
             Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Calling biometricPrompt.authenticate()")
+            awaitingResumeAfterBiometric = true
             biometricPrompt.authenticate(promptInfo)
         }
     }
