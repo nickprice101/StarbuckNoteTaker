@@ -261,7 +261,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // CRITICAL FIX: Direct navigation state instead of complex pending system
+    // Keep the original navigation state for PIN workflow (which was working)
     var biometricSuccessNoteId by remember { mutableStateOf<Long?>(null) }
 
     fun isBiometricOptInFlowActive(): Boolean = pendingBiometricOptInState.value
@@ -292,10 +292,10 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     val launchedBiometricRequest = remember { mutableStateOf<BiometricUnlockRequest?>(null) }
 
-    // CRITICAL FIX: Direct navigation effect triggered by biometric success
+    // Keep original LaunchedEffect for PIN workflow navigation (which was working)
     LaunchedEffect(biometricSuccessNoteId) {
         val noteId = biometricSuccessNoteId ?: return@LaunchedEffect
-        Log.d(BIOMETRIC_LOG_TAG, "DIRECT_NAVIGATION: Navigating immediately to noteId=$noteId")
+        Log.d(BIOMETRIC_LOG_TAG, "ORIGINAL_NAVIGATION: Navigating to noteId=$noteId")
         
         try {
             val note = noteViewModel.getNoteById(noteId)
@@ -303,21 +303,21 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 navController.navigate("detail/$noteId") {
                     launchSingleTop = true
                 }
-                Log.d(BIOMETRIC_LOG_TAG, "DIRECT_NAVIGATION: Navigation successful to noteId=$noteId")
+                Log.d(BIOMETRIC_LOG_TAG, "ORIGINAL_NAVIGATION: Navigation successful to noteId=$noteId")
             } else {
-                Log.e(BIOMETRIC_LOG_TAG, "DIRECT_NAVIGATION: Note not found for noteId=$noteId")
+                Log.e(BIOMETRIC_LOG_TAG, "ORIGINAL_NAVIGATION: Note not found for noteId=$noteId")
                 Toast.makeText(context, "Note not found", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Log.e(BIOMETRIC_LOG_TAG, "DIRECT_NAVIGATION: Navigation failed", e)
+            Log.e(BIOMETRIC_LOG_TAG, "ORIGINAL_NAVIGATION: Navigation failed", e)
             Toast.makeText(context, "Navigation error: ${e.message}", Toast.LENGTH_LONG).show()
         } finally {
             biometricSuccessNoteId = null
         }
     }
 
-    // CRITICAL FIX: Bulletproof biometric unlock callback with direct navigation trigger
-    val biometricAuthenticationCallback = remember(noteViewModel) {
+    // FIXED: Biometric authentication callback with direct navigation (only for biometric success)
+    val biometricAuthenticationCallback = remember(noteViewModel, navController) {
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 Log.d(BIOMETRIC_LOG_TAG, "BIOMETRIC_SUCCESS: Authentication succeeded")
@@ -332,18 +332,22 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     if (request != null) {
                         Log.d(BIOMETRIC_LOG_TAG, "BIOMETRIC_SUCCESS: Processing unlock for noteId=${request.noteId}")
                         
-                        // Mark note as unlocked
+                        // Mark note as unlocked and clear states
                         noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
-                        
-                        // Clear all biometric states
                         noteViewModel.clearBiometricUnlockRequest()
                         noteViewModel.clearPendingOpenNoteId()
                         launchedBiometricRequest.value = null
                         
-                        // CRITICAL: Set the direct navigation trigger - this is the absolute fix
-                        biometricSuccessNoteId = request.noteId
-                        
-                        Log.d(BIOMETRIC_LOG_TAG, "BIOMETRIC_SUCCESS: Triggered navigation for noteId=${request.noteId}")
+                        // CRITICAL FIX: Navigate immediately for biometric success only
+                        try {
+                            navController.navigate("detail/${request.noteId}") {
+                                launchSingleTop = true
+                            }
+                            Log.d(BIOMETRIC_LOG_TAG, "BIOMETRIC_SUCCESS: Direct navigation successful to noteId=${request.noteId}")
+                        } catch (e: Exception) {
+                            Log.e(BIOMETRIC_LOG_TAG, "BIOMETRIC_SUCCESS: Navigation failed", e)
+                            Toast.makeText(context, "Navigation error: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                         
                         try {
                             BiometricPromptTestHooks.notifyBiometricLog("Biometric unlock success for noteId=${request.noteId}")
@@ -378,9 +382,12 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     else -> false
                 }
 
+                // CRITICAL FIX: Properly trigger PIN fallback when user cancels biometric
                 if (userCanceled && request != null) {
                     Log.d(BIOMETRIC_LOG_TAG, "BIOMETRIC_ERROR: User canceled, showing PIN for noteId=${request.noteId}")
                     noteViewModel.clearBiometricUnlockRequest()
+                    launchedBiometricRequest.value = null
+                    // Set pending open note to trigger PIN dialog
                     noteViewModel.setPendingOpenNoteId(request.noteId)
                 } else {
                     val hardFailure = when (errorCode) {
@@ -395,13 +402,17 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     if (hardFailure) {
                         Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
                         noteViewModel.clearBiometricUnlockRequest()
+                        launchedBiometricRequest.value = null
                         if (request != null) {
                             noteViewModel.setPendingOpenNoteId(request.noteId)
                         }
+                    } else {
+                        // For other errors, also clear states
+                        noteViewModel.clearBiometricUnlockRequest()
+                        launchedBiometricRequest.value = null
                     }
                 }
 
-                launchedBiometricRequest.value = null
                 try {
                     BiometricPromptTestHooks.notifyBiometricLog("Biometric unlock error code=$errorCode")
                 } catch (e: Exception) {
@@ -780,7 +791,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     Log.d(BIOMETRIC_LOG_TAG, "PIN_DIALOG: Confirmed for noteId=$noteId")
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
-                    // Direct navigation immediately after PIN success
+                    // PRESERVED: Use original PIN success mechanism that was working
                     biometricSuccessNoteId = noteId
                 }
             )
