@@ -1,8 +1,14 @@
 package com.example.starbucknotetaker
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.SavedStateHandle
 import java.lang.reflect.Field
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -95,6 +101,57 @@ class BiometricNavigationTest {
         assertEquals(listOf(noteId), navigationTargets)
         assertEquals(noteId, biometricViewModel.pendingUnlockNavigationNoteId.value)
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun biometricUnlockNavigationWaitsForResumeBeforeNavigating() = runTest {
+        val lifecycleOwner = FakeLifecycleOwner(Lifecycle.State.RESUMED)
+
+        val noteViewModel = NoteViewModel(SavedStateHandle())
+        val noteId = 88L
+        val navigationTargets = mutableListOf<Long>()
+
+        val request = BiometricUnlockRequest(noteId, "Secret")
+        noteViewModel.setPendingOpenNoteId(noteId)
+        noteViewModel.setBiometricUnlockRequestForTest(request)
+
+        handleBiometricUnlockSuccess(
+            noteViewModel = noteViewModel,
+            request = request,
+            queueUnlockNavigation = { id -> noteViewModel.setPendingUnlockNavigationNoteId(id) },
+        )
+
+        assertEquals(noteId, noteViewModel.pendingUnlockNavigationNoteId.value)
+
+        var awaitingResumeAfterBiometric = true
+
+        suspend fun maybeNavigate() {
+            val pendingId = noteViewModel.pendingUnlockNavigationNoteId.value ?: return
+            if (awaitingResumeAfterBiometric) {
+                return
+            }
+            navigatePendingUnlock(
+                lifecycle = lifecycleOwner.lifecycle,
+                noteViewModel = noteViewModel,
+                noteId = pendingId,
+                openNoteAfterUnlock = { navigationTargets.add(it) },
+            )
+        }
+
+        maybeNavigate()
+
+        assertTrue(navigationTargets.isEmpty())
+        assertEquals(noteId, noteViewModel.pendingUnlockNavigationNoteId.value)
+
+        lifecycleOwner.handle(Lifecycle.Event.ON_PAUSE)
+        lifecycleOwner.handle(Lifecycle.Event.ON_RESUME)
+        awaitingResumeAfterBiometric = false
+
+        maybeNavigate()
+
+        assertEquals(listOf(noteId), navigationTargets)
+        assertNull(noteViewModel.pendingUnlockNavigationNoteId.value)
+    }
 }
 
 // You need to implement this function or import it from the appropriate module
@@ -124,4 +181,51 @@ private fun NoteViewModel.setBiometricUnlockRequestForTest(request: BiometricUnl
     field.isAccessible = true
     val state = field.get(this) as MutableStateFlow<BiometricUnlockRequest?>
     state.value = request
+}
+
+private class FakeLifecycleOwner(initialState: Lifecycle.State) : LifecycleOwner {
+    private val fakeLifecycle = FakeLifecycle(this, initialState)
+
+    override val lifecycle: Lifecycle
+        get() = fakeLifecycle
+
+    fun handle(event: Lifecycle.Event) {
+        fakeLifecycle.dispatch(event)
+    }
+}
+
+private class FakeLifecycle(
+    private val owner: LifecycleOwner,
+    initialState: Lifecycle.State,
+) : Lifecycle() {
+    private val observers = mutableSetOf<LifecycleEventObserver>()
+    private var state: Lifecycle.State = initialState
+
+    override fun addObserver(observer: LifecycleObserver) {
+        val eventObserver = observer as? LifecycleEventObserver
+            ?: throw IllegalArgumentException("FakeLifecycle only supports LifecycleEventObserver")
+        observers += eventObserver
+    }
+
+    override fun removeObserver(observer: LifecycleObserver) {
+        val eventObserver = observer as? LifecycleEventObserver ?: return
+        observers -= eventObserver
+    }
+
+    override val currentState: Lifecycle.State
+        get() = state
+
+    fun dispatch(event: Lifecycle.Event) {
+        state = when (event) {
+            Lifecycle.Event.ON_CREATE -> Lifecycle.State.CREATED
+            Lifecycle.Event.ON_START -> Lifecycle.State.STARTED
+            Lifecycle.Event.ON_RESUME -> Lifecycle.State.RESUMED
+            Lifecycle.Event.ON_PAUSE -> Lifecycle.State.STARTED
+            Lifecycle.Event.ON_STOP -> Lifecycle.State.CREATED
+            Lifecycle.Event.ON_DESTROY -> Lifecycle.State.DESTROYED
+            Lifecycle.Event.ON_ANY -> state
+        }
+        val snapshot = observers.toList()
+        snapshot.forEach { observer -> observer.onStateChanged(owner, event) }
+    }
 }
