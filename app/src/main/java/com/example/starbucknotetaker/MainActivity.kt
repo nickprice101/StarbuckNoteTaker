@@ -235,9 +235,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
-    val pendingUnlockNavigationNoteId by noteViewModel.pendingUnlockNavigationNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentActivityState = rememberUpdatedState(activity)
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
@@ -258,16 +256,11 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
     val lifecycleOwner = LocalLifecycleOwner.current
     
-    // REMOVED: awaitingResumeAfterBiometric - this was causing the navigation delay
-    
-    // DEBUG: Navigation state tracking
+    // GUARDRAIL STATE: Enforce absolute railroading
+    var isNavigationBlocked by remember { mutableStateOf(false) }
+    var pendingNavigationNoteId by remember { mutableStateOf<Long?>(null) }
     var navigationAttempts by remember { mutableStateOf(0) }
-    var lastNavigationAttempt by remember { mutableStateOf("") }
-    var lastSuccessfulNavigation by remember { mutableStateOf("") }
-    
-    // DEBUG: Biometric unlock state tracking  
-    var biometricUnlockAttempts by remember { mutableStateOf(0) }
-    var lastBiometricSuccess by remember { mutableStateOf("") }
+    var lastNavigationError by remember { mutableStateOf<String?>(null) }
 
     // ---[ Ironclad biometric flow distinction helpers ]---
     fun isBiometricOptInFlowActive(): Boolean = pendingBiometricOptInState.value
@@ -305,204 +298,160 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val startDestination = if (isPinSet) "list" else "pin_setup"
 
     val launchedBiometricRequest = remember { mutableStateOf<BiometricUnlockRequest?>(null) }
-    val launchedBiometricRequestState = rememberUpdatedState(launchedBiometricRequest.value)
 
-    // DEBUG: Navigation monitoring LaunchedEffect
-    LaunchedEffect(navBackStackEntry?.destination?.route) {
-        val currentRoute = navBackStackEntry?.destination?.route
-        val logMessage = "DEBUG_NAV: Route changed to '$currentRoute' at ${System.currentTimeMillis()}"
-        Log.d(BIOMETRIC_LOG_TAG, logMessage)
-        BiometricPromptTestHooks.notifyBiometricLog(logMessage)
-        
-        if (currentRoute?.startsWith("detail/") == true) {
-            lastSuccessfulNavigation = "SUCCESS: Navigated to $currentRoute at ${System.currentTimeMillis()}"
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: $lastSuccessfulNavigation")
-        }
-    }
-
-    // DEBUG: Comprehensive navigation attempt function
-    fun attemptNavigation(noteId: Long, source: String): Boolean {
+    // GUARDRAIL: Absolutely enforce navigation after successful unlock
+    fun forceNavigateToNote(noteId: Long, source: String) {
         navigationAttempts++
-        lastNavigationAttempt = "ATTEMPT #$navigationAttempts from $source to detail/$noteId at ${System.currentTimeMillis()}"
+        isNavigationBlocked = true
+        lastNavigationError = null
         
-        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: $lastNavigationAttempt")
-        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Current route before navigation: ${navController.currentBackStackEntry?.destination?.route}")
-        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: NavController state - canGoBack: ${navController.previousBackStackEntry != null}")
-        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Activity lifecycle state: ${lifecycleOwner.lifecycle.currentState}")
+        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Force navigate attempt #$navigationAttempts from $source to noteId=$noteId")
         
-        return try {
+        try {
             val note = noteViewModel.getNoteById(noteId)
             if (note == null) {
-                Log.e(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Note not found for noteId=$noteId")
+                lastNavigationError = "Note not found"
+                Log.e(BIOMETRIC_LOG_TAG, "GUARDRAIL: Note not found for noteId=$noteId")
                 Toast.makeText(context, "Note is no longer available", Toast.LENGTH_SHORT).show()
-                return false
+                isNavigationBlocked = false
+                return
             }
             
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: About to call navController.navigate for noteId=$noteId")
+            // ABSOLUTE GUARDRAIL: Clear all navigation-blocking states
+            noteViewModel.clearPendingOpenNoteId()
+            noteViewModel.clearBiometricUnlockRequest()
+            pendingNavigationNoteId = null
+            
+            // Force navigation with aggressive retry
+            Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Executing navController.navigate to detail/$noteId")
             navController.navigate("detail/$noteId") {
                 launchSingleTop = true
+                // Clear back stack to prevent user confusion
+                popUpTo("list") { inclusive = false }
             }
             
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Navigation call completed for noteId=$noteId")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Current route after navigation: ${navController.currentBackStackEntry?.destination?.route}")
+            Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Navigation completed successfully for noteId=$noteId")
+            isNavigationBlocked = false
             
-            true
         } catch (e: Exception) {
-            Log.e(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Navigation failed for noteId=$noteId from $source", e)
-            Toast.makeText(context, "Navigation failed: ${e.message}", Toast.LENGTH_LONG).show()
-            false
+            lastNavigationError = "Navigation failed: ${e.message}"
+            Log.e(BIOMETRIC_LOG_TAG, "GUARDRAIL: Critical navigation failure", e)
+            Toast.makeText(context, "Critical error: Cannot open note", Toast.LENGTH_LONG).show()
+            
+            // Fallback: Set pending navigation for retry
+            pendingNavigationNoteId = noteId
+            isNavigationBlocked = false
         }
     }
 
-    // FIXED: Immediate navigation without waiting for resume
-    LaunchedEffect(pendingUnlockNavigationNoteId) {
-        val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
-        Log.d(
-            BIOMETRIC_LOG_TAG,
-            "DEBUG_NAV: Processing pending unlock navigation immediately for noteId=$noteId"
-        )
-        navigatePendingUnlock(
-            lifecycle = lifecycleOwner.lifecycle,
-            noteViewModel = noteViewModel,
-            noteId = noteId,
-            openNoteAfterUnlock = { targetId ->
-                val success = attemptNavigation(targetId, "pending_unlock")
-                if (!success) {
-                    Log.e(
-                        BIOMETRIC_LOG_TAG,
-                        "DEBUG_NAV: Pending unlock navigation failed for noteId=$targetId"
-                    )
-                    noteViewModel.setPendingOpenNoteId(targetId)
-                }
-            },
-        )
+    // GUARDRAIL: Monitor navigation success and retry if needed
+    LaunchedEffect(navBackStackEntry?.destination?.route, pendingNavigationNoteId) {
+        val currentRoute = navBackStackEntry?.destination?.route
+        val pendingId = pendingNavigationNoteId
+        
+        if (pendingId != null && currentRoute != "detail/$pendingId" && !isNavigationBlocked) {
+            Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Retry navigation for pendingId=$pendingId, currentRoute=$currentRoute")
+            delay(100) // Brief delay to allow UI to settle
+            forceNavigateToNote(pendingId, "retry_mechanism")
+        }
     }
 
-    // ---[ FIXED: Biometric unlock callback with immediate navigation ]---
+    // ---[ GUARDRAIL: Bulletproof biometric unlock callback ]---
     val biometricAuthenticationCallback = remember(noteViewModel) {
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                biometricUnlockAttempts++
-                lastBiometricSuccess = "SUCCESS #$biometricUnlockAttempts at ${System.currentTimeMillis()}"
-
+                Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric authentication succeeded")
+                
                 val pendingOptIn = pendingBiometricOptInState.value
                 val activeRequest = biometricUnlockRequestState.value
 
                 if (!pendingOptIn && activeRequest != null) {
                     val request = noteViewModel.currentBiometricUnlockRequest()
-                        ?: launchedBiometricRequestState.value
+                        ?: launchedBiometricRequest.value
 
                     if (request != null) {
+                        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Processing unlock for noteId=${request.noteId}")
+                        
+                        // GUARDRAIL: Absolutely ensure note is unlocked
                         noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
-                        noteViewModel.clearBiometricUnlockRequest()
-                        noteViewModel.clearPendingOpenNoteId()
                         
-                        // FIXED: Navigate immediately instead of setting pendingUnlockNavigationNoteId
-                        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Biometric success - navigating immediately to noteId=${request.noteId}")
-                        val success = attemptNavigation(request.noteId, "biometric_success")
-                        if (!success) {
-                            Log.e(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Immediate navigation failed, falling back to pending")
-                            noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
-                        }
+                        // GUARDRAIL: Force immediate navigation with no escape routes
+                        forceNavigateToNote(request.noteId, "biometric_success")
                         
                         launchedBiometricRequest.value = null
-
-                        val successLog = "Biometric unlock success for noteId=${request.noteId}"
-                        Log.d(BIOMETRIC_LOG_TAG, successLog)
-                        BiometricPromptTestHooks.notifyBiometricLog(successLog)
+                        
+                        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric unlock completed for noteId=${request.noteId}")
+                        BiometricPromptTestHooks.notifyBiometricLog("Biometric unlock success for noteId=${request.noteId}")
                     } else {
-                        launchedBiometricRequest.value = null
-                        Log.w(BIOMETRIC_LOG_TAG, "Biometric unlock succeeded with no pending request")
+                        Log.w(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric succeeded but no request found")
                     }
                 } else {
-                    Log.d(
-                        BIOMETRIC_LOG_TAG,
-                        "Biometric unlock success ignored (pendingOptIn=$pendingOptIn, activeRequestNoteId=${activeRequest?.noteId})"
-                    )
+                    Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric success ignored (opt-in flow or no request)")
                 }
             }
 
             override fun onAuthenticationFailed() {
+                Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric authentication failed")
                 BiometricPromptTestHooks.notifyBiometricLog("Biometric unlock attempt failed")
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                val request = noteViewModel.currentBiometricUnlockRequest()
-                    ?: launchedBiometricRequestState.value
+                Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric error code=$errorCode message=\"$errString\"")
+                
+                val request = noteViewModel.currentBiometricUnlockRequest() ?: launchedBiometricRequest.value
 
-                val userExit = when (errorCode) {
+                val userCanceled = when (errorCode) {
                     BiometricPrompt.ERROR_NEGATIVE_BUTTON,
                     BiometricPrompt.ERROR_USER_CANCELED -> true
                     else -> false
                 }
 
-                val hardFailure = when (errorCode) {
-                    BiometricPrompt.ERROR_HW_NOT_PRESENT,
-                    BiometricPrompt.ERROR_NO_BIOMETRICS,
-                    BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-                    BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
-                    BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL -> true
-                    else -> false
-                }
-
-                if (userExit || hardFailure) {
-                    if (hardFailure) {
-                        Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
-                    }
+                if (userCanceled && request != null) {
+                    Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: User canceled biometric, falling back to PIN for noteId=${request.noteId}")
+                    // GUARDRAIL: Immediately show PIN dialog, no delays
                     noteViewModel.clearBiometricUnlockRequest()
-                    if (request != null) {
-                        noteViewModel.setPendingOpenNoteId(request.noteId)
-                    }
+                    noteViewModel.setPendingOpenNoteId(request.noteId)
                 } else {
-                    val transientError = when (errorCode) {
-                        BiometricPrompt.ERROR_CANCELED,
-                        BiometricPrompt.ERROR_TIMEOUT,
-                        BiometricPrompt.ERROR_LOCKOUT,
-                        BiometricPrompt.ERROR_HW_UNAVAILABLE,
-                        BiometricPrompt.ERROR_UNABLE_TO_PROCESS,
-                        BiometricPrompt.ERROR_NO_SPACE,
-                        BiometricPrompt.ERROR_VENDOR -> true
+                    val hardFailure = when (errorCode) {
+                        BiometricPrompt.ERROR_HW_NOT_PRESENT,
+                        BiometricPrompt.ERROR_NO_BIOMETRICS,
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
+                        BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
+                        BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL -> true
                         else -> false
                     }
 
-                    if (!transientError || errorCode == BiometricPrompt.ERROR_LOCKOUT) {
+                    if (hardFailure) {
                         Toast.makeText(context, errString, Toast.LENGTH_LONG).show()
+                        noteViewModel.clearBiometricUnlockRequest()
+                        if (request != null) {
+                            noteViewModel.setPendingOpenNoteId(request.noteId)
+                        }
                     }
                 }
 
-                val errorLog = "Biometric unlock error code=$errorCode message=\"$errString\""
-                Log.d(BIOMETRIC_LOG_TAG, errorLog)
-                BiometricPromptTestHooks.notifyBiometricLog(errorLog)
                 launchedBiometricRequest.value = null
+                BiometricPromptTestHooks.notifyBiometricLog("Biometric unlock error code=$errorCode message=\"$errString\"")
             }
         }
     }
 
-    // ---[ Ironclad biometric opt-in callback ]---
+    // ---[ Biometric opt-in callback ]---
     val biometricOptInAuthenticationCallback = remember(noteViewModel) {
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                // Only handle opt-in flow
                 if (isBiometricOptInFlowActive()) {
-                    val reason = "opt_in_authenticated"
-                    Log.d(
-                        BIOMETRIC_LOG_TAG,
-                        "biometricOptInPrompt onAuthenticationSucceeded reason=$reason pendingOptIn=$pendingBiometricOptIn"
-                    )
+                    Log.d(BIOMETRIC_LOG_TAG, "Biometric opt-in succeeded")
                     pinManager.setBiometricEnabled(true)
                     biometricsEnabled = true
-                    clearPendingBiometricOptIn(reason)
+                    clearPendingBiometricOptIn("opt_in_authenticated")
                     Toast.makeText(context, "Biometric unlock enabled", Toast.LENGTH_SHORT).show()
                 }
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                val reason = "opt_in_error_$errorCode"
-                Log.d(
-                    BIOMETRIC_LOG_TAG,
-                    "biometricOptInPrompt onAuthenticationError reason=$reason pendingOptIn=$pendingBiometricOptIn"
-                )
-                clearPendingBiometricOptIn(reason)
+                Log.d(BIOMETRIC_LOG_TAG, "Biometric opt-in error code=$errorCode")
+                clearPendingBiometricOptIn("opt_in_error_$errorCode")
                 if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
                     errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
                 ) {
@@ -539,68 +488,39 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    // DEBUG: Periodic state logging
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(5000) // Log state every 5 seconds
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: Navigation attempts: $navigationAttempts, Biometric unlocks: $biometricUnlockAttempts")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: Current route: ${navController.currentBackStackEntry?.destination?.route}")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: Lifecycle: ${lifecycleOwner.lifecycle.currentState}")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: PendingOpenNoteId: ${pendingOpenNoteId}")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: BiometricUnlockRequest: ${biometricUnlockRequest?.noteId}")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: Last navigation attempt: $lastNavigationAttempt")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: Last successful navigation: $lastSuccessfulNavigation")
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_STATE: Last biometric success: $lastBiometricSuccess")
-        }
-    }
-
-    // ---[ FIXED: Biometric prompt without waiting for resume ]---
+    // GUARDRAIL: Launch biometric prompt with absolute determination
     LaunchedEffect(biometricPromptTrigger, biometricUnlockRequest?.token, pendingBiometricOptIn) {
         if (biometricPromptTrigger == 0L) return@LaunchedEffect
         val request = biometricUnlockRequest ?: return@LaunchedEffect
         if (isBiometricOptInFlowActive()) {
-            val logMessage =
-                "biometric unlock request suppressed noteId=${request.noteId} token=${request.token} trigger=$biometricPromptTrigger pendingOptIn=true"
-            Log.w(
-                BIOMETRIC_LOG_TAG,
-                logMessage
-            )
-            BiometricPromptTestHooks.notifyBiometricLog(logMessage)
+            Log.w(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric unlock suppressed due to opt-in flow")
             return@LaunchedEffect
         }
-        val logMessage =
-            "DEBUG_BIO: Launching biometric prompt noteId=${request.noteId} token=${request.token} trigger=$biometricPromptTrigger pendingOptIn=$pendingBiometricOptIn"
-        Log.d(
-            BIOMETRIC_LOG_TAG,
-            logMessage
-        )
-        BiometricPromptTestHooks.notifyBiometricLog(logMessage)
+        
+        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Launching biometric prompt for noteId=${request.noteId}")
         launchedBiometricRequest.value = request
+        
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock note")
             .setSubtitle("Authenticate to open \"${request.title}\".")
             .setNegativeButtonText("Use PIN")
             .build()
+            
         val intercepted = BiometricPromptTestHooks.interceptAuthenticate?.let { handler ->
             runCatching { handler(promptInfo, biometricAuthenticationCallback) }
                 .onFailure { throwable ->
-                    Log.e(BIOMETRIC_LOG_TAG, "biometricPrompt intercept failed", throwable)
+                    Log.e(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric intercept failed", throwable)
                 }
                 .getOrDefault(false)
         } ?: false
-        if (intercepted) {
-            Log.d(
-                BIOMETRIC_LOG_TAG,
-                "DEBUG_BIO: Biometric prompt intercepted noteId=${request.noteId} token=${request.token}"
-            )
-        } else {
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Calling biometricPrompt.authenticate()")
-            // REMOVED: awaitingResumeAfterBiometric = true
+        
+        if (!intercepted) {
+            Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Executing biometricPrompt.authenticate()")
             biometricPrompt.authenticate(promptInfo)
         }
     }
 
-    // ---[ Only launch opt-in prompt if opt-in flow is active ]---
+    // Launch opt-in prompt
     LaunchedEffect(pendingBiometricOptIn) {
         if (isBiometricOptInFlowActive()) {
             val promptInfo = BiometricPrompt.PromptInfo.Builder()
@@ -608,23 +528,16 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 .setSubtitle("Confirm your biometrics to enable unlocking notes.")
                 .setNegativeButtonText("Cancel")
                 .build()
-            Log.d(
-                BIOMETRIC_LOG_TAG,
-                "Launching biometric opt-in prompt guard pendingOptIn=$pendingBiometricOptIn"
-            )
+            
             val intercepted = BiometricPromptTestHooks.interceptAuthenticate?.let { handler ->
                 runCatching { handler(promptInfo, biometricOptInAuthenticationCallback) }
                     .onFailure { throwable ->
-                        Log.e(BIOMETRIC_LOG_TAG, "biometricOptInPrompt intercept failed", throwable)
+                        Log.e(BIOMETRIC_LOG_TAG, "Biometric opt-in intercept failed", throwable)
                     }
                     .getOrDefault(false)
             } ?: false
-            if (intercepted) {
-                Log.d(
-                    BIOMETRIC_LOG_TAG,
-                    "Launching biometric opt-in prompt intercepted pendingOptIn=$pendingBiometricOptIn"
-                )
-            } else {
+            
+            if (!intercepted) {
                 biometricOptInPrompt.authenticate(promptInfo)
             }
         }
@@ -638,8 +551,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             } else if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                 noteViewModel.setPendingOpenNoteId(note.id)
             } else {
-                Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Reminder navigation attempt for noteId=$noteId")
-                attemptNavigation(noteId, "reminder")
+                forceNavigateToNote(noteId, "reminder")
             }
         }
     }
@@ -648,7 +560,6 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         if (pendingShare == null) return@LaunchedEffect
         val currentRoute = navBackStackEntry?.destination?.route
         if (currentRoute != "pin_enter" && currentRoute != "pin_setup") {
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Share navigation to add screen")
             navController.navigate("add") {
                 launchSingleTop = true
             }
@@ -678,45 +589,49 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             }
         }
         composable("list") {
-            NoteListScreen(
-                notes = noteViewModel.notes,
-                onAddNote = { navController.navigate("add") },
-                onAddEvent = { navController.navigate("add_event") },
-                onOpenNote = { note ->
-                    Log.d(
-                        BIOMETRIC_LOG_TAG,
-                        "DEBUG_NAV: onOpenNote tap noteId=${note.id} locked=${note.isLocked} tempUnlocked=${noteViewModel.isNoteTemporarilyUnlocked(note.id)} canUseBiometric=$canUseBiometric"
-                    )
-                    if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
-                        if (canUseBiometric) {
-                            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Requesting biometric unlock for noteId=${note.id}")
-                            noteViewModel.clearPendingOpenNoteId()
-                            val clearResult = clearPendingBiometricOptIn("note_list_unlock_request")
-                            val replayRequired = clearResult.action == ClearAction.FORCE_CLEAR_MISSING_ACTIVE_TOKEN ||
-                                clearResult.action == ClearAction.FORCE_CLEAR_TOKEN_MISMATCH
-                            if (replayRequired) {
-                                launchedBiometricRequest.value = null
-                                noteViewModel.clearBiometricUnlockRequest()
-                                val retryLog =
-                                    "reposting biometric unlock after force clear reason=note_list_unlock_request " +
-                                        "action=${clearResult.action} noteId=${note.id}"
-                                Log.d(BIOMETRIC_LOG_TAG, retryLog)
-                                BiometricPromptTestHooks.notifyBiometricLog(retryLog)
-                            }
-                            noteViewModel.requestBiometricUnlock(note.id, note.title)
-                        } else {
-                            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Setting pendingOpenNoteId for PIN unlock, noteId=${note.id}")
-                            noteViewModel.setPendingOpenNoteId(note.id)
-                        }
-                    } else {
-                        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Direct navigation to unlocked note, noteId=${note.id}")
-                        attemptNavigation(note.id, "note_list_direct")
+            // GUARDRAIL: Block list interactions during navigation
+            if (isNavigationBlocked) {
+                // Show loading state while navigation is in progress
+                Column {
+                    Text("Opening note...")
+                    if (lastNavigationError != null) {
+                        Text("Error: $lastNavigationError", color = Color.Red)
                     }
-                },
-                onDeleteNote = { noteId -> noteViewModel.deleteNote(noteId) },
-                onSettings = { navController.navigate("settings") },
-                summarizerState = summarizerState
-            )
+                }
+            } else {
+                NoteListScreen(
+                    notes = noteViewModel.notes,
+                    onAddNote = { navController.navigate("add") },
+                    onAddEvent = { navController.navigate("add_event") },
+                    onOpenNote = { note ->
+                        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Note tap - noteId=${note.id} locked=${note.isLocked}")
+                        
+                        if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
+                            if (canUseBiometric) {
+                                Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Starting biometric unlock for noteId=${note.id}")
+                                noteViewModel.clearPendingOpenNoteId()
+                                val clearResult = clearPendingBiometricOptIn("note_list_unlock_request")
+                                val replayRequired = clearResult.action == ClearAction.FORCE_CLEAR_MISSING_ACTIVE_TOKEN ||
+                                    clearResult.action == ClearAction.FORCE_CLEAR_TOKEN_MISMATCH
+                                if (replayRequired) {
+                                    launchedBiometricRequest.value = null
+                                    noteViewModel.clearBiometricUnlockRequest()
+                                }
+                                noteViewModel.requestBiometricUnlock(note.id, note.title)
+                            } else {
+                                Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Starting PIN unlock for noteId=${note.id}")
+                                noteViewModel.setPendingOpenNoteId(note.id)
+                            }
+                        } else {
+                            Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Direct navigation to unlocked note")
+                            forceNavigateToNote(note.id, "direct_access")
+                        }
+                    },
+                    onDeleteNote = { noteId -> noteViewModel.deleteNote(noteId) },
+                    onSettings = { navController.navigate("settings") },
+                    summarizerState = summarizerState
+                )
+            }
         }
         composable("add") {
             AddNoteScreen(
@@ -754,12 +669,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         composable("detail/{noteId}") { backStackEntry ->
             val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
             val note = noteId?.let { noteViewModel.getNoteById(it) }
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: detail composable rendered for noteId=$noteId, note exists=${note != null}")
+            Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Detail screen loaded for noteId=$noteId")
+            
             if (noteId != null && note != null) {
                 DisposableEffect(noteId) {
-                    Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: NoteDetailScreen started for noteId=$noteId")
+                    Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: NoteDetailScreen started for noteId=$noteId")
                     onDispose { 
-                        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: NoteDetailScreen disposed for noteId=$noteId")
+                        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: NoteDetailScreen disposed for noteId=$noteId")
                         noteViewModel.relockNote(noteId) 
                     }
                 }
@@ -775,7 +691,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     openAttachment = { id -> noteViewModel.openAttachment(id) }
                 )
             } else {
-                Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: detail composable - note not found, going back")
+                Log.w(BIOMETRIC_LOG_TAG, "GUARDRAIL: Note not found, navigating back")
                 navController.popBackStack()
             }
         }
@@ -859,7 +775,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
 
     pendingOpenNoteId?.let { noteId ->
         val note = noteViewModel.getNoteById(noteId)
-        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: PinPromptDialog showing for noteId=$noteId")
+        Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: PIN dialog for noteId=$noteId")
         if (note != null) {
             PinPromptDialog(
                 title = "Unlock note",
@@ -867,7 +783,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 pinManager = pinManager,
                 showBiometricOption = canUseBiometric,
                 onBiometricRequested = {
-                    Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Biometric requested from PIN dialog for noteId=$noteId")
+                    Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: Biometric requested from PIN dialog")
                     noteViewModel.clearPendingOpenNoteId()
                     if (canUseBiometric) {
                         val clearResult = clearPendingBiometricOptIn("pin_prompt_biometric_request")
@@ -876,29 +792,23 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                         if (replayRequired) {
                             launchedBiometricRequest.value = null
                             noteViewModel.clearBiometricUnlockRequest()
-                            val retryLog =
-                                "reposting biometric unlock after force clear reason=pin_prompt_biometric_request " +
-                                    "action=${clearResult.action} noteId=${noteId}"
-                            Log.d(BIOMETRIC_LOG_TAG, retryLog)
-                            BiometricPromptTestHooks.notifyBiometricLog(retryLog)
                         }
                         noteViewModel.requestBiometricUnlock(noteId, note.title)
                     }
                 },
                 onDismiss = { 
-                    Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: PIN dialog dismissed for noteId=$noteId")
+                    Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: PIN dialog dismissed")
                     noteViewModel.clearPendingOpenNoteId() 
                 },
                 onPinConfirmed = {
-                    Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: PIN confirmed for noteId=$noteId")
+                    Log.d(BIOMETRIC_LOG_TAG, "GUARDRAIL: PIN confirmed for noteId=$noteId")
                     noteViewModel.markNoteTemporarilyUnlocked(noteId)
                     noteViewModel.clearPendingOpenNoteId()
-                    // Direct navigation for PIN unlock
-                    attemptNavigation(noteId, "pin_confirmed")
+                    // GUARDRAIL: Force navigation immediately
+                    forceNavigateToNote(noteId, "pin_success")
                 }
             )
         } else {
-            Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Note not found for pendingOpenNoteId=$noteId, clearing")
             noteViewModel.clearPendingOpenNoteId()
         }
     }
