@@ -76,10 +76,12 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, address: String): 
             Log.d("AddressUtils", "Looking up venue for address: $address")
             
             // First try direct geocoding of the address
-            val addresses = geocoder.getFromLocationName(address, 10) ?: return@withContext null
+            val addresses = geocoder.getFromLocationName(address, 15) ?: return@withContext null
             Log.d("AddressUtils", "Found ${addresses.size} geocoded results")
             
-            // Look through all results for venue names
+            var bestResult: EventLocationDisplay? = null
+            
+            // Look through all results for venue names - prioritize exact matches
             for ((index, geocodedAddress) in addresses.withIndex()) {
                 Log.d("AddressUtils", "Checking result $index: ${geocodedAddress.getAddressLine(0)}")
                 
@@ -90,11 +92,28 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, address: String): 
                 if (venueName != null) {
                     Log.d("AddressUtils", "Found venue name: $venueName")
                     val fullAddress = buildFullAddress(geocodedAddress)
-                    return@withContext EventLocationDisplay(
+                    val result = EventLocationDisplay(
                         name = venueName,
                         address = fullAddress
                     )
+                    
+                    // If venue name matches the search query closely, prioritize it
+                    if (venueName.equals(address, ignoreCase = true) || 
+                        address.contains(venueName, ignoreCase = true)) {
+                        Log.d("AddressUtils", "Found exact venue match: $venueName")
+                        return@withContext result
+                    }
+                    
+                    // Keep the first valid result as backup
+                    if (bestResult == null) {
+                        bestResult = result
+                    }
                 }
+            }
+            
+            // Return the best result found, if any
+            if (bestResult != null) {
+                return@withContext bestResult
             }
             
             // If no venue found in direct lookup, try coordinate-based lookup with the first result
@@ -106,7 +125,7 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, address: String): 
                 val nearbyAddresses = geocoder.getFromLocation(
                     firstAddress.latitude, 
                     firstAddress.longitude, 
-                    20
+                    25
                 ) ?: emptyList()
                 
                 Log.d("AddressUtils", "Found ${nearbyAddresses.size} nearby results")
@@ -118,23 +137,47 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, address: String): 
                     val venueName = extractValidVenueName(nearbyAddress)
                     if (venueName != null) {
                         Log.d("AddressUtils", "Found nearby venue name: $venueName")
-                        // Use the original address for the address part, not the nearby one
-                        val fullAddress = buildFullAddress(firstAddress)
-                        return@withContext EventLocationDisplay(
+                        
+                        // Use the most accurate address - prefer the nearby address if it has better street info
+                        val fullAddress = if (hasMoreCompleteStreetInfo(nearbyAddress, firstAddress)) {
+                            buildFullAddress(nearbyAddress)
+                        } else {
+                            buildFullAddress(firstAddress)
+                        }
+                        
+                        val result = EventLocationDisplay(
                             name = venueName,
                             address = fullAddress
                         )
+                        
+                        // Prioritize if venue name matches search query
+                        if (venueName.equals(address, ignoreCase = true) || 
+                            address.contains(venueName, ignoreCase = true)) {
+                            Log.d("AddressUtils", "Found exact nearby venue match: $venueName")
+                            return@withContext result
+                        }
+                        
+                        if (bestResult == null) {
+                            bestResult = result
+                        }
                     }
                 }
             }
             
             Log.d("AddressUtils", "No venue name found for address: $address")
-            null
+            bestResult
         } catch (e: Exception) {
             Log.e("AddressUtils", "Failed to lookup venue at address: $address", e)
             null
         }
     }
+}
+
+private fun hasMoreCompleteStreetInfo(address1: Address, address2: Address): Boolean {
+    val address1HasStreetInfo = !address1.thoroughfare.isNullOrBlank() && !address1.subThoroughfare.isNullOrBlank()
+    val address2HasStreetInfo = !address2.thoroughfare.isNullOrBlank() && !address2.subThoroughfare.isNullOrBlank()
+    
+    return address1HasStreetInfo && !address2HasStreetInfo
 }
 
 private fun logAddressDetails(address: Address, index: Int) {
@@ -159,10 +202,22 @@ private fun logAddressDetails(address: Address, index: Int) {
 private fun buildFullAddress(address: Address): String {
     val parts = mutableListOf<String>()
     
-    // Build street address
+    // Build street address - handle Dutch format
     val streetParts = mutableListOf<String>()
-    address.subThoroughfare?.trim()?.takeIf { it.isNotEmpty() }?.let { streetParts.add(it) }
-    address.thoroughfare?.trim()?.takeIf { it.isNotEmpty() }?.let { streetParts.add(it) }
+    val subThoroughfare = address.subThoroughfare?.trim()?.takeIf { it.isNotEmpty() }
+    val thoroughfare = address.thoroughfare?.trim()?.takeIf { it.isNotEmpty() }
+    
+    if (thoroughfare != null) {
+        if (subThoroughfare != null) {
+            // For Dutch addresses, format as "Thoroughfare SubThoroughfare" (e.g., "Lijnbaansgracht 234A")
+            streetParts.add("$thoroughfare $subThoroughfare")
+        } else {
+            streetParts.add(thoroughfare)
+        }
+    } else if (subThoroughfare != null) {
+        streetParts.add(subThoroughfare)
+    }
+    
     if (streetParts.isNotEmpty()) {
         parts.add(streetParts.joinToString(" "))
     }
@@ -198,20 +253,33 @@ private fun extractValidVenueName(address: Address): String? {
             "point_of_interest",
             "business_name",
             "place_name",
-            "feature_name"
+            "poi_name",
+            "venue_name"
         ).forEach { key ->
-            extras.getString(key)?.trim()?.takeIf { it.isNotEmpty() }?.let { candidates.add(it) }
+            extras.getString(key)?.trim()?.takeIf { it.isNotEmpty() }?.let { 
+                candidates.add(it)
+                Log.d("AddressUtils", "Found candidate from extras[$key]: $it")
+            }
         }
     }
     
     // Check standard Address fields
-    address.featureName?.trim()?.takeIf { it.isNotEmpty() }?.let { candidates.add(it) }
-    address.premises?.trim()?.takeIf { it.isNotEmpty() }?.let { candidates.add(it) }
+    address.featureName?.trim()?.takeIf { it.isNotEmpty() }?.let { 
+        candidates.add(it)
+        Log.d("AddressUtils", "Found candidate from featureName: $it")
+    }
+    address.premises?.trim()?.takeIf { it.isNotEmpty() }?.let { 
+        candidates.add(it)
+        Log.d("AddressUtils", "Found candidate from premises: $it")
+    }
     
-    Log.d("AddressUtils", "Venue name candidates: $candidates")
+    Log.d("AddressUtils", "All venue name candidates: $candidates")
     
-    // Filter candidates to find valid venue names
-    return candidates.firstOrNull { candidate -> isValidVenueName(candidate, address) }
+    // Filter candidates to find valid venue names - prioritize longer, more specific names
+    val validCandidates = candidates.filter { candidate -> isValidVenueName(candidate, address) }
+    
+    // Return the longest valid candidate (likely to be most specific)
+    return validCandidates.maxByOrNull { it.length }
 }
 
 private fun isValidVenueName(candidate: String, address: Address): Boolean {
@@ -223,8 +291,8 @@ private fun isValidVenueName(candidate: String, address: Address): Boolean {
         return false
     }
     
-    // Must not be purely numeric (street numbers)
-    if (trimmed.matches(Regex("^\\d+[A-Za-z]*$"))) {
+    // Must not be purely numeric (street numbers) - FIXED: better regex
+    if (trimmed.matches(Regex("^\\d+[A-Za-z]?$"))) {
         Log.d("AddressUtils", "Rejecting '$candidate': looks like street number")
         return false
     }
@@ -235,14 +303,14 @@ private fun isValidVenueName(candidate: String, address: Address): Boolean {
     
     if (trimmed.equals(thoroughfare, ignoreCase = true) || 
         trimmed.equals(subThoroughfare, ignoreCase = true)) {
-        Log.d("AddressUtils", "Rejecting '$candidate': matches street components")
+        Log.d("AddressUtils", "Rejecting '$candidate': matches street components (thoroughfare: $thoroughfare, subThoroughfare: $subThoroughfare)")
         return false
     }
     
     // Must not contain obvious address patterns
     val addressPatterns = listOf(
         Regex("^\\d+\\s+\\w+"),  // "123 Main St"
-        Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht|Plein|Singel|Kade)\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht|Plein|Singel|Kade|Laan)\\b", RegexOption.IGNORE_CASE),
         Regex("\\b\\d{4,5}\\s*[A-Z]{0,2}\\b")  // Postal codes
     )
     
@@ -264,6 +332,18 @@ private fun isValidVenueName(candidate: String, address: Address): Boolean {
         return false
     }
     
+    // Additional check: avoid obvious non-venue names
+    val nonVenuePatterns = listOf(
+        Regex("^\\d+$"),  // Pure numbers
+        Regex("^[A-Z]{1,3}\\s*\\d+$"),  // "A 123", "NL 45" etc.
+        Regex("^(North|South|East|West|N|S|E|W)$", RegexOption.IGNORE_CASE)
+    )
+    
+    if (nonVenuePatterns.any { it.matches(trimmed) }) {
+        Log.d("AddressUtils", "Rejecting '$candidate': matches non-venue pattern")
+        return false
+    }
+    
     Log.d("AddressUtils", "Accepting '$candidate' as valid venue name")
     return true
 }
@@ -282,7 +362,7 @@ private fun isLikelyVenueName(text: String): Boolean {
         // Postal code patterns  
         Regex("\\b\\d{4,5}\\s*[A-Z]{0,2}\\b"),  // "1017 PH", "90210"
         // Common address words
-        Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Way|Place|Pl|Court|Ct|Straat|Gracht|Plein|Singel|Kade)\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Way|Place|Pl|Court|Ct|Straat|Gracht|Plein|Singel|Kade|Laan)\\b", RegexOption.IGNORE_CASE),
         // Geographic indicators that usually appear in addresses
         Regex("\\b(North|South|East|West|N|S|E|W|Noord|Zuid|Oost|West)\\s+\\w+", RegexOption.IGNORE_CASE),
     )
@@ -320,7 +400,7 @@ internal fun Address.toSuggestion(): String? {
     }
     
     addIfUseful(thoroughfare?.let { street ->
-        subThoroughfare?.let { number -> "$number $street" } ?: street
+        subThoroughfare?.let { number -> "$street $number" } ?: street
     })
     addIfUseful(locality)
     addIfUseful(subAdminArea)
@@ -358,7 +438,7 @@ internal fun Address.toEventLocationDisplayWithVenueLookup(): EventLocationDispl
 private fun isStreetAddress(text: String): Boolean {
     val trimmed = text.trim()
     return trimmed.matches(Regex("^\\d+\\s*[A-Za-z]*\\s+.+")) || // "123A Main Street"
-           trimmed.contains(Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht|Plein|Singel|Kade)\\b", RegexOption.IGNORE_CASE))
+           trimmed.contains(Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht|Plein|Singel|Kade|Laan)\\b", RegexOption.IGNORE_CASE))
 }
 
 internal fun EventLocationDisplay.mergeWithFallback(fallback: EventLocationDisplay): EventLocationDisplay {
