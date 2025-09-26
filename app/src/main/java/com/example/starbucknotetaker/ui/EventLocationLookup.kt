@@ -23,12 +23,20 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
     val display by produceState(initialValue = fallback, key1 = query, key2 = geocoder) {
         val resolved = withContext(Dispatchers.IO) {
             runCatching {
-                geocoder.getFromLocationName(query, 5)
-                    ?.mapNotNull { candidate ->
-                        candidate.toEventLocationDisplay()
-                    }
+                // First try the enhanced venue lookup
+                val venueResult = lookupVenueAtAddress(geocoder, query)
+                if (venueResult != null) {
+                    listOf(venueResult)
+                } else {
+                    // Fallback to standard geocoding
+                    geocoder.getFromLocationName(query, 5)
+                        ?.mapNotNull { candidate ->
+                            candidate.toEventLocationDisplay()
+                        }
+                }
             }.getOrNull()
         }.orEmpty()
+        
         val prioritized = resolved.firstOrNull { candidate ->
             !candidate.name.equals(fallback.name, ignoreCase = true) ||
                 candidate.address != null
