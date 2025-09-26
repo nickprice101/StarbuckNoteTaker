@@ -257,18 +257,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val pendingBiometricOptInState = rememberUpdatedState(pendingBiometricOptIn)
     val biometricPromptTrigger by biometricOptInReplayGuard.promptTrigger
     val lifecycleOwner = LocalLifecycleOwner.current
-    var awaitingResumeAfterBiometric by remember { mutableStateOf(false) }
-
-    DisposableEffect(lifecycleOwner) {
-        val lifecycle = lifecycleOwner.lifecycle
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                awaitingResumeAfterBiometric = false
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
+    
+    // REMOVED: awaitingResumeAfterBiometric - this was causing the navigation delay
     
     // DEBUG: Navigation state tracking
     var navigationAttempts by remember { mutableStateOf(0) }
@@ -364,15 +354,13 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    LaunchedEffect(pendingUnlockNavigationNoteId, awaitingResumeAfterBiometric) {
+    // FIXED: Immediate navigation without waiting for resume
+    LaunchedEffect(pendingUnlockNavigationNoteId) {
         val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
-        if (awaitingResumeAfterBiometric) {
-            Log.d(
-                BIOMETRIC_LOG_TAG,
-                "DEBUG_NAV: Deferring pending unlock navigation until resume noteId=$noteId"
-            )
-            return@LaunchedEffect
-        }
+        Log.d(
+            BIOMETRIC_LOG_TAG,
+            "DEBUG_NAV: Processing pending unlock navigation immediately for noteId=$noteId"
+        )
         navigatePendingUnlock(
             lifecycle = lifecycleOwner.lifecycle,
             noteViewModel = noteViewModel,
@@ -390,7 +378,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         )
     }
 
-    // ---[ Biometric unlock callback using standard BiometricPrompt pattern ]---
+    // ---[ FIXED: Biometric unlock callback with immediate navigation ]---
     val biometricAuthenticationCallback = remember(noteViewModel) {
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -408,11 +396,18 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                         noteViewModel.markNoteTemporarilyUnlocked(request.noteId)
                         noteViewModel.clearBiometricUnlockRequest()
                         noteViewModel.clearPendingOpenNoteId()
-                        noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
+                        
+                        // FIXED: Navigate immediately instead of setting pendingUnlockNavigationNoteId
+                        Log.d(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Biometric success - navigating immediately to noteId=${request.noteId}")
+                        val success = attemptNavigation(request.noteId, "biometric_success")
+                        if (!success) {
+                            Log.e(BIOMETRIC_LOG_TAG, "DEBUG_NAV: Immediate navigation failed, falling back to pending")
+                            noteViewModel.setPendingUnlockNavigationNoteId(request.noteId)
+                        }
+                        
                         launchedBiometricRequest.value = null
 
-                        val successLog =
-                            "Biometric unlock success for noteId=${request.noteId}"
+                        val successLog = "Biometric unlock success for noteId=${request.noteId}"
                         Log.d(BIOMETRIC_LOG_TAG, successLog)
                         BiometricPromptTestHooks.notifyBiometricLog(successLog)
                     } else {
@@ -559,7 +554,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         }
     }
 
-    // ---[ Only launch biometric unlock prompt if NOT in opt-in flow ]---
+    // ---[ FIXED: Biometric prompt without waiting for resume ]---
     LaunchedEffect(biometricPromptTrigger, biometricUnlockRequest?.token, pendingBiometricOptIn) {
         if (biometricPromptTrigger == 0L) return@LaunchedEffect
         val request = biometricUnlockRequest ?: return@LaunchedEffect
@@ -600,7 +595,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
             )
         } else {
             Log.d(BIOMETRIC_LOG_TAG, "DEBUG_BIO: Calling biometricPrompt.authenticate()")
-            awaitingResumeAfterBiometric = true
+            // REMOVED: awaitingResumeAfterBiometric = true
             biometricPrompt.authenticate(promptInfo)
         }
     }
