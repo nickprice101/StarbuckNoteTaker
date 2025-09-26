@@ -49,8 +49,7 @@ import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
 import com.example.starbucknotetaker.BiometricOptInReplayGuard.ClearAction
 import kotlinx.coroutines.flow.collectLatest
 
-// CRITICAL FIX: Define the missing constant
-private const val BIOMETRIC_LOG_TAG = "BiometricNavigation"
+// REMOVED: Duplicate BIOMETRIC_LOG_TAG definition (using the one from BiometricUnlockRequest.kt)
 
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
