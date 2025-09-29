@@ -29,6 +29,7 @@ class BiometricUnlockActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Don't set content view - keep it minimal
         Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: onCreate called")
         
         val noteId = intent.getLongExtra(EXTRA_NOTE_ID, -1L)
@@ -42,10 +43,8 @@ class BiometricUnlockActivity : AppCompatActivity() {
         
         Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Starting biometric authentication for noteId=$noteId")
         
-        // Post the biometric authentication to ensure the activity is fully created
-        window.decorView.post {
-            startBiometricAuthentication(noteId, noteTitle)
-        }
+        // Start biometric authentication immediately
+        startBiometricAuthentication(noteId, noteTitle)
     }
     
     private fun startBiometricAuthentication(noteId: Long, noteTitle: String) {
