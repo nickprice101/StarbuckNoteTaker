@@ -67,7 +67,12 @@ class MainActivity : AppCompatActivity() {
                 
                 when {
                     success && unlockedNoteId != -1L -> {
-                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock SUCCESS - navigating to noteId=$unlockedNoteId")
+                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock SUCCESS - marking note unlocked and navigating to noteId=$unlockedNoteId")
+                        
+                        // CRITICAL FIX: Mark the note as unlocked in THIS ViewModel instance
+                        noteViewModel.markNoteTemporarilyUnlocked(unlockedNoteId)
+                        
+                        // Navigate to the note detail screen
                         navController.navigate("detail/$unlockedNoteId") {
                             launchSingleTop = true
                         }
@@ -356,7 +361,7 @@ fun AppContent(
                 onAddNote = { navController.navigate("add") },
                 onAddEvent = { navController.navigate("add_event") },
                 onOpenNote = { note ->
-                    Log.d(BIOMETRIC_LOG_TAG, "NOTE_TAP: noteId=${note.id} locked=${note.isLocked}")
+                    Log.d(BIOMETRIC_LOG_TAG, "NOTE_TAP: noteId=${note.id} locked=${note.isLocked} temporarilyUnlocked=${noteViewModel.isNoteTemporarilyUnlocked(note.id)}")
                     
                     if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                         if (canUseBiometric) {
@@ -367,7 +372,7 @@ fun AppContent(
                             noteViewModel.setPendingOpenNoteId(note.id)
                         }
                     } else {
-                        Log.d(BIOMETRIC_LOG_TAG, "NOTE_TAP: Direct navigation to unlocked note")
+                        Log.d(BIOMETRIC_LOG_TAG, "NOTE_TAP: Direct navigation to ${if (note.isLocked) "temporarily unlocked" else "unlocked"} note")
                         navController.navigate("detail/${note.id}") {
                             launchSingleTop = true
                         }
