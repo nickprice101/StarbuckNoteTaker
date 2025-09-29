@@ -56,7 +56,7 @@
         <activity
             android:name=".BiometricUnlockActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:theme="@style/Theme.StarbuckNoteTaker.Transparent"
             android:launchMode="singleTask" />
         <provider
             android:name="androidx.core.content.FileProvider"
