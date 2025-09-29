@@ -305,33 +305,35 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
         Log.d(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Trigger #$navigationTrigger for noteId=$targetId")
         
         // Multiple retry attempts with delays
-        repeat(5) { attempt ->
+        var navigationSucceeded = false
+        for (attempt in 1..5) {
             try {
                 val note = noteViewModel.getNoteById(targetId)
                 if (note != null) {
-                    Log.d(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Attempt #${attempt + 1} - navigating to noteId=$targetId")
+                    Log.d(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Attempt #$attempt - navigating to noteId=$targetId")
                     navControllerRef.value.navigate("detail/$targetId") {
                         launchSingleTop = true
                         // Clear the back stack to prevent conflicts
                         popUpTo("list") { inclusive = false }
                     }
                     Log.d(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Navigation command issued successfully")
-                    break // Success, exit retry loop
+                    navigationSucceeded = true
+                    return@LaunchedEffect // Success, exit early
                 } else {
                     Log.e(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Note not found for noteId=$targetId")
                     Toast.makeText(context, "Note not found", Toast.LENGTH_SHORT).show()
-                    break
+                    return@LaunchedEffect
                 }
             } catch (e: Exception) {
-                Log.e(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Attempt #${attempt + 1} failed", e)
-                if (attempt == 4) { // Last attempt
+                Log.e(BIOMETRIC_LOG_TAG, "NUCLEAR_NAVIGATION: Attempt #$attempt failed", e)
+                if (attempt == 5) { // Last attempt
                     Toast.makeText(context, "Navigation failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
                 delay(100) // Wait before retry
             }
         }
         
-        // Reset after processing
+        // Reset after processing (in finally block equivalent)
         navigationTargetId = null
         navigationTrigger = 0
     }
