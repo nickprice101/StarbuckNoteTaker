@@ -41,27 +41,24 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
         val potentialVenueName = lines.first()
         val addressParts = lines.drop(1)
         
-        // Check if first line looks like a venue name (not a street address)
-        if (isLikelyVenueName(potentialVenueName)) {
+        // Always prefer the first line if it could be a venue name
+        if (potentialVenueName.isNotEmpty()) {
             val address = addressParts.joinToString(", ").takeIf { it.isNotEmpty() }
             return EventLocationDisplay(name = potentialVenueName, address = address)
         }
     }
     
-    // For single line entries, try to identify venue name vs street address
+    // For single line entries, check if the first token could be a venue name
     val firstToken = tokens.first()
     
-    // If first token looks like a venue name, use it as primary
-    // This is key - prioritize venue-like names over street addresses
-    if (isLikelyVenueName(firstToken) && !looksLikeStreetNumber(firstToken)) {
+    // Simple check: if it doesn't start with a number and isn't obviously an address, treat as venue
+    if (!firstToken.matches(Regex("^\\d+.*")) && 
+        !firstToken.contains(Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht|Plein|Singel|Kade)\\b", RegexOption.IGNORE_CASE)) &&
+        firstToken.length > 1) {
+        
         val remainingTokens = tokens.drop(1)
         val address = remainingTokens.joinToString(", ").takeIf { it.isNotEmpty() }
         return EventLocationDisplay(name = firstToken, address = address)
-    }
-    
-    // If the entire query looks like a single venue name (no commas, not an address pattern)
-    if (tokens.size == 1 && isLikelyVenueName(firstToken)) {
-        return EventLocationDisplay(name = firstToken, address = null)
     }
     
     // Fallback to original behavior
@@ -73,31 +70,17 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
 }
 
 /**
- * Check if a string looks like a street number (e.g., "234A", "123")
- */
-private fun looksLikeStreetNumber(text: String): Boolean {
-    return text.matches(Regex("^\\d+[A-Za-z]*$"))
-}
-
-/**
- * Enhanced venue lookup that preserves the original venue name when geocoding doesn't find it
+ * Simplified venue lookup that tries to find actual venue/POI names
  */
 internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, originalQuery: String): EventLocationDisplay? {
     return withContext(Dispatchers.IO) {
         try {
             Log.d("AddressUtils", "Looking up venue for query: $originalQuery")
             
-            // Extract potential venue name from the original query
-            val potentialVenueName = extractPotentialVenueFromQuery(originalQuery)
-            Log.d("AddressUtils", "Potential venue name from query: $potentialVenueName")
-            
-            // First try direct geocoding of the original query
             val addresses = geocoder.getFromLocationName(originalQuery, 10) ?: return@withContext null
             Log.d("AddressUtils", "Found ${addresses.size} geocoded results")
             
-            // Look through all results for venue names, prioritizing matches to the query
-            val candidatesWithScores = mutableListOf<Pair<EventLocationDisplay, Double>>()
-            
+            // Look for actual venue/POI names in the results
             for ((index, geocodedAddress) in addresses.withIndex()) {
                 Log.d("AddressUtils", "Checking result $index: ${geocodedAddress.getAddressLine(0)}")
                 logAddressDetails(geocodedAddress, index)
@@ -105,133 +88,18 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, originalQuery: Str
                 val venueName = extractValidVenueName(geocodedAddress)
                 if (venueName != null) {
                     val fullAddress = buildFullAddress(geocodedAddress)
-                    val candidate = EventLocationDisplay(name = venueName, address = fullAddress)
-                    
-                    // Calculate similarity score
-                    val score = calculateVenueMatchScore(venueName, originalQuery, potentialVenueName)
-                    candidatesWithScores.add(candidate to score)
-                    
-                    Log.d("AddressUtils", "Found venue '$venueName' with score: $score")
+                    Log.d("AddressUtils", "Found valid venue name: $venueName")
+                    return@withContext EventLocationDisplay(name = venueName, address = fullAddress)
                 }
             }
             
-            // If we found candidates with excellent scores, return the best match
-            val bestGeocodedMatch = candidatesWithScores.maxByOrNull { it.second }
-            if (bestGeocodedMatch != null && bestGeocodedMatch.second > 0.8) {
-                Log.d("AddressUtils", "Using geocoded venue: ${bestGeocodedMatch.first.name}")
-                return@withContext bestGeocodedMatch.first
-            }
-            
-            // If we have a potential venue name from the query and geocoding results,
-            // use the venue name with the best geocoded address
-            if (potentialVenueName != null && addresses.isNotEmpty()) {
-                val bestAddress = addresses.first()
-                val fullAddress = buildFullAddress(bestAddress)
-                Log.d("AddressUtils", "Using extracted venue name '$potentialVenueName' with geocoded address")
-                return@withContext EventLocationDisplay(
-                    name = potentialVenueName,
-                    address = fullAddress.takeIf { it.isNotEmpty() }
-                )
-            }
-            
-            Log.d("AddressUtils", "No venue enhancement possible for query: $originalQuery")
+            Log.d("AddressUtils", "No venue name found in geocoding results")
             null
         } catch (e: Exception) {
             Log.e("AddressUtils", "Failed to lookup venue for query: $originalQuery", e)
             null
         }
     }
-}
-
-/**
- * Extracts potential venue name from the original user query
- */
-private fun extractPotentialVenueFromQuery(query: String): String? {
-    // First try to get the entire query if it's a single venue name
-    val trimmedQuery = query.trim()
-    if (isLikelyVenueName(trimmedQuery) && !trimmedQuery.contains(',') && !trimmedQuery.contains('\n')) {
-        return trimmedQuery
-    }
-    
-    // Otherwise, split and find the first venue-like token
-    val tokens = query.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
-    
-    return tokens.firstOrNull { token ->
-        isLikelyVenueName(token) && !looksLikeStreetNumber(token) && token.length > 2
-    }
-}
-
-/**
- * Calculates how well a venue name matches the original search query
- */
-private fun calculateVenueMatchScore(
-    venueName: String, 
-    originalQuery: String, 
-    potentialVenueName: String?
-): Double {
-    val venue = venueName.lowercase().trim()
-    val query = originalQuery.lowercase().trim()
-    
-    // Perfect match with full query
-    if (venue == query) return 1.0
-    
-    // Perfect match with extracted venue name
-    if (potentialVenueName != null) {
-        val potential = potentialVenueName.lowercase().trim()
-        if (venue == potential) return 0.95
-    }
-    
-    // Check if venue name is contained in or contains the query
-    when {
-        venue.contains(query) -> return 0.9
-        query.contains(venue) -> return 0.9
-    }
-    
-    // Check against potential venue name
-    if (potentialVenueName != null) {
-        val potential = potentialVenueName.lowercase().trim()
-        when {
-            venue.contains(potential) -> return 0.85
-            potential.contains(venue) -> return 0.85
-        }
-    }
-    
-    // Calculate Levenshtein distance similarity
-    val maxLen = maxOf(venue.length, query.length)
-    if (maxLen == 0) return 0.0
-    
-    val distance = levenshteinDistance(venue, query)
-    val similarity = 1.0 - (distance.toDouble() / maxLen)
-    
-    return similarity
-}
-
-/**
- * Calculates Levenshtein distance between two strings
- */
-private fun levenshteinDistance(str1: String, str2: String): Int {
-    val len1 = str1.length
-    val len2 = str2.length
-    val matrix = Array(len1 + 1) { IntArray(len2 + 1) }
-    
-    for (i in 0..len1) {
-        matrix[i][0] = i
-    }
-    for (j in 0..len2) {
-        matrix[0][j] = j
-    }
-    
-    for (i in 1..len1) {
-        for (j in 1..len2) {
-            val cost = if (str1[i - 1] == str2[j - 1]) 0 else 1
-            matrix[i][j] = min(
-                min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
-                matrix[i - 1][j - 1] + cost
-            )
-        }
-    }
-    
-    return matrix[len1][len2]
 }
 
 private fun logAddressDetails(address: Address, index: Int) {
@@ -320,8 +188,8 @@ private fun isValidVenueName(candidate: String, address: Address): Boolean {
         return false
     }
     
-    // Must not be purely numeric or street number-like
-    if (looksLikeStreetNumber(trimmed)) {
+    // Must not be purely numeric (street numbers)
+    if (trimmed.matches(Regex("^\\d+[A-Za-z]*$"))) {
         Log.d("AddressUtils", "Rejecting '$candidate': looks like street number")
         return false
     }
@@ -363,51 +231,6 @@ private fun isValidVenueName(candidate: String, address: Address): Boolean {
     
     Log.d("AddressUtils", "Accepting '$candidate' as valid venue name")
     return true
-}
-
-/**
- * Attempts to determine if a string looks like a venue/place name rather than a street address
- */
-private fun isLikelyVenueName(text: String): Boolean {
-    val trimmed = text.trim()
-    if (trimmed.isEmpty()) return false
-    
-    // Reject obvious street numbers first
-    if (looksLikeStreetNumber(trimmed)) {
-        return false
-    }
-    
-    // Common patterns that suggest this is NOT a venue name (i.e., it's likely an address)
-    val addressPatterns = listOf(
-        // Street number patterns
-        Regex("^\\d+\\s+\\w+"),  // "123 Main St", "234A Some Street"
-        // Postal code patterns  
-        Regex("\\b\\d{4,5}\\s*[A-Z]{0,2}\\b"),  // "1017 PH", "90210"
-        // Common address words
-        Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Way|Place|Pl|Court|Ct|Straat|Gracht|Plein|Singel|Kade)\\b", RegexOption.IGNORE_CASE),
-        // Geographic indicators that usually appear in addresses
-        Regex("\\b(North|South|East|West|N|S|E|W|Noord|Zuid|Oost|West)\\s+\\w+", RegexOption.IGNORE_CASE),
-    )
-    
-    // If any address pattern matches, it's likely an address, not a venue name
-    if (addressPatterns.any { it.containsMatchIn(trimmed) }) {
-        return false
-    }
-    
-    // Positive indicators that this might be a venue name
-    val venueIndicators = listOf(
-        // Single word or short phrases (venue names are often concise)
-        trimmed.split("\\s+".toRegex()).size <= 3,
-        // Proper capitalization (venue names are usually title case)
-        trimmed.split("\\s+".toRegex()).all { word -> 
-            word.isNotEmpty() && (word[0].isUpperCase() || !word[0].isLetter())
-        },
-        // Not purely numbers
-        !trimmed.matches(Regex("^\\d+$"))
-    )
-    
-    // If it has positive venue indicators and no negative address patterns, treat as venue
-    return venueIndicators.all { it }
 }
 
 internal fun Address.toSuggestion(): String? {
