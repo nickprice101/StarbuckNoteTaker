@@ -23,7 +23,7 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
     val display by produceState(initialValue = fallback, key1 = query, key2 = geocoder) {
         val resolved = withContext(Dispatchers.IO) {
             runCatching {
-                // First try the enhanced venue lookup
+                // First try the enhanced venue lookup with the original query
                 val venueResult = lookupVenueAtAddress(geocoder, query)
                 if (venueResult != null) {
                     listOf(venueResult)
