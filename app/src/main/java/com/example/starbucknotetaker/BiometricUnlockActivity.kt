@@ -5,13 +5,11 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 
 class BiometricUnlockActivity : AppCompatActivity() {
-    private val noteViewModel: NoteViewModel by viewModels()
     
     companion object {
         const val EXTRA_NOTE_ID = "extra_note_id"
@@ -29,7 +27,6 @@ class BiometricUnlockActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Don't set content view - keep it minimal
         Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: onCreate called")
         
         val noteId = intent.getLongExtra(EXTRA_NOTE_ID, -1L)
@@ -54,10 +51,9 @@ class BiometricUnlockActivity : AppCompatActivity() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication SUCCESS for noteId=$noteId")
                     
-                    // Mark note as temporarily unlocked
-                    noteViewModel.markNoteTemporarilyUnlocked(noteId)
+                    // CRITICAL FIX: Don't use ViewModel here - pass the unlock result back to MainActivity
+                    // The MainActivity will handle marking the note as unlocked in its own ViewModel instance
                     
-                    // Navigate back to MainActivity with success
                     val resultIntent = Intent().apply {
                         putExtra("biometric_unlock_success", true)
                         putExtra("unlocked_note_id", noteId)
