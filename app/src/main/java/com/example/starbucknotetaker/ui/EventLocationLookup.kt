@@ -21,73 +21,98 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
     val context = LocalContext.current
     val geocoder = remember(context) { Geocoder(context, Locale.getDefault()) }
     val display by produceState(initialValue = fallback, key1 = query, key2 = geocoder) {
-        val resolved = withContext(Dispatchers.IO) {
+        val result = withContext(Dispatchers.IO) {
             runCatching {
-                // Try the enhanced venue lookup first
-                val venueResult = lookupVenueAtAddress(geocoder, query)
-                if (venueResult != null) {
-                    return@runCatching listOf(venueResult)
-                }
+                // Check if the original query looks like a venue name
+                val originalVenueName = extractVenueNameFromQuery(query)
                 
-                // If venue lookup didn't work, try standard geocoding
+                // Get geocoded address information
                 val addresses = geocoder.getFromLocationName(query, 5) ?: emptyList()
-                val geocodedResults = addresses.mapNotNull { candidate ->
-                    candidate.toEventLocationDisplay()
-                }
                 
-                // If we got geocoded results but none are good matches, and our fallback 
-                // has a likely venue name, prefer the fallback
-                if (geocodedResults.isNotEmpty()) {
-                    geocodedResults
-                } else {
-                    // No good geocoding results, stick with fallback
-                    emptyList()
-                }
-            }.getOrNull()
-        }.orEmpty()
-        
-        if (resolved.isNotEmpty()) {
-            // We got some enhanced results, find the best one
-            val prioritized = resolved.firstOrNull { candidate ->
-                // Prefer results that don't just match the fallback name exactly
-                !candidate.name.equals(fallback.name, ignoreCase = true) ||
-                    candidate.address != null
-            }
-            val best = prioritized ?: resolved.firstOrNull()
-            value = best?.mergeWithFallback(fallback) ?: fallback
-        } else {
-            // No enhanced results, but let's check if our fallback has a good venue name
-            // If the fallback identified a likely venue name, keep it as-is
-            if (fallback.name.isNotEmpty() && fallback.name.length > 2 && 
-                !fallback.name.matches(Regex("^\\d+.*")) && // Not starting with numbers
-                !fallback.name.contains(Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht)\\b", RegexOption.IGNORE_CASE))) {
-                
-                // Try to get a better address by geocoding the query
-                val addressOnly = withContext(Dispatchers.IO) {
-                    runCatching {
-                        geocoder.getFromLocationName(query, 1)?.firstOrNull()?.let { address ->
-                            buildFullAddressFromGeocoded(address)
-                        }
-                    }.getOrNull()
-                }
-                
-                value = if (addressOnly != null) {
+                if (originalVenueName != null && addresses.isNotEmpty()) {
+                    // Use the original venue name with the best geocoded address
+                    val bestAddress = addresses.first()
+                    val fullAddress = buildAddressFromGeocoded(bestAddress)
+                    
                     EventLocationDisplay(
-                        name = fallback.name,
-                        address = addressOnly.takeIf { !it.equals(fallback.name, ignoreCase = true) }
+                        name = originalVenueName,
+                        address = fullAddress.takeIf { it.isNotEmpty() }
                     )
                 } else {
-                    fallback
+                    // Try to find venue names in geocoded results
+                    val venueResult = lookupVenueAtAddress(geocoder, query)
+                    if (venueResult != null) {
+                        venueResult
+                    } else {
+                        // Fallback to standard geocoding
+                        addresses.mapNotNull { it.toEventLocationDisplay() }.firstOrNull()
+                    }
                 }
-            } else {
-                value = fallback
-            }
+            }.getOrNull()
         }
+        
+        value = result ?: fallback
     }
     return display
 }
 
-private fun buildFullAddressFromGeocoded(address: android.location.Address): String {
+/**
+ * Extracts a venue name from the user's query if it looks like one
+ */
+private fun extractVenueNameFromQuery(query: String): String? {
+    val trimmed = query.trim()
+    
+    // Split by common separators and get the first part
+    val parts = trimmed.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+    val firstPart = parts.firstOrNull() ?: return null
+    
+    // Check if the first part looks like a venue name
+    return if (isVenueNameLike(firstPart)) {
+        firstPart
+    } else {
+        // If the entire query is a single word/phrase and looks like a venue, use it
+        if (parts.size == 1 && isVenueNameLike(trimmed)) {
+            trimmed
+        } else {
+            null
+        }
+    }
+}
+
+/**
+ * Determines if a string looks like a venue name rather than an address component
+ */
+private fun isVenueNameLike(text: String): Boolean {
+    val trimmed = text.trim()
+    
+    // Must be at least 2 characters
+    if (trimmed.length < 2) return false
+    
+    // Must not be purely numeric (street numbers)
+    if (trimmed.matches(Regex("^\\d+[A-Za-z]*$"))) return false
+    
+    // Must not start with a number followed by a space (street addresses)
+    if (trimmed.matches(Regex("^\\d+\\s+.*"))) return false
+    
+    // Must not contain obvious address keywords
+    val addressKeywords = listOf(
+        "street", "st", "avenue", "ave", "road", "rd", "lane", "ln", 
+        "drive", "dr", "boulevard", "blvd", "straat", "gracht", 
+        "plein", "singel", "kade", "way", "place", "pl", "court", "ct"
+    )
+    
+    if (addressKeywords.any { keyword -> 
+        trimmed.contains(keyword, ignoreCase = true) 
+    }) return false
+    
+    // Must not be a postal code pattern
+    if (trimmed.matches(Regex("\\b\\d{4,5}\\s*[A-Z]{0,2}\\b"))) return false
+    
+    // Looks like a venue name
+    return true
+}
+
+private fun buildAddressFromGeocoded(address: android.location.Address): String {
     val parts = mutableListOf<String>()
     
     // Build street address
