@@ -7,12 +7,12 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -25,13 +25,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -50,9 +46,47 @@ import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
+    private var pendingBiometricNoteId: Long? = null
+    private lateinit var navController: NavHostController
 
     @VisibleForTesting
     internal fun getNoteViewModelForTest(): NoteViewModel = noteViewModel
+
+    private val biometricUnlockLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric result - resultCode=${result.resultCode}")
+        
+        when (result.resultCode) {
+            RESULT_OK -> {
+                val data = result.data
+                val success = data?.getBooleanExtra("biometric_unlock_success", false) ?: false
+                val usePinInstead = data?.getBooleanExtra("use_pin_instead", false) ?: false
+                val unlockedNoteId = data?.getLongExtra("unlocked_note_id", -1L) ?: -1L
+                val pinNoteId = data?.getLongExtra("note_id_for_pin", -1L) ?: -1L
+                
+                when {
+                    success && unlockedNoteId != -1L -> {
+                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock SUCCESS - navigating to noteId=$unlockedNoteId")
+                        navController.navigate("detail/$unlockedNoteId") {
+                            launchSingleTop = true
+                        }
+                    }
+                    usePinInstead && pinNoteId != -1L -> {
+                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: User chose PIN - setting pendingOpenNoteId=$pinNoteId")
+                        noteViewModel.setPendingOpenNoteId(pinNoteId)
+                    }
+                    else -> {
+                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock cancelled or failed")
+                    }
+                }
+            }
+            RESULT_CANCELED -> {
+                Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock was cancelled")
+            }
+        }
+        pendingBiometricNoteId = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,14 +96,18 @@ class MainActivity : AppCompatActivity() {
         val pinManager = PinManager(applicationContext)
         setContent {
             StarbuckNoteTakerTheme {
-                val navController = rememberNavController()
-                AppContent(navController, noteViewModel, pinManager)
+                navController = rememberNavController()
+                AppContent(navController, noteViewModel, pinManager) { noteId, noteTitle ->
+                    // Callback for starting biometric unlock
+                    pendingBiometricNoteId = noteId
+                    val biometricIntent = BiometricUnlockActivity.createIntent(this, noteId, noteTitle)
+                    biometricUnlockLauncher.launch(biometricIntent)
+                }
             }
         }
 
         handleReminderIntent(intent)
         handleShareIntent(intent)
-        handleBiometricNavigationIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -77,29 +115,6 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         handleReminderIntent(intent)
         handleShareIntent(intent)
-        handleBiometricNavigationIntent(intent)
-    }
-
-    private fun handleBiometricNavigationIntent(intent: Intent?) {
-        intent ?: return
-        
-        // Handle navigation from BiometricUnlockActivity
-        val navigateToNote = intent.getLongExtra("navigate_to_note", -1L)
-        if (navigateToNote != -1L) {
-            Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Received navigation intent for noteId=$navigateToNote")
-            noteViewModel.setPendingUnlockNavigationNoteId(navigateToNote)
-            intent.removeExtra("navigate_to_note")
-            return
-        }
-        
-        // Handle PIN fallback from BiometricUnlockActivity
-        val showPinForNote = intent.getLongExtra("show_pin_for_note", -1L)
-        if (showPinForNote != -1L) {
-            Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Received PIN request for noteId=$showPinForNote")
-            noteViewModel.setPendingOpenNoteId(showPinForNote)
-            intent.removeExtra("show_pin_for_note")
-            return
-        }
     }
 
     private fun handleReminderIntent(intent: Intent?) {
@@ -249,44 +264,30 @@ class MainActivity : AppCompatActivity() {
 }
 
 @Composable
-fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, pinManager: PinManager) {
+fun AppContent(
+    navController: NavHostController, 
+    noteViewModel: NoteViewModel, 
+    pinManager: PinManager,
+    onStartBiometricUnlock: (Long, String) -> Unit
+) {
     val context = LocalContext.current
-    val activity = remember(context) { context as AppCompatActivity }
-    val executor = remember(activity) { ContextCompat.getMainExecutor(activity) }
-    val biometricManager = remember(activity) { BiometricManager.from(activity) }
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
-    val pendingUnlockNavigationNoteId by noteViewModel.pendingUnlockNavigationNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
     var pendingUnlockNoteId by remember { mutableStateOf<Long?>(null) }
     var biometricsEnabled by remember { mutableStateOf(pinManager.isBiometricEnabled()) }
     var showBiometricOptIn by remember { mutableStateOf(false) }
-    val lifecycleOwner = LocalLifecycleOwner.current
 
+    val biometricManager = remember { BiometricManager.from(context) }
     val biometricStatus = biometricManager.canAuthenticate(
         BiometricManager.Authenticators.BIOMETRIC_STRONG or
             BiometricManager.Authenticators.BIOMETRIC_WEAK
     )
     val canUseBiometric = biometricsEnabled && biometricStatus == BiometricManager.BIOMETRIC_SUCCESS
     val startDestination = if (isPinSet) "list" else "pin_setup"
-
-    // Handle direct navigation from BiometricUnlockActivity
-    LaunchedEffect(pendingUnlockNavigationNoteId) {
-        val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
-        Log.d(BIOMETRIC_LOG_TAG, "AppContent: Direct navigation to noteId=$noteId")
-        
-        val note = noteViewModel.getNoteById(noteId)
-        if (note != null) {
-            navController.navigate("detail/$noteId") {
-                launchSingleTop = true
-                popUpTo("list") { inclusive = false }
-            }
-            noteViewModel.clearPendingUnlockNavigationNoteId()
-        }
-    }
 
     LaunchedEffect(isPinSet) {
         if (!isPinSet) {
@@ -360,8 +361,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     if (note.isLocked && !noteViewModel.isNoteTemporarilyUnlocked(note.id)) {
                         if (canUseBiometric) {
                             Log.d(BIOMETRIC_LOG_TAG, "NOTE_TAP: Starting BiometricUnlockActivity for noteId=${note.id}")
-                            val biometricIntent = BiometricUnlockActivity.createIntent(context, note.id, note.title)
-                            context.startActivity(biometricIntent)
+                            onStartBiometricUnlock(note.id, note.title)
                         } else {
                             Log.d(BIOMETRIC_LOG_TAG, "NOTE_TAP: Starting PIN unlock for noteId=${note.id}")
                             noteViewModel.setPendingOpenNoteId(note.id)
@@ -531,8 +531,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                     Log.d(BIOMETRIC_LOG_TAG, "PIN_DIALOG: Biometric requested")
                     noteViewModel.clearPendingOpenNoteId()
                     if (canUseBiometric) {
-                        val biometricIntent = BiometricUnlockActivity.createIntent(context, noteId, note.title)
-                        context.startActivity(biometricIntent)
+                        onStartBiometricUnlock(noteId, note.title)
                     }
                 },
                 onDismiss = { 
