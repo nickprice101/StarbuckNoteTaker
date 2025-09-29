@@ -46,7 +46,6 @@ import com.example.starbucknotetaker.ui.PinEnterScreen
 import com.example.starbucknotetaker.ui.PinSetupScreen
 import com.example.starbucknotetaker.ui.SettingsScreen
 import com.example.starbucknotetaker.ui.StarbuckNoteTakerTheme
-import com.example.starbucknotetaker.BiometricOptInReplayGuard.ClearAction
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
@@ -88,7 +87,7 @@ class MainActivity : AppCompatActivity() {
         val navigateToNote = intent.getLongExtra("navigate_to_note", -1L)
         if (navigateToNote != -1L) {
             Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Received navigation intent for noteId=$navigateToNote")
-            noteViewModel.setDirectNavigationNoteId(navigateToNote)
+            noteViewModel.setPendingUnlockNavigationNoteId(navigateToNote)
             intent.removeExtra("navigate_to_note")
             return
         }
@@ -258,7 +257,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
-    val directNavigationNoteId by noteViewModel.directNavigationNoteId.collectAsState()
+    val pendingUnlockNavigationNoteId by noteViewModel.pendingUnlockNavigationNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val isPinSet = pinManager.isPinSet()
     var hasLoadedInitialPin by remember { mutableStateOf(false) }
@@ -275,8 +274,8 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
     val startDestination = if (isPinSet) "list" else "pin_setup"
 
     // Handle direct navigation from BiometricUnlockActivity
-    LaunchedEffect(directNavigationNoteId) {
-        val noteId = directNavigationNoteId ?: return@LaunchedEffect
+    LaunchedEffect(pendingUnlockNavigationNoteId) {
+        val noteId = pendingUnlockNavigationNoteId ?: return@LaunchedEffect
         Log.d(BIOMETRIC_LOG_TAG, "AppContent: Direct navigation to noteId=$noteId")
         
         val note = noteViewModel.getNoteById(noteId)
@@ -285,7 +284,7 @@ fun AppContent(navController: NavHostController, noteViewModel: NoteViewModel, p
                 launchSingleTop = true
                 popUpTo("list") { inclusive = false }
             }
-            noteViewModel.clearDirectNavigationNoteId()
+            noteViewModel.clearPendingUnlockNavigationNoteId()
         }
     }
 
