@@ -46,8 +46,9 @@ import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
     private val noteViewModel: NoteViewModel by viewModels()
-    private var pendingBiometricNoteId: Long? = null
-    private lateinit var navController: NavHostController
+    
+    // CRITICAL FIX: Use a state variable instead of trying to navigate directly in callback
+    private var pendingBiometricNavigationNoteId: Long? = null
 
     @VisibleForTesting
     internal fun getNoteViewModelForTest(): NoteViewModel = noteViewModel
@@ -67,15 +68,13 @@ class MainActivity : AppCompatActivity() {
                 
                 when {
                     success && unlockedNoteId != -1L -> {
-                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock SUCCESS - marking note unlocked and navigating to noteId=$unlockedNoteId")
+                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock SUCCESS - marking note unlocked and preparing navigation to noteId=$unlockedNoteId")
                         
                         // CRITICAL FIX: Mark the note as unlocked in THIS ViewModel instance
                         noteViewModel.markNoteTemporarilyUnlocked(unlockedNoteId)
                         
-                        // Navigate to the note detail screen
-                        navController.navigate("detail/$unlockedNoteId") {
-                            launchSingleTop = true
-                        }
+                        // CRITICAL FIX: Set pending navigation instead of direct navigation
+                        pendingBiometricNavigationNoteId = unlockedNoteId
                     }
                     usePinInstead && pinNoteId != -1L -> {
                         Log.d(BIOMETRIC_LOG_TAG, "MainActivity: User chose PIN - setting pendingOpenNoteId=$pinNoteId")
@@ -90,7 +89,6 @@ class MainActivity : AppCompatActivity() {
                 Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Biometric unlock was cancelled")
             }
         }
-        pendingBiometricNoteId = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,11 +99,23 @@ class MainActivity : AppCompatActivity() {
         val pinManager = PinManager(applicationContext)
         setContent {
             StarbuckNoteTakerTheme {
-                navController = rememberNavController()
+                val navController = rememberNavController()
+                
+                // CRITICAL FIX: Handle pending biometric navigation in Compose context
+                LaunchedEffect(pendingBiometricNavigationNoteId) {
+                    val noteId = pendingBiometricNavigationNoteId
+                    if (noteId != null) {
+                        Log.d(BIOMETRIC_LOG_TAG, "MainActivity: Executing pending navigation to noteId=$noteId")
+                        navController.navigate("detail/$noteId") {
+                            launchSingleTop = true
+                        }
+                        pendingBiometricNavigationNoteId = null
+                    }
+                }
+                
                 AppContent(navController, noteViewModel, pinManager) { noteId, noteTitle ->
                     // Callback for starting biometric unlock
-                    pendingBiometricNoteId = noteId
-                    val biometricIntent = BiometricUnlockActivity.createIntent(this, noteId, noteTitle)
+                    val biometricIntent = BiometricUnlockActivity.createIntent(this@MainActivity, noteId, noteTitle)
                     biometricUnlockLauncher.launch(biometricIntent)
                 }
             }
