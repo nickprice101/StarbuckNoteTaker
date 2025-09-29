@@ -7,7 +7,6 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 
@@ -22,12 +21,15 @@ class BiometricUnlockActivity : AppCompatActivity() {
             return Intent(context, BiometricUnlockActivity::class.java).apply {
                 putExtra(EXTRA_NOTE_ID, noteId)
                 putExtra(EXTRA_NOTE_TITLE, noteTitle)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: onCreate called")
         
         val noteId = intent.getLongExtra(EXTRA_NOTE_ID, -1L)
         val noteTitle = intent.getStringExtra(EXTRA_NOTE_TITLE) ?: "Note"
@@ -39,62 +41,76 @@ class BiometricUnlockActivity : AppCompatActivity() {
         }
         
         Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Starting biometric authentication for noteId=$noteId")
-        startBiometricAuthentication(noteId, noteTitle)
+        
+        // Post the biometric authentication to ensure the activity is fully created
+        window.decorView.post {
+            startBiometricAuthentication(noteId, noteTitle)
+        }
     }
     
     private fun startBiometricAuthentication(noteId: Long, noteTitle: String) {
-        val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication SUCCESS for noteId=$noteId")
-                
-                // Mark note as temporarily unlocked
-                noteViewModel.markNoteTemporarilyUnlocked(noteId)
-                
-                // Navigate directly to note detail using Intent
-                val detailIntent = Intent(this@BiometricUnlockActivity, MainActivity::class.java).apply {
-                    putExtra("navigate_to_note", noteId)
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        try {
+            val executor = ContextCompat.getMainExecutor(this)
+            val biometricPrompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication SUCCESS for noteId=$noteId")
+                    
+                    // Mark note as temporarily unlocked
+                    noteViewModel.markNoteTemporarilyUnlocked(noteId)
+                    
+                    // Navigate back to MainActivity with success
+                    val resultIntent = Intent().apply {
+                        putExtra("biometric_unlock_success", true)
+                        putExtra("unlocked_note_id", noteId)
+                    }
+                    setResult(RESULT_OK, resultIntent)
+                    
+                    Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Finishing with success result")
+                    finish()
                 }
                 
-                Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Starting MainActivity with noteId=$noteId")
-                startActivity(detailIntent)
-                finish()
-            }
-            
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication ERROR code=$errorCode message=\"$errString\"")
-                
-                when (errorCode) {
-                    BiometricPrompt.ERROR_NEGATIVE_BUTTON,
-                    BiometricPrompt.ERROR_USER_CANCELED -> {
-                        // User chose to use PIN instead or canceled
-                        val mainIntent = Intent(this@BiometricUnlockActivity, MainActivity::class.java).apply {
-                            putExtra("show_pin_for_note", noteId)
-                            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication ERROR code=$errorCode message=\"$errString\"")
+                    
+                    when (errorCode) {
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+                        BiometricPrompt.ERROR_USER_CANCELED -> {
+                            // User chose to use PIN instead
+                            val resultIntent = Intent().apply {
+                                putExtra("biometric_unlock_success", false)
+                                putExtra("use_pin_instead", true)
+                                putExtra("note_id_for_pin", noteId)
+                            }
+                            setResult(RESULT_OK, resultIntent)
                         }
-                        startActivity(mainIntent)
-                        finish()
+                        else -> {
+                            // Other errors
+                            Toast.makeText(this@BiometricUnlockActivity, errString, Toast.LENGTH_LONG).show()
+                            setResult(RESULT_CANCELED)
+                        }
                     }
-                    else -> {
-                        Toast.makeText(this@BiometricUnlockActivity, errString, Toast.LENGTH_LONG).show()
-                        finish()
-                    }
+                    finish()
                 }
-            }
+                
+                override fun onAuthenticationFailed() {
+                    Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication FAILED - letting user retry")
+                    // Don't finish - let user try again
+                }
+            })
             
-            override fun onAuthenticationFailed() {
-                Log.d(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Authentication FAILED")
-                // Don't finish - let user try again
-            }
-        })
-        
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Unlock note")
-            .setSubtitle("Authenticate to open \"$noteTitle\"")
-            .setNegativeButtonText("Use PIN")
-            .build()
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock note")
+                .setSubtitle("Authenticate to open \"$noteTitle\"")
+                .setNegativeButtonText("Use PIN")
+                .build()
+                
+            biometricPrompt.authenticate(promptInfo)
             
-        biometricPrompt.authenticate(promptInfo)
+        } catch (e: Exception) {
+            Log.e(BIOMETRIC_LOG_TAG, "BiometricUnlockActivity: Error starting biometric prompt", e)
+            Toast.makeText(this, "Biometric authentication failed to start", Toast.LENGTH_LONG).show()
+            setResult(RESULT_CANCELED)
+            finish()
+        }
     }
 }
