@@ -71,23 +71,23 @@ jobs:
             "numpy==2.0.2" "protobuf==5.29.1" "ml-dtypes>=0.5.0" \
             "datasets==3.1.0"
 
-          python <<'PY'
-from pathlib import Path
+            python <<'PY'
+            from pathlib import Path
 
-notebook = Path("build_tensor.ipynb")
-if not notebook.exists():
-    raise FileNotFoundError("build_tensor.ipynb not found")
+            notebook = Path("build_tensor.ipynb")
+            if not notebook.exists():
+                raise FileNotFoundError("build_tensor.ipynb not found")
 
-filtered_lines = []
-for line in notebook.read_text().splitlines():
-    if line.lstrip().startswith("%pip"):
-        continue
-    filtered_lines.append(line)
+            filtered_lines = []
+            for line in notebook.read_text().splitlines():
+                if line.lstrip().startswith("%pip"):
+                    continue
+                filtered_lines.append(line)
 
-code = compile("\n".join(filtered_lines), str(notebook), "exec")
-globals_dict = {"__name__": "__main__"}
-exec(code, globals_dict)
-PY
+            code = compile("\n".join(filtered_lines), str(notebook), "exec")
+            globals_dict = {"__name__": "__main__"}
+            exec(code, globals_dict)
+            PY
 
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "${ASSETS_DIR}/${file}" ]; then
