@@ -52,7 +52,20 @@ def main() -> None:
 
     _report_missing_assets(missing_paths)
 
-    _ensure_package("sentencepiece")
+    required_packages = {
+        "tensorflow": "tensorflow==2.19.0",
+        "tf_keras": "tf-keras==2.19.0",
+        "transformers": "transformers==4.44.2",
+        "huggingface_hub": "huggingface_hub>=0.24.0",
+        "numpy": "numpy==2.0.2",
+        "protobuf": "protobuf==5.29.1",
+        "ml_dtypes": "ml-dtypes>=0.5.0",
+        "datasets": "datasets==3.1.0",
+        "sentencepiece": None,
+    }
+
+    for module_name, package_spec in required_packages.items():
+        _ensure_package(module_name, package=package_spec)
 
     notebook = Path("build_tensor.ipynb")
     if not notebook.exists():
