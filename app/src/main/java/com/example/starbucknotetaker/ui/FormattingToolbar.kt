@@ -10,24 +10,34 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
 import androidx.compose.material.IconToggleButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.richtext.RichTextStyle
+
+enum class FormattingAction {
+    BulletList,
+    NumberedList,
+}
 
 @Composable
 fun FormattingToolbar(
     visible: Boolean,
     activeStyles: Set<RichTextStyle>,
     onToggle: (RichTextStyle) -> Unit,
+    onAction: (FormattingAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
@@ -59,6 +69,12 @@ fun FormattingToolbar(
                     checked = activeStyles.contains(RichTextStyle.Underline),
                     onCheckedChange = { onToggle(RichTextStyle.Underline) },
                 )
+                ToolbarActionButton(Icons.Filled.FormatListBulleted) {
+                    onAction(FormattingAction.BulletList)
+                }
+                ToolbarActionButton(Icons.Filled.FormatListNumbered) {
+                    onAction(FormattingAction.NumberedList)
+                }
             }
         }
     }
@@ -66,7 +82,7 @@ fun FormattingToolbar(
 
 @Composable
 private fun ToolbarToggleButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     checked: Boolean,
     onCheckedChange: () -> Unit,
 ) {
@@ -77,5 +93,22 @@ private fun ToolbarToggleButton(
     ) {
         val tint = if (checked) MaterialTheme.colors.primary else Color.Unspecified
         Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = tint)
+    }
+}
+
+@Composable
+private fun ToolbarActionButton(
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(44.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }

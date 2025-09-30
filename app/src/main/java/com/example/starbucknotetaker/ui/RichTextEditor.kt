@@ -71,6 +71,10 @@ fun RichTextEditor(
                                     onValueChange(state.value)
                                 }
                             },
+                            onAction = { action ->
+                                state.applyFormattingAction(action)
+                                onValueChange(state.value)
+                            },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         innerTextField()
