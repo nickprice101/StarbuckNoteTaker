@@ -6,6 +6,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.min
 
 internal data class EventLocationDisplay(
     val name: String,
@@ -41,8 +42,8 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
         val potentialVenueName = lines.first()
         val addressParts = lines.drop(1)
         
-        // Always prefer the first line if it could be a venue name
-        if (potentialVenueName.isNotEmpty()) {
+        // Always prefer the first line as venue name if it's not obviously an address
+        if (potentialVenueName.isNotEmpty() && !looksLikeAddressLine(potentialVenueName)) {
             val address = addressParts.joinToString(", ").takeIf { it.isNotEmpty() }
             return EventLocationDisplay(
                 name = capitalizeVenueName(potentialVenueName), 
@@ -51,14 +52,11 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
         }
     }
     
-    // For single line entries, check if the first token could be a venue name
+    // For single line entries, check the first token
     val firstToken = tokens.first()
     
-    // Simple check: if it doesn't start with a number and isn't obviously an address, treat as venue
-    if (!firstToken.matches(Regex("^\\d+.*")) && 
-        !firstToken.contains(Regex("\\b(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Straat|Gracht|Plein|Singel|Kade)\\b", RegexOption.IGNORE_CASE)) &&
-        firstToken.length > 1) {
-        
+    // If first token looks like a venue name, use it
+    if (!looksLikeAddressLine(firstToken) && isValidVenueToken(firstToken)) {
         val remainingTokens = tokens.drop(1)
         val address = remainingTokens.joinToString(", ").takeIf { it.isNotEmpty() }
         return EventLocationDisplay(
@@ -75,20 +73,45 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
     return EventLocationDisplay(name = primary, address = secondary)
 }
 
-/**
- * Capitalizes each word in a venue name
- */
+private fun looksLikeAddressLine(text: String): Boolean {
+    val trimmed = text.trim()
+    
+    // Starts with number (typical street address)
+    if (trimmed.matches(Regex("^\\d+.*"))) return true
+    
+    // Contains street keywords
+    val streetKeywords = listOf(
+        "street", "st", "avenue", "ave", "road", "rd", "lane", "ln",
+        "drive", "dr", "boulevard", "blvd", "straat", "gracht"
+    )
+    
+    return streetKeywords.any { keyword ->
+        trimmed.contains(Regex("\\b$keyword\\b", RegexOption.IGNORE_CASE))
+    }
+}
+
+private fun isValidVenueToken(text: String): Boolean {
+    val trimmed = text.trim()
+    return trimmed.length >= 2 && 
+           !trimmed.matches(Regex("^\\d+$")) &&
+           !trimmed.matches(Regex("\\d{4,5}\\s*[A-Z]{0,2}"))  // Not postal code
+}
+
 private fun capitalizeVenueName(name: String): String {
-    return name.split(" ")
+    return name.split(Regex("\\s+"))
         .joinToString(" ") { word ->
-            word.lowercase().replaceFirstChar { 
-                if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
+            if (word.isNotEmpty()) {
+                word.lowercase().replaceFirstChar { 
+                    if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
+                }
+            } else {
+                word
             }
         }
 }
 
 /**
- * Simplified venue lookup that tries to find actual venue/POI names
+ * Enhanced venue lookup that tries to find business/venue names at a given address
  */
 internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, originalQuery: String): EventLocationDisplay? {
     return withContext(Dispatchers.IO) {
