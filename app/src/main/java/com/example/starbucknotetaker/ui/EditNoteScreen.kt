@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
@@ -58,6 +57,8 @@ import com.example.starbucknotetaker.extractUrls
 import com.example.starbucknotetaker.ui.LinkPreviewCard
 import com.example.starbucknotetaker.REMINDER_MINUTE_OPTIONS
 import com.example.starbucknotetaker.R
+import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.RichTextDocumentBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,7 +75,7 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun EditNoteScreen(
     note: Note,
-    onSave: (String?, String, List<NoteImage>, List<NoteFile>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
+    onSave: (String?, String, RichTextDocument, List<NoteImage>, List<NoteFile>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
     onCancel: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
@@ -84,37 +85,44 @@ fun EditNoteScreen(
     var title by remember { mutableStateOf(note.title) }
     val blocks = remember {
         mutableStateListOf<EditBlock>().apply {
-            val lines = note.content.lines()
+            val styledSource = note.styledContent ?: RichTextDocument.fromPlainText(note.content)
+            val contentText = note.content
+            val placeholderRegex = Regex("\\[\\[(image|file|link):(\\d+)]]")
+            var cursor = 0
             var lastTextId: Long? = null
-            lines.forEach { line ->
-                val trimmed = line.trim()
-                val imgPlaceholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
-                val filePlaceholder = Regex("\\[\\[file:(\\d+)]]").matchEntire(trimmed)
-                val linkPlaceholder = Regex("\\[\\[link:(\\d+)]]").matchEntire(trimmed)
-                when {
-                    imgPlaceholder != null -> {
-                        val idx = imgPlaceholder.groupValues[1].toInt()
-                        note.images.getOrNull(idx)?.let { image ->
+            placeholderRegex.findAll(contentText).forEach { match ->
+                val start = match.range.first
+                if (start > cursor) {
+                    val segment = styledSource.slice(cursor, start)
+                    if (segment.text.isNotEmpty()) {
+                        val textBlock = EditBlock.Text(RichTextValue.fromDocument(segment))
+                        add(textBlock)
+                        lastTextId = textBlock.id
+                    }
+                }
+                val type = match.groupValues[1]
+                val indexValue = match.groupValues[2].toInt()
+                when (type) {
+                    "image" -> {
+                        note.images.getOrNull(indexValue)?.let { image ->
                             add(EditBlock.Image(image.attachmentId, image.data.orEmpty()))
-                            val textBlock = EditBlock.Text(TextFieldValue(""))
+                            val textBlock = EditBlock.Text(RichTextValue.fromPlainText(""))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
                     }
-                    filePlaceholder != null -> {
-                        val idx = filePlaceholder.groupValues[1].toInt()
-                        note.files.getOrNull(idx)?.let { file ->
+                    "file" -> {
+                        note.files.getOrNull(indexValue)?.let { file ->
                             add(EditBlock.File(file))
-                            val textBlock = EditBlock.Text(TextFieldValue(""))
+                            val textBlock = EditBlock.Text(RichTextValue.fromPlainText(""))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
                     }
-                    linkPlaceholder != null -> {
-                        val idx = linkPlaceholder.groupValues[1].toInt()
-                        note.linkPreviews.getOrNull(idx)?.let { preview ->
+                    "link" -> {
+                        note.linkPreviews.getOrNull(indexValue)?.let { preview ->
                             val sourceId = lastTextId ?: run {
-                                val textBlock = EditBlock.Text(TextFieldValue(""))
+                                val textBlock = EditBlock.Text(RichTextValue.fromPlainText(""))
                                 add(textBlock)
                                 lastTextId = textBlock.id
                                 textBlock.id
@@ -128,32 +136,25 @@ fun EditNoteScreen(
                                     hasAttempted = true,
                                 )
                             )
-                            val textBlock = EditBlock.Text(TextFieldValue(""))
-                            add(textBlock)
-                            lastTextId = textBlock.id
-                        }
-                    }
-                    else -> {
-                        val last = lastOrNull()
-                        if (last is EditBlock.Text) {
-                            val lastIndex = size - 1
-                            val existing = last.value.text
-                            val newText = if (existing.isEmpty()) line else existing + "\n" + line
-                            val updated = last.copy(value = TextFieldValue(newText))
-                            this[lastIndex] = updated
-                            lastTextId = updated.id
-                        } else {
-                            val textBlock = EditBlock.Text(TextFieldValue(line))
+                            val textBlock = EditBlock.Text(RichTextValue.fromPlainText(""))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
                     }
                 }
+                cursor = match.range.last + 1
+                if (cursor < contentText.length && contentText[cursor] == '\n') {
+                    cursor++
+                }
             }
-            if (isEmpty()) {
-                add(EditBlock.Text(TextFieldValue("")))
-            } else if (lastOrNull() !is EditBlock.Text) {
-                val textBlock = EditBlock.Text(TextFieldValue(""))
+            if (cursor < contentText.length) {
+                val segment = styledSource.slice(cursor, contentText.length)
+                val textBlock = EditBlock.Text(RichTextValue.fromDocument(segment))
+                add(textBlock)
+                lastTextId = textBlock.id
+            }
+            if (isEmpty() || lastOrNull() !is EditBlock.Text) {
+                val textBlock = EditBlock.Text(RichTextValue.fromPlainText(""))
                 add(textBlock)
             }
         }
@@ -381,10 +382,10 @@ fun EditNoteScreen(
                     val last = blocks.lastOrNull()
                     if (last is EditBlock.Text && last.value.text.isBlank()) {
                         blocks[blocks.size - 1] = EditBlock.Image(null, data)
-                        blocks.add(EditBlock.Text(TextFieldValue("")))
+                        blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
                     } else {
                         blocks.add(EditBlock.Image(null, data))
-                        blocks.add(EditBlock.Text(TextFieldValue("")))
+                        blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
                     }
                 }
             }
@@ -414,10 +415,10 @@ fun EditNoteScreen(
                     val last = blocks.lastOrNull()
                     if (last is EditBlock.Text && last.value.text.isBlank()) {
                         blocks[blocks.size - 1] = EditBlock.File(f)
-                        blocks.add(EditBlock.Text(TextFieldValue("")))
+                        blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
                     } else {
                         blocks.add(EditBlock.File(f))
-                        blocks.add(EditBlock.Text(TextFieldValue("")))
+                        blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
                     }
                 }
             }
@@ -430,16 +431,16 @@ fun EditNoteScreen(
         val lastIndex = blocks.lastIndex
         val last = blocks.getOrNull(lastIndex)
         if (last is EditBlock.Text && last.value.text.isBlank()) {
-            val updated = last.copy(value = TextFieldValue(sanitized))
+            val updated = last.copy(value = RichTextValue.fromPlainText(sanitized))
             blocks[lastIndex] = updated
             syncLinkPreviews(lastIndex, updated, finalizePending = true)
-            blocks.add(EditBlock.Text(TextFieldValue("")))
+            blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
         } else {
-            val newBlock = EditBlock.Text(TextFieldValue(sanitized))
+            val newBlock = EditBlock.Text(RichTextValue.fromPlainText(sanitized))
             blocks.add(newBlock)
             val index = blocks.lastIndex
             syncLinkPreviews(index, newBlock, finalizePending = true)
-            blocks.add(EditBlock.Text(TextFieldValue("")))
+            blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
         }
     }
 
@@ -498,41 +499,48 @@ fun EditNoteScreen(
                         val images = mutableListOf<NoteImage>()
                         val files = mutableListOf<NoteFile>()
                         val linkPreviews = mutableListOf<NoteLinkPreview>()
-                        val content = buildString {
-                            var linkIndex = 0
-                            blocks.forEach { block ->
-                                when (block) {
-                                    is EditBlock.Text -> {
-                                        append(block.value.text)
-                                        append("\n")
-                                    }
-                                    is EditBlock.Image -> {
-                                        append("[[image:")
-                                        append(images.size)
-                                        append("]]\n")
-                                        images.add(
-                                            NoteImage(
-                                                attachmentId = block.attachmentId,
-                                                data = block.data.takeIf { it.isNotBlank() }
-                                            )
+                        val contentBuilder = StringBuilder()
+                        val styledBuilder = RichTextDocumentBuilder()
+                        var linkIndex = 0
+                        blocks.forEach { block ->
+                            when (block) {
+                                is EditBlock.Text -> {
+                                    styledBuilder.append(block.value.toDocument())
+                                    styledBuilder.appendPlain("\n")
+                                    contentBuilder.append(block.value.text)
+                                    contentBuilder.append('\n')
+                                }
+                                is EditBlock.Image -> {
+                                    styledBuilder.appendPlain("[[image:${images.size}]]\n")
+                                    contentBuilder.append("[[image:")
+                                    contentBuilder.append(images.size)
+                                    contentBuilder.append("]]\n")
+                                    images.add(
+                                        NoteImage(
+                                            attachmentId = block.attachmentId,
+                                            data = block.data.takeIf { it.isNotBlank() }
                                         )
-                                    }
-                                    is EditBlock.File -> {
-                                        append("[[file:")
-                                        append(files.size)
-                                        append("]]\n")
-                                        files.add(block.file)
-                                    }
-                                    is EditBlock.LinkPreview -> {
-                                        append("[[link:")
-                                        append(linkIndex)
-                                        append("]]\n")
-                                        linkPreviews.add(block.preview)
-                                        linkIndex++
-                                    }
+                                    )
+                                }
+                                is EditBlock.File -> {
+                                    styledBuilder.appendPlain("[[file:${files.size}]]\n")
+                                    contentBuilder.append("[[file:")
+                                    contentBuilder.append(files.size)
+                                    contentBuilder.append("]]\n")
+                                    files.add(block.file)
+                                }
+                                is EditBlock.LinkPreview -> {
+                                    styledBuilder.appendPlain("[[link:$linkIndex]]\n")
+                                    contentBuilder.append("[[link:")
+                                    contentBuilder.append(linkIndex)
+                                    contentBuilder.append("]]\n")
+                                    linkPreviews.add(block.preview)
+                                    linkIndex++
                                 }
                             }
-                        }.trim()
+                        }
+                        val content = contentBuilder.toString().trim()
+                        val styledContent = styledBuilder.build().trimmed()
                         scope.launch {
                             hideKeyboard()
                             focusManager.clearFocus(force = true)
@@ -570,7 +578,7 @@ fun EditNoteScreen(
                             } else {
                                 note.event
                             }
-                            onSave(title, content, images, files, linkPreviews, eventForSave)
+                            onSave(title, content, styledContent, images, files, linkPreviews, eventForSave)
                             scaffoldState.snackbarHostState.showSnackbar(
                                 "Changes saved",
                                 duration = SnackbarDuration.Short
@@ -868,13 +876,6 @@ fun EditNoteScreen(
                                 label = if (blockIndex == 0 && !isEvent) {
                                     { Text("Content") }
                                 } else null,
-                                onAction = { action ->
-                                    val current = blocks.getOrNull(blockIndex) as? EditBlock.Text ?: return@RichTextEditor
-                                    val formatted = applyTextFormatting(current.value, action)
-                                    val updated = current.copy(value = formatted)
-                                    blocks[blockIndex] = updated
-                                    syncLinkPreviews(blockIndex, updated)
-                                },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -944,7 +945,7 @@ fun EditNoteScreen(
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
                                             val merged = prev.value.text + "\n" + next.value.text
-                                            blocks[prevIndex] = prev.copy(value = TextFieldValue(merged))
+                                            blocks[prevIndex] = prev.copy(value = RichTextValue.fromPlainText(merged))
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -974,7 +975,7 @@ fun EditNoteScreen(
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
                                             val merged = prev.value.text + "\n" + next.value.text
-                                            blocks[prevIndex] = prev.copy(value = TextFieldValue(merged))
+                                            blocks[prevIndex] = prev.copy(value = RichTextValue.fromPlainText(merged))
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -1028,7 +1029,7 @@ fun EditNoteScreen(
                                     val next = blocks.getOrNull(prevIndex + 1)
                                     if (prev is EditBlock.Text && next is EditBlock.Text) {
                                         val merged = prev.value.text + "\n" + next.value.text
-                                        blocks[prevIndex] = prev.copy(value = TextFieldValue(merged))
+                                        blocks[prevIndex] = prev.copy(value = RichTextValue.fromPlainText(merged))
                                         blocks.removeAt(prevIndex + 1)
                                     }
                                 }
@@ -1186,7 +1187,7 @@ private fun AttachmentAction(
 private sealed class EditBlock {
     abstract val id: Long
 
-    data class Text(val value: TextFieldValue, override val id: Long = nextEditBlockId()) : EditBlock()
+    data class Text(val value: RichTextValue, override val id: Long = nextEditBlockId()) : EditBlock()
     data class Image(
         val attachmentId: String?,
         val data: String,
