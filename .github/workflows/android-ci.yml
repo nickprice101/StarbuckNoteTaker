@@ -60,22 +60,10 @@ jobs:
 
           if [ "${#missing[@]}" -eq 0 ]; then
             echo "All summarizer assets already present."
-            exit 0
+          else
+            echo "Missing summarizer assets: ${missing[*]}"
+            python scripts/generate_summarizer_assets.py
           fi
-
-          echo "Missing summarizer assets: ${missing[*]}"
-          python -m pip install --upgrade "pip<25"
-          python -m pip install --no-cache-dir \
-            "tensorflow==2.19.0" "tf-keras==2.19.0" \
-            "transformers==4.44.2" "huggingface_hub>=0.24.0" \
-            "numpy==2.0.2" "protobuf==5.29.1" "ml-dtypes>=0.5.0" \
-            "datasets==3.1.0"
-
-          python -m pip install --no-cache-dir \
-            --index-url https://download.pytorch.org/whl/cpu \
-            "torch==2.5.1"
-
-          python scripts/generate_summarizer_assets.py
 
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "${ASSETS_DIR}/${file}" ]; then
