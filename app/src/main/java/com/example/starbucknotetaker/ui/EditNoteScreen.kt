@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
@@ -95,7 +96,7 @@ fun EditNoteScreen(
                         val idx = imgPlaceholder.groupValues[1].toInt()
                         note.images.getOrNull(idx)?.let { image ->
                             add(EditBlock.Image(image.attachmentId, image.data.orEmpty()))
-                            val textBlock = EditBlock.Text("")
+                            val textBlock = EditBlock.Text(TextFieldValue(""))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
@@ -104,7 +105,7 @@ fun EditNoteScreen(
                         val idx = filePlaceholder.groupValues[1].toInt()
                         note.files.getOrNull(idx)?.let { file ->
                             add(EditBlock.File(file))
-                            val textBlock = EditBlock.Text("")
+                            val textBlock = EditBlock.Text(TextFieldValue(""))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
@@ -113,7 +114,7 @@ fun EditNoteScreen(
                         val idx = linkPlaceholder.groupValues[1].toInt()
                         note.linkPreviews.getOrNull(idx)?.let { preview ->
                             val sourceId = lastTextId ?: run {
-                                val textBlock = EditBlock.Text("")
+                                val textBlock = EditBlock.Text(TextFieldValue(""))
                                 add(textBlock)
                                 lastTextId = textBlock.id
                                 textBlock.id
@@ -127,7 +128,7 @@ fun EditNoteScreen(
                                     hasAttempted = true,
                                 )
                             )
-                            val textBlock = EditBlock.Text("")
+                            val textBlock = EditBlock.Text(TextFieldValue(""))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
@@ -136,12 +137,13 @@ fun EditNoteScreen(
                         val last = lastOrNull()
                         if (last is EditBlock.Text) {
                             val lastIndex = size - 1
-                            val newText = if (last.text.isEmpty()) line else last.text + "\n" + line
-                            val updated = last.copy(text = newText)
+                            val existing = last.value.text
+                            val newText = if (existing.isEmpty()) line else existing + "\n" + line
+                            val updated = last.copy(value = TextFieldValue(newText))
                             this[lastIndex] = updated
                             lastTextId = updated.id
                         } else {
-                            val textBlock = EditBlock.Text(line)
+                            val textBlock = EditBlock.Text(TextFieldValue(line))
                             add(textBlock)
                             lastTextId = textBlock.id
                         }
@@ -149,9 +151,9 @@ fun EditNoteScreen(
                 }
             }
             if (isEmpty()) {
-                add(EditBlock.Text(""))
+                add(EditBlock.Text(TextFieldValue("")))
             } else if (lastOrNull() !is EditBlock.Text) {
-                val textBlock = EditBlock.Text("")
+                val textBlock = EditBlock.Text(TextFieldValue(""))
                 add(textBlock)
             }
         }
@@ -268,7 +270,7 @@ fun EditNoteScreen(
         textBlock: EditBlock.Text,
         finalizePending: Boolean = false,
     ) {
-        val detections = extractUrls(textBlock.text, finalizePending)
+        val detections = extractUrls(textBlock.value.text, finalizePending)
         val existingBlocks = mutableMapOf<String, EditBlock.LinkPreview>()
         var cursor = index + 1
         while (cursor < blocks.size) {
@@ -377,12 +379,12 @@ fun EditNoteScreen(
                 }
                 base64?.let { data ->
                     val last = blocks.lastOrNull()
-                    if (last is EditBlock.Text && last.text.isBlank()) {
+                    if (last is EditBlock.Text && last.value.text.isBlank()) {
                         blocks[blocks.size - 1] = EditBlock.Image(null, data)
-                        blocks.add(EditBlock.Text(""))
+                        blocks.add(EditBlock.Text(TextFieldValue("")))
                     } else {
                         blocks.add(EditBlock.Image(null, data))
-                        blocks.add(EditBlock.Text(""))
+                        blocks.add(EditBlock.Text(TextFieldValue("")))
                     }
                 }
             }
@@ -410,12 +412,12 @@ fun EditNoteScreen(
                 }
                 file?.let { f ->
                     val last = blocks.lastOrNull()
-                    if (last is EditBlock.Text && last.text.isBlank()) {
+                    if (last is EditBlock.Text && last.value.text.isBlank()) {
                         blocks[blocks.size - 1] = EditBlock.File(f)
-                        blocks.add(EditBlock.Text(""))
+                        blocks.add(EditBlock.Text(TextFieldValue("")))
                     } else {
                         blocks.add(EditBlock.File(f))
-                        blocks.add(EditBlock.Text(""))
+                        blocks.add(EditBlock.Text(TextFieldValue("")))
                     }
                 }
             }
@@ -427,17 +429,17 @@ fun EditNoteScreen(
         if (sanitized.isEmpty()) return
         val lastIndex = blocks.lastIndex
         val last = blocks.getOrNull(lastIndex)
-        if (last is EditBlock.Text && last.text.isBlank()) {
-            val updated = last.copy(text = sanitized)
+        if (last is EditBlock.Text && last.value.text.isBlank()) {
+            val updated = last.copy(value = TextFieldValue(sanitized))
             blocks[lastIndex] = updated
             syncLinkPreviews(lastIndex, updated, finalizePending = true)
-            blocks.add(EditBlock.Text(""))
+            blocks.add(EditBlock.Text(TextFieldValue("")))
         } else {
-            val newBlock = EditBlock.Text(sanitized)
+            val newBlock = EditBlock.Text(TextFieldValue(sanitized))
             blocks.add(newBlock)
             val index = blocks.lastIndex
             syncLinkPreviews(index, newBlock, finalizePending = true)
-            blocks.add(EditBlock.Text(""))
+            blocks.add(EditBlock.Text(TextFieldValue("")))
         }
     }
 
@@ -501,7 +503,7 @@ fun EditNoteScreen(
                             blocks.forEach { block ->
                                 when (block) {
                                     is EditBlock.Text -> {
-                                        append(block.text)
+                                        append(block.value.text)
                                         append("\n")
                                     }
                                     is EditBlock.Image -> {
@@ -607,7 +609,6 @@ fun EditNoteScreen(
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
                 ) {
-                    FormattingToolbar()
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
@@ -849,6 +850,7 @@ fun EditNoteScreen(
                 }
             }
             itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
+                val blockIndex = index
                 when (block) {
                     is EditBlock.Text -> {
                         Column(
@@ -856,18 +858,24 @@ fun EditNoteScreen(
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
                         ) {
-                            FormattingToolbar()
-                            OutlinedTextField(
-                                value = block.text,
-                                onValueChange = { newText ->
-                                    val updated = block.copy(text = newText)
-                                    blocks[index] = updated
-                                    syncLinkPreviews(index, updated)
+                            RichTextEditor(
+                                value = block.value,
+                                onValueChange = { newValue ->
+                                    val updated = block.copy(value = newValue)
+                                    blocks[blockIndex] = updated
+                                    syncLinkPreviews(blockIndex, updated)
                                 },
-                                label = if (index == 0 && !isEvent) {
+                                label = if (blockIndex == 0 && !isEvent) {
                                     { Text("Content") }
                                 } else null,
-                                modifier = Modifier.fillMaxWidth()
+                                onAction = { action ->
+                                    val current = blocks.getOrNull(blockIndex) as? EditBlock.Text ?: return@RichTextEditor
+                                    val formatted = applyTextFormatting(current.value, action)
+                                    val updated = current.copy(value = formatted)
+                                    blocks[blockIndex] = updated
+                                    syncLinkPreviews(blockIndex, updated)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
@@ -935,7 +943,8 @@ fun EditNoteScreen(
                                         val prev = blocks[prevIndex]
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                            blocks[prevIndex] = prev.copy(text = prev.text + "\n" + next.text)
+                                            val merged = prev.value.text + "\n" + next.value.text
+                                            blocks[prevIndex] = prev.copy(value = TextFieldValue(merged))
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -964,7 +973,8 @@ fun EditNoteScreen(
                                         val prev = blocks[prevIndex]
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                            blocks[prevIndex] = prev.copy(text = prev.text + "\n" + next.text)
+                                            val merged = prev.value.text + "\n" + next.value.text
+                                            blocks[prevIndex] = prev.copy(value = TextFieldValue(merged))
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -1017,7 +1027,8 @@ fun EditNoteScreen(
                                     val prev = blocks[prevIndex]
                                     val next = blocks.getOrNull(prevIndex + 1)
                                     if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                        blocks[prevIndex] = prev.copy(text = prev.text + "\n" + next.text)
+                                        val merged = prev.value.text + "\n" + next.value.text
+                                        blocks[prevIndex] = prev.copy(value = TextFieldValue(merged))
                                         blocks.removeAt(prevIndex + 1)
                                     }
                                 }
@@ -1175,7 +1186,7 @@ private fun AttachmentAction(
 private sealed class EditBlock {
     abstract val id: Long
 
-    data class Text(val text: String, override val id: Long = nextEditBlockId()) : EditBlock()
+    data class Text(val value: TextFieldValue, override val id: Long = nextEditBlockId()) : EditBlock()
     data class Image(
         val attachmentId: String?,
         val data: String,
