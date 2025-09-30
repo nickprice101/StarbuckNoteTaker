@@ -17,3 +17,6 @@ gradle/wrapper/gradle-wrapper.jar
 app/src/main/assets/*.tflite
 app/src/main/assets/*.model
 app/src/main/assets/tokenizer.json
+flan_t5_small_type_first_finetuned/
+flan_t5_small_type_first_tflite_min/
+flan_t5_small_type_first_tflite_min.zip
