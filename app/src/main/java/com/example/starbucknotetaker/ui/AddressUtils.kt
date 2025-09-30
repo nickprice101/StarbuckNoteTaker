@@ -5,7 +5,7 @@ import android.location.Geocoder
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.min
+import java.util.Locale
 
 internal data class EventLocationDisplay(
     val name: String,
@@ -44,7 +44,10 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
         // Always prefer the first line if it could be a venue name
         if (potentialVenueName.isNotEmpty()) {
             val address = addressParts.joinToString(", ").takeIf { it.isNotEmpty() }
-            return EventLocationDisplay(name = potentialVenueName, address = address)
+            return EventLocationDisplay(
+                name = capitalizeVenueName(potentialVenueName), 
+                address = address
+            )
         }
     }
     
@@ -58,7 +61,10 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
         
         val remainingTokens = tokens.drop(1)
         val address = remainingTokens.joinToString(", ").takeIf { it.isNotEmpty() }
-        return EventLocationDisplay(name = firstToken, address = address)
+        return EventLocationDisplay(
+            name = capitalizeVenueName(firstToken), 
+            address = address
+        )
     }
     
     // Fallback to original behavior
@@ -67,6 +73,18 @@ internal fun fallbackEventLocationDisplay(raw: String): EventLocationDisplay {
         .joinToString(separator = ", ")
         .takeIf { it.isNotEmpty() }
     return EventLocationDisplay(name = primary, address = secondary)
+}
+
+/**
+ * Capitalizes each word in a venue name
+ */
+private fun capitalizeVenueName(name: String): String {
+    return name.split(" ")
+        .joinToString(" ") { word ->
+            word.lowercase().replaceFirstChar { 
+                if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
+            }
+        }
 }
 
 /**
@@ -89,7 +107,10 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, originalQuery: Str
                 if (venueName != null) {
                     val fullAddress = buildFullAddress(geocodedAddress)
                     Log.d("AddressUtils", "Found valid venue name: $venueName")
-                    return@withContext EventLocationDisplay(name = venueName, address = fullAddress)
+                    return@withContext EventLocationDisplay(
+                        name = capitalizeVenueName(venueName), 
+                        address = fullAddress
+                    )
                 }
             }
             
@@ -243,7 +264,7 @@ internal fun Address.toSuggestion(): String? {
     // Prioritize POI name if available
     val poiName = extractValidVenueName(this)
     if (!poiName.isNullOrBlank()) {
-        addIfUseful(poiName)
+        addIfUseful(capitalizeVenueName(poiName))
     }
     
     addIfUseful(thoroughfare?.let { street ->
@@ -274,7 +295,7 @@ internal fun Address.toEventLocationDisplayWithVenueLookup(): EventLocationDispl
     if (!venueName.isNullOrBlank()) {
         val fullAddress = buildFullAddress(this)
         return EventLocationDisplay(
-            name = venueName,
+            name = capitalizeVenueName(venueName),
             address = fullAddress.takeIf { it.isNotEmpty() && !it.equals(venueName, ignoreCase = true) }
         )
     }
