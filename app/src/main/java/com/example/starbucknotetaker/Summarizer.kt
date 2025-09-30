@@ -194,7 +194,7 @@ class Summarizer(
             }
 
             suspend fun fallback(reason: String, throwable: Throwable? = null): String {
-                val (label, summary) = ensureClassifierDetails()
+                val (label, classifierFallbackSummary) = ensureClassifierDetails()
                 if (!fallbackLabelLogged) {
                     emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
                     fallbackLabelLogged = true
@@ -202,7 +202,11 @@ class Summarizer(
                 emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
-                return summary
+                val extractiveFallback = extractFallbackSummary(text)
+                if (extractiveFallback.isNotBlank()) {
+                    return extractiveFallback
+                }
+                return classifierFallbackSummary
             }
 
             if (enc == null || dec == null || tok == null) {
@@ -448,8 +452,32 @@ class Summarizer(
     fun fallbackSummary(text: String): String = fallbackSummary(text, null)
 
     fun fallbackSummary(text: String, event: NoteEvent?): String {
+        val extractive = extractFallbackSummary(text)
+        if (extractive.isNotBlank()) {
+            return extractive
+        }
         val label = runBlocking { classifyFallbackLabel(text, event) }
         return trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+    }
+
+    private fun extractFallbackSummary(text: String): String {
+        if (text.isBlank()) return ""
+        val lines = mutableListOf<String>()
+        for (line in text.lineSequence()) {
+            if (lines.size >= FALLBACK_LINE_LIMIT) break
+            val trimmed = line.trim()
+            if (trimmed.isNotEmpty()) {
+                lines.add(trimmed)
+            }
+        }
+        if (lines.isEmpty()) return ""
+        val joined = lines.joinToString(separator = " ")
+        val limited = if (joined.length > FALLBACK_CHARACTER_LIMIT) {
+            joined.take(FALLBACK_CHARACTER_LIMIT)
+        } else {
+            joined
+        }
+        return limited.trim()
     }
 
     private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel {
@@ -1006,6 +1034,8 @@ class Summarizer(
         private const val VOCAB_SIZE = 32128
         private const val MAX_TOKEN_CHOICES = 8
         private const val CLASSIFIER_WORD_LIMIT = 15
+        private const val FALLBACK_LINE_LIMIT = 2
+        private const val FALLBACK_CHARACTER_LIMIT = 200
         private const val ELLIPSIS = "…"
         internal val WORD_SPLIT_REGEX = Regex("\\s+")
         internal fun trimToWordLimit(text: String, wordLimit: Int = CLASSIFIER_WORD_LIMIT): String {

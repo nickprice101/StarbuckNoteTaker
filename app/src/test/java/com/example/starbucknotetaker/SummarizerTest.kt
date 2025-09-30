@@ -32,12 +32,16 @@ class SummarizerTest {
     }
 
     @Test
-    fun fallbackSummaryReturnsClassifierLabel() {
+    fun fallbackSummaryReturnsFirstTwoLines() {
         val summarizer = Summarizer(context, nativeLoader = { false }, debugSink = { })
-        val text = "Security updates require MFA for all accounts. Lunch options were discussed briefly. The security updates also add mandatory VPN use."
+        val text = """
+            Security updates require MFA for all accounts.
+            Lunch options were discussed briefly.
+            The security updates also add mandatory VPN use.
+        """.trimIndent()
         val summary = summarizer.fallbackSummary(text)
         assertEquals(
-            NoteNatureType.GENERAL_NOTE.humanReadable,
+            "Security updates require MFA for all accounts. Lunch options were discussed briefly.",
             summary
         )
     }
@@ -64,9 +68,9 @@ class SummarizerTest {
             debugSink = { }
         )
 
-        val text = "One. Two. Three."
+        val text = "One.\nTwo.\nThree."
         val result = summarizer.summarize(text)
-        assertEquals(NoteNatureType.GENERAL_NOTE.humanReadable, result)
+        assertEquals("One. Two.", result)
     }
 
     @Test
