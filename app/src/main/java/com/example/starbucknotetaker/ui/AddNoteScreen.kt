@@ -453,14 +453,19 @@ fun AddNoteScreen(
                 SummarizerStatusBanner(state = summarizerState)
             }
             item {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Title") },
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
-                )
+                ) {
+                    FormattingToolbar()
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Title") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
             if (entryMode == NoteEntryMode.Event) {
                 item {
@@ -655,20 +660,25 @@ fun AddNoteScreen(
             itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
                 when (block) {
                     is NoteBlock.Text -> {
-                        OutlinedTextField(
-                            value = block.text,
-                            onValueChange = { newText ->
-                                val updated = block.copy(text = newText)
-                                blocks[index] = updated
-                                syncLinkPreviews(index, updated)
-                            },
-                            label = if (index == 0 && entryMode == NoteEntryMode.Note) {
-                                { Text("Content") }
-                            } else null,
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
-                        )
+                        ) {
+                            FormattingToolbar()
+                            OutlinedTextField(
+                                value = block.text,
+                                onValueChange = { newText ->
+                                    val updated = block.copy(text = newText)
+                                    blocks[index] = updated
+                                    syncLinkPreviews(index, updated)
+                                },
+                                label = if (index == 0 && entryMode == NoteEntryMode.Note) {
+                                    { Text("Content") }
+                                } else null,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                     is NoteBlock.Image -> {
                         Box(

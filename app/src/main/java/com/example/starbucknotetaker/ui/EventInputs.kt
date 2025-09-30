@@ -69,14 +69,17 @@ fun LocationAutocompleteField(
     val coroutineScope = rememberCoroutineScope()
     val geocoderAvailable = remember { Geocoder.isPresent() }
     if (!geocoderAvailable) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text(label) },
-            modifier = modifier,
-            leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
-            singleLine = true,
-        )
+        Column(modifier = modifier) {
+            FormattingToolbar()
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = { Text(label) },
+                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
+                singleLine = true,
+            )
+        }
         return
     }
     val geocoder = remember(context) { Geocoder(context, Locale.getDefault()) }
@@ -118,66 +121,69 @@ fun LocationAutocompleteField(
         }
     }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = {
-            if (suggestions.isNotEmpty()) {
-                expanded = it
-                if (it) {
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
-                }
-            } else {
-                expanded = false
-            }
-        },
-        modifier = modifier,
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { newValue ->
-                onValueChange(newValue)
-                requestSuggestions(newValue)
-                keyboardController?.show()
-            },
-            label = { Text(label) },
-            leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(focusRequester),
-        )
-        DropdownMenu(
-            expanded = expanded && suggestions.isNotEmpty(),
-            onDismissRequest = { expanded = false },
-            properties = PopupProperties(focusable = false),
-        ) {
-            suggestions.forEach { suggestion ->
-                DropdownMenuItem(onClick = {
-                    val formattedSelection = suggestion.display
-                        .toQueryString()
-                        .ifBlank { suggestion.text }
-                    onValueChange(formattedSelection)
+    Column(modifier = modifier) {
+        FormattingToolbar()
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = {
+                if (suggestions.isNotEmpty()) {
+                    expanded = it
+                    if (it) {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }
+                } else {
                     expanded = false
-                    suggestions = emptyList()
-                    focusRequester.requestFocus()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { newValue ->
+                    onValueChange(newValue)
+                    requestSuggestions(newValue)
                     keyboardController?.show()
-                }) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = suggestion.display.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
-                        )
-                        suggestion.display.address?.let { address ->
+                },
+                label = { Text(label) },
+                leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+            )
+            DropdownMenu(
+                expanded = expanded && suggestions.isNotEmpty(),
+                onDismissRequest = { expanded = false },
+                properties = PopupProperties(focusable = false),
+            ) {
+                suggestions.forEach { suggestion ->
+                    DropdownMenuItem(onClick = {
+                        val formattedSelection = suggestion.display
+                            .toQueryString()
+                            .ifBlank { suggestion.text }
+                        onValueChange(formattedSelection)
+                        expanded = false
+                        suggestions = emptyList()
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = address,
+                                text = suggestion.display.name,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.caption,
+                                style = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
                             )
+                            suggestion.display.address?.let { address ->
+                                Text(
+                                    text = address,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.caption,
+                                )
+                            }
                         }
                     }
                 }

@@ -563,14 +563,19 @@ fun EditNoteScreen(
                 SummarizerStatusBanner(state = summarizerState)
             }
             item {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Title") },
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
-                )
+                ) {
+                    FormattingToolbar()
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Title") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
             if (isEvent) {
                 item {
@@ -765,20 +770,25 @@ fun EditNoteScreen(
             itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
                 when (block) {
                     is EditBlock.Text -> {
-                        OutlinedTextField(
-                            value = block.text,
-                            onValueChange = { newText ->
-                                val updated = block.copy(text = newText)
-                                blocks[index] = updated
-                                syncLinkPreviews(index, updated)
-                            },
-                            label = if (index == 0 && !isEvent) {
-                                { Text("Content") }
-                            } else null,
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
-                        )
+                        ) {
+                            FormattingToolbar()
+                            OutlinedTextField(
+                                value = block.text,
+                                onValueChange = { newText ->
+                                    val updated = block.copy(text = newText)
+                                    blocks[index] = updated
+                                    syncLinkPreviews(index, updated)
+                                },
+                                label = if (index == 0 && !isEvent) {
+                                    { Text("Content") }
+                                } else null,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                     is EditBlock.Image -> {
                         var bitmap by remember(block.id, block.data) { mutableStateOf<Bitmap?>(null) }
