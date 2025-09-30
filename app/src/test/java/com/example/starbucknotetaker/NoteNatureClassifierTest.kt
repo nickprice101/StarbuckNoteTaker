@@ -9,6 +9,96 @@ class NoteNatureClassifierTest {
     private val classifier = NoteNatureClassifier()
 
     @Test
+    fun classifyPersonalDailyLife() = runBlocking {
+        val text = """
+            Weekend plans:
+            - Brunch with friends at 11am
+            - Errands and chores around the apartment
+            - Movie night celebration with family tonight
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.PERSONAL_DAILY_LIFE, label.type)
+        assertEquals(NoteNatureType.PERSONAL_DAILY_LIFE.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyFinanceLegal() = runBlocking {
+        val text = """
+            Q1 budget review
+            - Invoice 1042 due March 15 ($1,200)
+            - Update contract clause 4 with compliance notes
+            - Track expense reimbursements and insurance policy updates
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.FINANCE_LEGAL, label.type)
+        assertEquals(NoteNatureType.FINANCE_LEGAL.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifySelfImprovement() = runBlocking {
+        val text = """
+            Personal growth goals
+            [ ] Morning meditation habit tracker
+            [x] Practice guitar 30 minutes
+            Weekly goals: Reflect on progress and write affirmation.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.SELF_IMPROVEMENT, label.type)
+        assertEquals(NoteNatureType.SELF_IMPROVEMENT.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyHealthWellness() = runBlocking {
+        val text = """
+            Health log
+            Workout: 5km run + 30 minutes yoga
+            Breakfast: oats and berries (320 calories)
+            Medication: vitamin d dose 2000mg nightly
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.HEALTH_WELLNESS, label.type)
+        assertEquals(NoteNatureType.HEALTH_WELLNESS.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyEducationLearning() = runBlocking {
+        val text = """
+            Lecture notes - Biology 201
+            Lesson 3: Cell structures
+            Key concepts: mitochondria, ribosomes
+            Homework assignment: read chapter 4 and complete practice problems.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.EDUCATION_LEARNING, label.type)
+        assertEquals(NoteNatureType.EDUCATION_LEARNING.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyHomeFamily() = runBlocking {
+        val text = """
+            Family schedule
+            - School dropoff 8:00am for kids
+            - Laundry and house cleaning before grandparents arrive
+            Call babysitter to confirm Friday night.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.HOME_FAMILY, label.type)
+        assertEquals(NoteNatureType.HOME_FAMILY.humanReadable, label.humanReadable)
+    }
+
+    @Test
     fun classifyMeetingRecap() = runBlocking {
         val text = """
             Team Meeting Recap
