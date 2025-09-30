@@ -446,6 +446,7 @@ fun AddNoteScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
+                .imePadding()
                 .padding(16.dp)
         ) {
             item {
