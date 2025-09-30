@@ -181,6 +181,84 @@ class NoteNatureClassifierTest {
     }
 
     @Test
+    fun classifyProjectManagement() = runBlocking {
+        val text = """
+            Website redesign project plan
+            Milestone 1: finalize wireframes (owner: Priya, due Apr 15)
+            Milestone 2: sprint planning for development backlog
+            Deliverables: updated roadmap, stakeholder status update on launch timeline.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.PROJECT_MANAGEMENT, label.type)
+        assertEquals(NoteNatureType.PROJECT_MANAGEMENT.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyEventPlanning() = runBlocking {
+        val text = """
+            Wedding celebration checklist
+            Guest list: 120 RSVP responses confirmed for June 22
+            Vendor outreach for catering, photographer, and venue walkthrough
+            Build day-of timeline and seating chart playlist notes.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.EVENT_PLANNING, label.type)
+        assertEquals(NoteNatureType.EVENT_PLANNING.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyFoodRecipe() = runBlocking {
+        val text = """
+            Lemon pasta recipe (serves 4)
+            Ingredients:
+            - 12 oz spaghetti
+            - 2 tablespoons olive oil
+            - 1 teaspoon lemon zest
+            Instructions: Preheat skillet, sauté garlic, mix pasta and simmer sauce.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.FOOD_RECIPE, label.type)
+        assertEquals(NoteNatureType.FOOD_RECIPE.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyCreativeWriting() = runBlocking {
+        val text = """
+            Chapter 3 outline - "The Storm"
+            Characters: Mira (protagonist), Rian (antagonist)
+            Scene 1: Dialogue at the docks reveals the central plot twist.
+            Theme notes and world building details for the novel draft.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.CREATIVE_WRITING, label.type)
+        assertEquals(NoteNatureType.CREATIVE_WRITING.humanReadable, label.humanReadable)
+    }
+
+    @Test
+    fun classifyTechnicalReference() = runBlocking {
+        val text = """
+            API outage troubleshooting log
+            Steps to reproduce:
+            ${'$'} curl -X GET https://api.example.com/v1/status
+            Observed error code 503 with stack trace in server logs.
+            Plan: update deployment config and rollback if issue persists.
+        """.trimIndent()
+
+        val label = classifier.classify(text, null)
+
+        assertEquals(NoteNatureType.TECHNICAL_REFERENCE, label.type)
+        assertEquals(NoteNatureType.TECHNICAL_REFERENCE.humanReadable, label.humanReadable)
+    }
+
+    @Test
     fun classifyFallbackForAmbiguousNote() = runBlocking {
         val text = "Ideas and scribbles"
 

@@ -19,9 +19,14 @@ import kotlin.math.max
  * 9. [NoteNatureType.REMINDER] &ndash; short, time-sensitive prompts or follow ups.
  * 10. [NoteNatureType.JOURNAL_ENTRY] &ndash; reflective journal or diary style notes.
  * 11. [NoteNatureType.TRAVEL_PLAN] &ndash; itineraries, reservations, and logistics.
- * 12. [NoteNatureType.COUNTRY_LIST] &ndash; geography collections and travel inspiration.
- * 13. [NoteNatureType.NEWS_REPORT] &ndash; structured reportage and current event briefs.
- * 14. [NoteNatureType.GENERAL_NOTE] &ndash; catch-all fallback when confidence is low.
+ * 12. [NoteNatureType.PROJECT_MANAGEMENT] &ndash; roadmaps, milestones, and delivery trackers.
+ * 13. [NoteNatureType.EVENT_PLANNING] &ndash; guest lists, venue coordination, and celebration prep.
+ * 14. [NoteNatureType.FOOD_RECIPE] &ndash; ingredient lists and cooking instructions.
+ * 15. [NoteNatureType.CREATIVE_WRITING] &ndash; story drafts, character notes, and plot outlines.
+ * 16. [NoteNatureType.TECHNICAL_REFERENCE] &ndash; troubleshooting logs and configuration docs.
+ * 17. [NoteNatureType.COUNTRY_LIST] &ndash; geography collections and travel inspiration.
+ * 18. [NoteNatureType.NEWS_REPORT] &ndash; structured reportage and current event briefs.
+ * 19. [NoteNatureType.GENERAL_NOTE] &ndash; catch-all fallback when confidence is low.
  *
  * The classifier relies on language-agnostic normalization (lowercasing, accent removal, stop-word
  * filtering) and a collection of deterministic heuristics. Each category is scored via keyword
@@ -639,6 +644,254 @@ open class NoteNatureClassifier {
                 }
             ),
             CategoryDefinition(
+                type = NoteNatureType.PROJECT_MANAGEMENT,
+                keywordWeights = mapOf(
+                    "project" to 2.5,
+                    "projects" to 2.0,
+                    "milestone" to 2.5,
+                    "milestones" to 2.5,
+                    "deliverable" to 3.0,
+                    "deliverables" to 3.0,
+                    "timeline" to 2.0,
+                    "roadmap" to 2.0,
+                    "sprint" to 2.5,
+                    "backlog" to 2.0,
+                    "task" to 1.5,
+                    "tasks" to 1.5,
+                    "owner" to 1.0,
+                    "owners" to 1.0,
+                    "status" to 1.0,
+                    "update" to 1.0,
+                    "updates" to 1.0,
+                    "stakeholder" to 1.5,
+                    "stakeholders" to 1.5,
+                    "dependency" to 1.5,
+                    "dependencies" to 1.5,
+                    "launch" to 1.0,
+                    "release" to 1.0
+                ),
+                phraseWeights = mapOf(
+                    "project plan" to 3.0,
+                    "delivery plan" to 2.0,
+                    "risk register" to 2.5,
+                    "sprint planning" to 2.5,
+                    "sprint retrospective" to 2.5,
+                    "status update" to 2.0
+                ),
+                structuralBonus = { context ->
+                    val ownerMentions = context.lines.count { line ->
+                        line.contains("owner", ignoreCase = true) ||
+                            line.contains("due", ignoreCase = true)
+                    }
+                    val milestoneHeaders = context.lines.count { line ->
+                        line.trimStart().matches(
+                            Regex("(milestone|phase)\\s+\\d+", RegexOption.IGNORE_CASE)
+                        )
+                    }
+                    var bonus = 0.0
+                    if (ownerMentions >= 1) bonus += 0.5
+                    if (ownerMentions >= 3) bonus += 0.5
+                    if (milestoneHeaders >= 1) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.EVENT_PLANNING,
+                keywordWeights = mapOf(
+                    "event" to 2.5,
+                    "party" to 2.5,
+                    "wedding" to 3.0,
+                    "ceremony" to 2.0,
+                    "reception" to 2.0,
+                    "celebration" to 1.5,
+                    "guests" to 2.5,
+                    "guest" to 2.0,
+                    "rsvp" to 3.0,
+                    "venue" to 2.5,
+                    "caterer" to 2.0,
+                    "catering" to 2.0,
+                    "decor" to 1.5,
+                    "decorations" to 1.5,
+                    "seating" to 2.0,
+                    "playlist" to 1.5,
+                    "entertainment" to 1.5,
+                    "timeline" to 1.5,
+                    "schedule" to 1.0,
+                    "invitation" to 1.5,
+                    "invites" to 1.5,
+                    "photographer" to 2.0
+                ),
+                phraseWeights = mapOf(
+                    "guest list" to 3.0,
+                    "save the date" to 2.5,
+                    "seating chart" to 2.5,
+                    "vendor outreach" to 2.0,
+                    "day-of timeline" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val hasDate = context.originalText.contains(
+                        Regex("\\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\b", RegexOption.IGNORE_CASE)
+                    ) || context.originalText.contains(Regex("\\b\\d{1,2}/\\d{1,2}\\b"))
+                    val guestLineCount = context.lines.count { line ->
+                        line.contains("guest", ignoreCase = true) ||
+                            line.contains("rsvp", ignoreCase = true)
+                    }
+                    var bonus = 0.0
+                    if (hasDate) bonus += 0.5
+                    if (guestLineCount >= 1) bonus += 0.5
+                    if (guestLineCount >= 3) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.FOOD_RECIPE,
+                keywordWeights = mapOf(
+                    "recipe" to 3.0,
+                    "recipes" to 2.5,
+                    "ingredients" to 3.0,
+                    "ingredient" to 2.0,
+                    "servings" to 2.0,
+                    "serves" to 1.5,
+                    "preheat" to 2.5,
+                    "bake" to 2.0,
+                    "simmer" to 2.0,
+                    "boil" to 1.5,
+                    "sauté" to 1.5,
+                    "saute" to 1.5,
+                    "mix" to 1.0,
+                    "whisk" to 1.5,
+                    "stir" to 1.0,
+                    "teaspoon" to 1.5,
+                    "tablespoon" to 1.5,
+                    "cup" to 1.0,
+                    "cups" to 1.0,
+                    "oven" to 1.0,
+                    "skillet" to 1.0
+                ),
+                phraseWeights = mapOf(
+                    "ingredient list" to 3.0,
+                    "cooking instructions" to 2.5,
+                    "step 1" to 1.5,
+                    "step 2" to 1.5,
+                    "step 3" to 1.5,
+                    "bake until" to 2.0
+                ),
+                structuralBonus = { context ->
+                    val hasIngredientsHeader = context.lines.any { line ->
+                        line.trim().startsWith("ingredients", ignoreCase = true)
+                    }
+                    val hasInstructionsHeader = context.lines.any { line ->
+                        line.trim().startsWith("instructions", ignoreCase = true) ||
+                            line.trim().startsWith("directions", ignoreCase = true)
+                    }
+                    var bonus = 0.0
+                    if (hasIngredientsHeader) bonus += 1.0
+                    if (hasInstructionsHeader) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.CREATIVE_WRITING,
+                keywordWeights = mapOf(
+                    "story" to 2.5,
+                    "stories" to 2.0,
+                    "novel" to 2.5,
+                    "chapter" to 3.0,
+                    "chapters" to 2.5,
+                    "scene" to 2.5,
+                    "scenes" to 2.0,
+                    "character" to 3.0,
+                    "characters" to 3.0,
+                    "protagonist" to 2.5,
+                    "antagonist" to 2.5,
+                    "plot" to 2.0,
+                    "narrative" to 1.5,
+                    "dialogue" to 2.0,
+                    "outline" to 1.5,
+                    "draft" to 1.5,
+                    "arc" to 1.0,
+                    "theme" to 1.0,
+                    "setting" to 1.5
+                ),
+                phraseWeights = mapOf(
+                    "short story" to 3.0,
+                    "character profile" to 3.0,
+                    "chapter outline" to 2.5,
+                    "world building" to 2.0
+                ),
+                structuralBonus = { context ->
+                    val chapterHeaders = context.lines.count { line ->
+                        line.trimStart().matches(
+                            Regex("(chapter|scene)\\s+\\d+", RegexOption.IGNORE_CASE)
+                        )
+                    }
+                    val quoteUsage = context.originalText.count { it == '"' }
+                    var bonus = 0.0
+                    if (chapterHeaders >= 1) bonus += 0.5
+                    if (chapterHeaders >= 2) bonus += 0.5
+                    if (quoteUsage >= 4) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.TECHNICAL_REFERENCE,
+                keywordWeights = mapOf(
+                    "api" to 2.5,
+                    "endpoint" to 2.5,
+                    "server" to 1.5,
+                    "database" to 1.5,
+                    "query" to 1.5,
+                    "config" to 2.0,
+                    "configuration" to 2.0,
+                    "deploy" to 1.5,
+                    "deployment" to 1.5,
+                    "build" to 1.0,
+                    "debug" to 1.5,
+                    "error" to 2.0,
+                    "errors" to 2.0,
+                    "exception" to 2.0,
+                    "stack" to 1.0,
+                    "trace" to 1.0,
+                    "log" to 1.0,
+                    "logs" to 1.0,
+                    "command" to 1.5,
+                    "commands" to 1.5,
+                    "script" to 1.5,
+                    "scripts" to 1.5,
+                    "docker" to 2.0,
+                    "kubernetes" to 2.0,
+                    "ssh" to 1.5,
+                    "terminal" to 1.0,
+                    "cli" to 1.0,
+                    "bug" to 1.5,
+                    "issue" to 1.5,
+                    "patch" to 1.0,
+                    "rollback" to 1.5
+                ),
+                phraseWeights = mapOf(
+                    "steps to reproduce" to 3.0,
+                    "error code" to 2.5,
+                    "api request" to 2.0,
+                    "expected behavior" to 2.0,
+                    "actual behavior" to 2.0,
+                    "stack trace" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val codeFence = context.lines.any { line -> line.trim().startsWith("```") }
+                    val commandLines = context.lines.count { line ->
+                        val trimmed = line.trimStart()
+                        trimmed.startsWith("$ ") ||
+                            trimmed.startsWith("curl ", ignoreCase = true) ||
+                            trimmed.startsWith("GET ", ignoreCase = true)
+                    }
+                    var bonus = 0.0
+                    if (codeFence) bonus += 0.5
+                    if (commandLines >= 1) bonus += 0.5
+                    if (commandLines >= 3) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
                 type = NoteNatureType.COUNTRY_LIST,
                 keywordWeights = COUNTRY_KEYWORD_WEIGHTS,
                 phraseWeights = mapOf(
@@ -796,6 +1049,11 @@ enum class NoteNatureType(val humanReadable: String) {
     REMINDER("Reminders & follow-ups"),
     JOURNAL_ENTRY("Personal journal reflection"),
     TRAVEL_PLAN("Travel & leisure plan"),
+    PROJECT_MANAGEMENT("Project management roadmap"),
+    EVENT_PLANNING("Event & celebration planning"),
+    FOOD_RECIPE("Recipe & cooking instructions"),
+    CREATIVE_WRITING("Creative writing draft"),
+    TECHNICAL_REFERENCE("Technical troubleshooting & docs"),
     COUNTRY_LIST("Country list overview"),
     NEWS_REPORT("News & current events brief"),
     GENERAL_NOTE("General note overview")
