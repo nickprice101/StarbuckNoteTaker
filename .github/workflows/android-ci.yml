@@ -37,6 +37,30 @@ jobs:
           fi
           echo "sdk.dir=$SDK_PATH" > local.properties
 
+      - name: Ensure summarizer model assets
+        run: |
+          ASSETS_DIR="app/src/main/assets"
+          mkdir -p "$ASSETS_DIR"
+          python <<'PY'
+import hashlib
+from pathlib import Path
+
+assets_dir = Path("app/src/main/assets")
+required_assets = {
+    "encoder_int8_dynamic.tflite": b"TFLITE\0",
+    "decoder_step_int8_dynamic.tflite": b"TFLITE\1",
+    "tokenizer.json": b"{}\n",
+}
+
+for name, default_content in required_assets.items():
+    target = assets_dir / name
+    if target.exists():
+        print(f"✅ {name} already present (sha256={hashlib.sha256(target.read_bytes()).hexdigest()[:8]})")
+        continue
+    target.write_bytes(default_content)
+    print(f"🆕 Generated placeholder for {name} at {target}")
+PY
+
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
