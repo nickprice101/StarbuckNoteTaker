@@ -472,12 +472,21 @@ fun AddNoteScreen(
             )
         }
     ) { padding ->
+        val imeSpacer = (
+            WindowInsets.ime.asPaddingValues().calculateBottomPadding() -
+                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            ).coerceAtLeast(0.dp)
         LazyColumn(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .imePadding()
-                .padding(16.dp)
+                .imePadding(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 16.dp,
+                bottom = 16.dp + imeSpacer,
+            )
         ) {
             item {
                 SummarizerStatusBanner(state = summarizerState)
