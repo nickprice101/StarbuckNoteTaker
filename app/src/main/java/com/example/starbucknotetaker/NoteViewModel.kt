@@ -178,7 +178,7 @@ class NoteViewModel(
         val finalContent = processed.text
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
-        val summarizerSource = buildSummarizerSource(finalContent, event)
+        val summarizerSource = buildSummarizerSource(finalTitle, finalContent, event)
         val initialSummary = if (summarizerSource.isBlank()) {
             ""
         } else {
@@ -247,7 +247,7 @@ class NoteViewModel(
             val note = _notes[index]
             val finalTitle = if (title.isNullOrBlank()) note.title else title
             val finalEvent = event ?: note.event
-            val summarizerSource = buildSummarizerSource(content, finalEvent)
+            val summarizerSource = buildSummarizerSource(finalTitle, content, finalEvent)
             val initialSummary = if (summarizerSource.isBlank()) {
                 ""
             } else {
@@ -528,13 +528,20 @@ class NoteViewModel(
         )
     }
 
-    private fun buildSummarizerSource(content: String, event: NoteEvent?): String {
+    private fun buildSummarizerSource(title: String, content: String, event: NoteEvent?): String {
+        val trimmedTitle = title.trim()
         val trimmedContent = content.trim()
         if (event == null) {
-            return trimmedContent
-        }
-        if (trimmedContent.isEmpty()) {
-            return ""
+            return buildString {
+                if (trimmedTitle.isNotEmpty()) {
+                    append("Title: ")
+                    append(trimmedTitle)
+                }
+                if (trimmedContent.isNotEmpty()) {
+                    if (length > 0) append("\n\n")
+                    append(trimmedContent)
+                }
+            }.trim()
         }
         val zoneId = runCatching { java.time.ZoneId.of(event.timeZone) }
             .getOrDefault(java.time.ZoneId.systemDefault())
@@ -542,6 +549,11 @@ class NoteViewModel(
         val end = java.time.Instant.ofEpochMilli(event.end).atZone(zoneId)
         val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
         return buildString {
+            if (trimmedTitle.isNotEmpty()) {
+                append("Title: ")
+                append(trimmedTitle)
+                append('\n')
+            }
             append("Event from ")
             append(start.format(formatter))
             append(" to ")
@@ -550,9 +562,11 @@ class NoteViewModel(
                 append(" at ")
                 append(event.location)
             }
-            append('\n')
-            append(trimmedContent)
-        }
+            if (trimmedContent.isNotEmpty()) {
+                append("\n\n")
+                append(trimmedContent)
+            }
+        }.trim()
     }
 
     private data class ProcessedNoteContent(
