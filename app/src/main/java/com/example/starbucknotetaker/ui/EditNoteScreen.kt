@@ -186,18 +186,26 @@ fun EditNoteScreen(
     }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
     val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    var alarmEnabled by remember(note.event) {
+        mutableStateOf(note.event?.alarmMinutesBeforeStart != null)
+    }
+    var alarmMinutes by remember(note.event) {
+        mutableStateOf(note.event?.alarmMinutesBeforeStart ?: REMINDER_MINUTE_OPTIONS.getOrElse(4) { 30 })
+    }
     var reminderEnabled by remember(note.event) {
-        mutableStateOf(note.event?.reminderMinutesBeforeStart != null)
+        mutableStateOf(note.event?.notificationMinutesBeforeStart != null)
     }
     var reminderMinutes by remember(note.event) {
-        mutableStateOf(note.event?.reminderMinutesBeforeStart ?: REMINDER_MINUTE_OPTIONS.getOrElse(4) { 30 })
+        mutableStateOf(note.event?.notificationMinutesBeforeStart ?: REMINDER_MINUTE_OPTIONS.getOrElse(4) { 30 })
     }
+    var awaitingAlarmEnable by remember { mutableStateOf(false) }
     var awaitingReminderEnable by remember { mutableStateOf(false) }
     var canScheduleExactAlarm by remember { mutableStateOf(NoteAlarmScheduler.canScheduleExactAlarms(context)) }
+    var pendingNotificationTarget by remember { mutableStateOf<ReminderPermissionTarget?>(null) }
     val exactAlarmPermissionLauncher =
         rememberLauncherForActivityResult(StartActivityForResult()) {
             canScheduleExactAlarm = NoteAlarmScheduler.canScheduleExactAlarms(context)
-            if (awaitingReminderEnable) {
+            if (awaitingAlarmEnable) {
                 if (!canScheduleExactAlarm) {
                     Toast.makeText(
                         context,
@@ -205,33 +213,54 @@ fun EditNoteScreen(
                         Toast.LENGTH_LONG
                     ).show()
                 }
-                reminderEnabled = true
-                awaitingReminderEnable = false
+                alarmEnabled = true
+                awaitingAlarmEnable = false
             }
         }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (awaitingReminderEnable) {
-                if (granted) {
-                    val launched = requestExactAlarmPermission(
-                        context = context,
-                        updateCanSchedule = { canScheduleExactAlarm = it },
-                        onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
-                    )
-                    if (!launched) {
-                        reminderEnabled = true
+            when (pendingNotificationTarget) {
+                ReminderPermissionTarget.Alarm -> {
+                    if (awaitingAlarmEnable) {
+                        if (granted) {
+                            val launched = requestExactAlarmPermission(
+                                context = context,
+                                updateCanSchedule = { canScheduleExactAlarm = it },
+                                onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
+                            )
+                            if (!launched) {
+                                alarmEnabled = true
+                                awaitingAlarmEnable = false
+                            }
+                        } else {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.alarm_notification_permission_required),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            alarmEnabled = false
+                            awaitingAlarmEnable = false
+                        }
+                    }
+                }
+                ReminderPermissionTarget.Reminder -> {
+                    if (awaitingReminderEnable) {
+                        if (granted) {
+                            reminderEnabled = true
+                        } else {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.reminder_notification_permission_required),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            reminderEnabled = false
+                        }
                         awaitingReminderEnable = false
                     }
-                } else {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.reminder_notification_permission_required),
-                        Toast.LENGTH_LONG
-                    ).show()
-                    reminderEnabled = false
-                    awaitingReminderEnable = false
                 }
+                null -> Unit
             }
+            pendingNotificationTarget = null
         }
 
     fun syncLinkPreviews(
@@ -533,7 +562,8 @@ fun EditNoteScreen(
                                     allDay = eventAllDay,
                                     timeZone = zoneId.id,
                                     location = eventLocation.takeIf { it.isNotBlank() },
-                                    reminderMinutesBeforeStart = if (reminderEnabled) reminderMinutes else null,
+                                    alarmMinutesBeforeStart = if (alarmEnabled) alarmMinutes else null,
+                                    notificationMinutesBeforeStart = if (reminderEnabled) reminderMinutes else null,
                                 )
                             } else {
                                 note.event
@@ -708,19 +738,20 @@ fun EditNoteScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Reminder")
+                            Text(text = stringResource(R.string.event_alarm_toggle_label))
                             Spacer(modifier = Modifier.width(8.dp))
                             Switch(
-                                checked = reminderEnabled,
+                                checked = alarmEnabled,
                                 onCheckedChange = { checked ->
                                     if (checked) {
-                                        awaitingReminderEnable = true
+                                        awaitingAlarmEnable = true
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                             val granted = ContextCompat.checkSelfPermission(
                                                 context,
                                                 Manifest.permission.POST_NOTIFICATIONS
                                             ) == PackageManager.PERMISSION_GRANTED
                                             if (!granted) {
+                                                pendingNotificationTarget = ReminderPermissionTarget.Alarm
                                                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                                 return@Switch
                                             }
@@ -731,17 +762,17 @@ fun EditNoteScreen(
                                             onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
                                         )
                                         if (!launched) {
-                                            reminderEnabled = true
-                                            awaitingReminderEnable = false
+                                            alarmEnabled = true
+                                            awaitingAlarmEnable = false
                                         }
                                     } else {
-                                        awaitingReminderEnable = false
-                                        reminderEnabled = false
+                                        awaitingAlarmEnable = false
+                                        alarmEnabled = false
                                     }
                                 }
                             )
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canScheduleExactAlarm) {
+                        if (alarmEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canScheduleExactAlarm) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = stringResource(R.string.reminder_exact_alarm_permission_needed),
@@ -757,11 +788,52 @@ fun EditNoteScreen(
                                 Text(text = stringResource(R.string.reminder_exact_alarm_permission_action))
                             }
                         }
+                        if (alarmEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ReminderOffsetDropdown(
+                                selectedMinutes = alarmMinutes,
+                                onMinutesSelected = { alarmMinutes = it },
+                                fieldLabel = stringResource(R.string.event_alarm_lead_time_label),
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = stringResource(R.string.event_reminder_toggle_label))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(
+                                checked = reminderEnabled,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        awaitingReminderEnable = true
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.POST_NOTIFICATIONS
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (!granted) {
+                                                pendingNotificationTarget = ReminderPermissionTarget.Reminder
+                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                                return@Switch
+                                            }
+                                        }
+                                        reminderEnabled = true
+                                        awaitingReminderEnable = false
+                                    } else {
+                                        awaitingReminderEnable = false
+                                        reminderEnabled = false
+                                    }
+                                }
+                            )
+                        }
                         if (reminderEnabled) {
                             Spacer(modifier = Modifier.height(8.dp))
                             ReminderOffsetDropdown(
                                 selectedMinutes = reminderMinutes,
                                 onMinutesSelected = { reminderMinutes = it },
+                                fieldLabel = stringResource(R.string.event_reminder_lead_time_label),
                             )
                         }
                     }
@@ -1115,4 +1187,5 @@ private sealed class EditBlock {
 private val editBlockIdGenerator = AtomicLong(0L)
 
 private fun nextEditBlockId(): Long = editBlockIdGenerator.getAndIncrement()
+
 

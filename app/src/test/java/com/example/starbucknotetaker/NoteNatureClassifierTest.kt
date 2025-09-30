@@ -170,7 +170,7 @@ class NoteNatureClassifierTest {
             end = 1_700_000_900_000L,
             allDay = false,
             timeZone = "UTC",
-            reminderMinutesBeforeStart = 30
+            alarmMinutesBeforeStart = 30
         )
 
         val label = classifier.classify(text, event)

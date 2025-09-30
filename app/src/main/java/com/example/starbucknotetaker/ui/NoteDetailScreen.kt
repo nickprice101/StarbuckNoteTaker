@@ -591,7 +591,10 @@ private fun buildEventSummary(
                 ?.takeUnless { it.equals(name, ignoreCase = true) }
                 ?.let { appendLine(it) }
         }
-        event.reminderMinutesBeforeStart?.let { minutes ->
+        event.alarmMinutesBeforeStart?.let { minutes ->
+            appendLine("Alarm: ${formatReminderOffsetMinutes(minutes)}")
+        }
+        event.notificationMinutesBeforeStart?.let { minutes ->
             appendLine("Reminder: ${formatReminderOffsetMinutes(minutes)}")
         }
         append("Time zone: $zoneCode (${zoneId.id})")
@@ -691,6 +694,14 @@ private fun EventDetailsCard(
                 secondary?.let { address ->
                     Text(address)
                 }
+            }
+            event.alarmMinutesBeforeStart?.let { minutes ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Alarm: ${formatReminderOffsetMinutes(minutes)}")
+            }
+            event.notificationMinutesBeforeStart?.let { minutes ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Reminder: ${formatReminderOffsetMinutes(minutes)}")
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text("Time zone: $zoneCode (${zoneId.id})")
