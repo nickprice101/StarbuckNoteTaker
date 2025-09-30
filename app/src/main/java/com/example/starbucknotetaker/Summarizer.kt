@@ -181,7 +181,12 @@ class Summarizer(
                 emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
-                return label.humanReadable
+                val excerpt = firstTwoNonEmptyLines(text)
+                return if (excerpt.isNotBlank()) {
+                    excerpt
+                } else {
+                    label.humanReadable
+                }
             }
 
             if (enc == null || dec == null || tok == null) {
@@ -423,7 +428,12 @@ class Summarizer(
 
     fun fallbackSummary(text: String, event: NoteEvent?): String {
         val label = runBlocking { classifyFallbackLabel(text, event) }
-        return label.humanReadable
+        val excerpt = firstTwoNonEmptyLines(text)
+        return if (excerpt.isNotBlank()) {
+            excerpt
+        } else {
+            label.humanReadable
+        }
     }
 
     private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel {
@@ -440,6 +450,20 @@ class Summarizer(
         }
         emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
         return label
+    }
+
+    private fun firstTwoNonEmptyLines(text: String): String {
+        val lines = text
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .take(2)
+            .toList()
+        return when {
+            lines.isEmpty() -> ""
+            lines.size == 1 -> lines[0]
+            else -> lines.joinToString(separator = "\n")
+        }
     }
 
     private fun selectNextToken(

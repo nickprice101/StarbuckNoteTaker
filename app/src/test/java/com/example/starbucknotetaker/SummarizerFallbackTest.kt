@@ -40,10 +40,13 @@ class SummarizerFallbackTest {
             debugSink = { debugMessages.add(it) }
         )
 
-        val source = "First sentence has coffee beans. Second sentence talks about roasting beans. Third sentence is ignored."
+        val source = "First sentence has coffee beans.\nSecond sentence talks about roasting beans.\nThird sentence is ignored."
         val summary = summarizer.summarize(source)
 
-        assertEquals(NoteNatureType.GENERAL_NOTE.humanReadable, summary)
+        assertEquals(
+            "First sentence has coffee beans.\nSecond sentence talks about roasting beans.",
+            summary
+        )
 
         val trace = summarizer.consumeDebugTrace()
         assertTrue(
