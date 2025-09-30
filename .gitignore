@@ -16,3 +16,4 @@ gradle/wrapper/gradle-wrapper.jar
 # On-device model binaries (download separately)
 app/src/main/assets/*.tflite
 app/src/main/assets/*.model
+app/src/main/assets/tokenizer.json

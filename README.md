@@ -20,13 +20,18 @@ This repository uses the included Gradle wrapper. Typical commands:
 
 ## On-device summarization models
 
-The app downloads its TensorFlow Lite summarisation models from a public
-endpoint at `https://music.corsicanescape.com/apk/` on first run and caches
-them under internal storage. If the download fails, summaries gracefully fall
-back to a simple extractive method.
+The TensorFlow Lite encoder/decoder models and tokenizer JSON now ship with the
+app under `app/src/main/assets/`. The notebook `build_tensor.ipynb` fine-tunes
+the FLAN-T5 model, converts it to `encoder_int8_dynamic.tflite` and
+`decoder_step_int8_dynamic.tflite`, and copies those files plus `tokenizer.json`
+into the assets directory. At runtime the app copies the bundled assets into
+`context.filesDir/models` before loading them. If the interpreter or tokenizer
+cannot be prepared, the summariser gracefully falls back to the extractive
+strategy.
 
-The model URLs are configured in `ModelFetcher`. Update these constants when
-publishing new model versions or moving the files.
+The large binaries remain untracked by Git. After regenerating the models, run
+the notebook and keep only the metadata/documentation changes in version
+control.
 
 ## Requirements
 
