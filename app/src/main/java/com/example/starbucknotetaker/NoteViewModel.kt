@@ -89,14 +89,8 @@ class NoteViewModel(
                     _summarizerState.value = state
                     this@NoteViewModel.context?.let { ctx ->
                         when (state) {
-                            Summarizer.SummarizerState.Ready ->
-                                NotificationInterruptionManager.runOrQueue {
-                                    Toast.makeText(ctx, "AI summarizer loaded", Toast.LENGTH_SHORT).show()
-                                }
-                            Summarizer.SummarizerState.Fallback ->
-                                NotificationInterruptionManager.runOrQueue {
-                                    Toast.makeText(ctx, "Using fallback summarization", Toast.LENGTH_SHORT).show()
-                                }
+                            Summarizer.SummarizerState.Ready -> Unit
+                            Summarizer.SummarizerState.Fallback -> Unit
                             is Summarizer.SummarizerState.Error ->
                                 NotificationInterruptionManager.runOrQueue {
                                     Toast.makeText(
