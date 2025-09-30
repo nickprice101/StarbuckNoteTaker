@@ -13,6 +13,7 @@ data class ReminderPayload(
     val isLocked: Boolean,
     val reminderMinutes: Int,
     val fallbackToNotification: Boolean,
+    val kind: Kind,
 ) {
     fun copyForFallback(fallback: Boolean): ReminderPayload {
         return copy(fallbackToNotification = fallback)
@@ -29,6 +30,11 @@ data class ReminderPayload(
         intent.putExtra(EXTRA_NOTE_LOCKED, isLocked)
         intent.putExtra(EXTRA_REMINDER_MINUTES, reminderMinutes)
         intent.putExtra(EXTRA_FALLBACK_TO_NOTIFICATION, fallbackToNotification)
+        intent.putExtra(EXTRA_KIND, kind.name)
+    }
+
+    fun requestCode(): Int {
+        return (noteId.hashCode() * 31) + kind.ordinal
     }
 
     companion object {
@@ -42,6 +48,7 @@ data class ReminderPayload(
         private const val EXTRA_NOTE_LOCKED = "extra_note_locked"
         private const val EXTRA_REMINDER_MINUTES = "extra_reminder_minutes"
         private const val EXTRA_FALLBACK_TO_NOTIFICATION = "extra_fallback_to_notification"
+        private const val EXTRA_KIND = "extra_reminder_kind"
 
         fun fromIntent(intent: Intent?): ReminderPayload? {
             intent ?: return null
@@ -52,6 +59,10 @@ data class ReminderPayload(
             if (noteId == -1L) {
                 return null
             }
+            val kindName = intent.getStringExtra(EXTRA_KIND)
+            val kind = kindName?.let { name ->
+                runCatching { Kind.valueOf(name) }.getOrDefault(Kind.ALARM)
+            } ?: Kind.ALARM
             return ReminderPayload(
                 noteId = noteId,
                 title = intent.getStringExtra(EXTRA_NOTE_TITLE).orEmpty(),
@@ -63,10 +74,16 @@ data class ReminderPayload(
                 isLocked = intent.getBooleanExtra(EXTRA_NOTE_LOCKED, false),
                 reminderMinutes = intent.getIntExtra(EXTRA_REMINDER_MINUTES, 0),
                 fallbackToNotification = intent.getBooleanExtra(EXTRA_FALLBACK_TO_NOTIFICATION, false),
+                kind = kind,
             )
         }
 
-        fun fromNote(note: Note, fallbackToNotification: Boolean): ReminderPayload {
+        fun fromNote(
+            note: Note,
+            minutesBeforeStart: Int,
+            fallbackToNotification: Boolean,
+            kind: Kind,
+        ): ReminderPayload {
             val event = note.event ?: error("Note must have an event to create a reminder payload")
             return ReminderPayload(
                 noteId = note.id,
@@ -77,9 +94,15 @@ data class ReminderPayload(
                 allDay = event.allDay,
                 location = event.location,
                 isLocked = note.isLocked,
-                reminderMinutes = event.reminderMinutesBeforeStart ?: 0,
+                reminderMinutes = minutesBeforeStart,
                 fallbackToNotification = fallbackToNotification,
+                kind = kind,
             )
         }
+    }
+
+    enum class Kind {
+        ALARM,
+        REMINDER,
     }
 }

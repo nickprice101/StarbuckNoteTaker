@@ -28,3 +28,8 @@ fun requestExactAlarmPermission(
     onNeedsPermission(intent)
     return true
 }
+
+enum class ReminderPermissionTarget {
+    Alarm,
+    Reminder,
+}

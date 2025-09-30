@@ -19,36 +19,81 @@ class NoteAlarmScheduler(private val context: Context) {
             return
         }
         val event = note.event
-        val reminderMinutes = event?.reminderMinutesBeforeStart
-        if (event == null || reminderMinutes == null) {
+        if (event == null) {
             cancel(note.id)
+            return
+        }
+
+        scheduleReminder(
+            manager = manager,
+            note = note,
+            event = event,
+            minutesBefore = event.alarmMinutesBeforeStart,
+            kind = ReminderPayload.Kind.ALARM,
+        )
+        scheduleReminder(
+            manager = manager,
+            note = note,
+            event = event,
+            minutesBefore = event.notificationMinutesBeforeStart,
+            kind = ReminderPayload.Kind.REMINDER,
+        )
+    }
+
+    fun cancel(noteId: Long) {
+        cancel(noteId, ReminderPayload.Kind.ALARM)
+        cancel(noteId, ReminderPayload.Kind.REMINDER)
+    }
+
+    fun syncNotes(notes: List<Note>) {
+        notes.forEach { note -> scheduleIfNeeded(note) }
+    }
+
+    private fun scheduleReminder(
+        manager: AlarmManager,
+        note: Note,
+        event: NoteEvent,
+        minutesBefore: Int?,
+        kind: ReminderPayload.Kind,
+    ) {
+        if (minutesBefore == null) {
+            cancel(note.id, kind)
             return
         }
 
         val eventInstant = Instant.ofEpochMilli(event.start)
         val zone = runCatching { ZoneId.of(event.timeZone) }.getOrNull()
         val reminderInstant = zone?.let {
-            eventInstant.atZone(it).minusMinutes(reminderMinutes.toLong()).toInstant()
-        } ?: eventInstant.minus(Duration.ofMinutes(reminderMinutes.toLong()))
+            eventInstant.atZone(it).minusMinutes(minutesBefore.toLong()).toInstant()
+        } ?: eventInstant.minus(Duration.ofMinutes(minutesBefore.toLong()))
         val triggerAtMillis = reminderInstant.toEpochMilli()
         val now = System.currentTimeMillis()
         if (triggerAtMillis <= now) {
             Log.d(
                 TAG,
-                "scheduleIfNeeded: skipping past reminder noteId=${note.id} triggerAt=${triggerAtMillis} now=${now}"
+                "scheduleReminder: skipping past reminder noteId=${note.id} kind=${kind} triggerAt=${triggerAtMillis} now=${now}"
             )
-            cancel(note.id)
+            cancel(note.id, kind)
             return
         }
 
-        val existing = existingPendingIntent(note.id)
+        val existing = existingPendingIntent(note.id, kind)
         if (existing != null) {
             manager.cancel(existing)
             existing.cancel()
         }
 
         val canUseExact = canScheduleExactAlarms(context)
-        val payload = ReminderPayload.fromNote(note, fallbackToNotification = !canUseExact)
+        val fallbackToNotification = when (kind) {
+            ReminderPayload.Kind.ALARM -> !canUseExact
+            ReminderPayload.Kind.REMINDER -> true
+        }
+        val payload = ReminderPayload.fromNote(
+            note = note,
+            minutesBeforeStart = minutesBefore,
+            fallbackToNotification = fallbackToNotification,
+            kind = kind,
+        )
         val pendingIntent = ReminderAlarmService.createAlarmPendingIntent(context, payload)
         if (canUseExact) {
             manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
@@ -57,34 +102,34 @@ class NoteAlarmScheduler(private val context: Context) {
         }
         Log.d(
             TAG,
-            "scheduleIfNeeded: scheduled noteId=${note.id} reschedule=${existing != null} triggerAt=${triggerAtMillis} minutesBefore=${reminderMinutes} fallback=${!canUseExact}"
+            "scheduleReminder: scheduled noteId=${note.id} kind=${kind} reschedule=${existing != null} triggerAt=${triggerAtMillis} minutesBefore=${minutesBefore} fallback=${fallbackToNotification}"
         )
     }
 
-    fun cancel(noteId: Long) {
+    private fun cancel(noteId: Long, kind: ReminderPayload.Kind) {
         val manager = alarmManager ?: return
-        val existing = existingPendingIntent(noteId)
+        val existing = existingPendingIntent(noteId, kind)
         if (existing != null) {
             manager.cancel(existing)
             existing.cancel()
-            Log.d(TAG, "cancel: cancelled noteId=${noteId}")
+            Log.d(TAG, "cancel: cancelled noteId=${noteId} kind=${kind}")
         } else {
-            Log.d(TAG, "cancel: no existing alarm for noteId=${noteId}")
+            Log.d(TAG, "cancel: no existing alarm for noteId=${noteId} kind=${kind}")
         }
     }
 
-    fun syncNotes(notes: List<Note>) {
-        notes.forEach { note -> scheduleIfNeeded(note) }
-    }
-
-    private fun existingPendingIntent(noteId: Long): PendingIntent? {
-        val intent = ReminderAlarmReceiver.createBaseIntent(context, noteId)
+    private fun existingPendingIntent(noteId: Long, kind: ReminderPayload.Kind): PendingIntent? {
+        val intent = ReminderAlarmReceiver.createBaseIntent(context, noteId, kind)
         return PendingIntent.getBroadcast(
             context,
-            noteId.hashCode(),
+            requestCode(noteId, kind),
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
+    }
+
+    private fun requestCode(noteId: Long, kind: ReminderPayload.Kind): Int {
+        return (noteId.hashCode() * 31) + kind.ordinal
     }
 
     companion object {

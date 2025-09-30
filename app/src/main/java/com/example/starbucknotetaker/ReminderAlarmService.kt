@@ -220,7 +220,7 @@ class ReminderAlarmService : Service() {
             val intent = ReminderAlarmReceiver.createIntent(context, payload)
             return PendingIntent.getBroadcast(
                 context,
-                payload.noteId.hashCode(),
+                payload.requestCode(),
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )

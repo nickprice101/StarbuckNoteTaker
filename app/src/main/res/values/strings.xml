@@ -18,7 +18,12 @@
     <string name="reminder_alarm_missing_payload">Reminder details were unavailable.</string>
     <string name="reminder_alarm_snoozed">Snoozed for %1$d minutes</string>
     <string name="reminder_notification_permission_required">Notification permission is required to enable reminders.</string>
-    <string name="reminder_exact_alarm_permission_denied">Exact alarms are still disabled. Reminders will arrive as notifications.</string>
-    <string name="reminder_exact_alarm_permission_needed">Allow exact alarms to enable full-screen reminders.</string>
+    <string name="alarm_notification_permission_required">Notification permission is required to enable alarms.</string>
+    <string name="reminder_exact_alarm_permission_denied">Exact alarms are still disabled. Alarm reminders will arrive as notifications.</string>
+    <string name="reminder_exact_alarm_permission_needed">Allow exact alarms to enable full-screen alarms.</string>
     <string name="reminder_exact_alarm_permission_action">Open alarm settings</string>
+    <string name="event_alarm_toggle_label">Alarm</string>
+    <string name="event_reminder_toggle_label">Reminder</string>
+    <string name="event_alarm_lead_time_label">Alarm lead time</string>
+    <string name="event_reminder_lead_time_label">Reminder lead time</string>
 </resources>

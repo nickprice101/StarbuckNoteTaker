@@ -22,6 +22,7 @@ fun ReminderOffsetDropdown(
     selectedMinutes: Int,
     onMinutesSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    fieldLabel: String,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val label = formatReminderOffsetMinutes(selectedMinutes)
@@ -31,7 +32,7 @@ fun ReminderOffsetDropdown(
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Reminder lead time") },
+            label = { Text(fieldLabel) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = modifier.fillMaxWidth(),
         )

@@ -33,12 +33,20 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         val wakeLock = acquireWakeLock(appContext, payload.noteId)
         try {
-            if (payload.fallbackToNotification) {
-                showNotification(appContext, payload)
-                Log.d(TAG, "onReceive: fallback notification shown noteId=${payload.noteId}")
-            } else {
-                ReminderAlarmService.start(appContext, payload)
-                Log.d(TAG, "onReceive: started full-screen alarm noteId=${payload.noteId}")
+            when (payload.kind) {
+                ReminderPayload.Kind.ALARM -> {
+                    if (payload.fallbackToNotification) {
+                        showNotification(appContext, payload)
+                        Log.d(TAG, "onReceive: fallback notification shown noteId=${payload.noteId}")
+                    } else {
+                        ReminderAlarmService.start(appContext, payload)
+                        Log.d(TAG, "onReceive: started full-screen alarm noteId=${payload.noteId}")
+                    }
+                }
+                ReminderPayload.Kind.REMINDER -> {
+                    showNotification(appContext, payload)
+                    Log.d(TAG, "onReceive: reminder notification shown noteId=${payload.noteId}")
+                }
             }
         } catch (t: Throwable) {
             Log.e(TAG, "onReceive: failed to handle reminder", t)
@@ -136,7 +144,7 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             return
         }
 
-        NotificationManagerCompat.from(context).notify(payload.noteId.hashCode(), builder.build())
+        NotificationManagerCompat.from(context).notify(payload.requestCode(), builder.build())
     }
 
     companion object {
@@ -145,13 +153,9 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         private const val CHANNEL_ID = "note-reminders"
         private const val WAKE_LOCK_TAG = "StarbuckNoteTaker:ReminderWakeLock"
         private const val WAKE_LOCK_TIMEOUT_MS = 10_000L
+        private const val EXTRA_BASE_KIND = "extra_base_reminder_kind"
         private val DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a")
         private val DATE_FORMAT = DateTimeFormatter.ofPattern("MMM d, yyyy")
-
-        fun createIntent(context: Context, note: Note, fallbackToNotification: Boolean): Intent {
-            val payload = ReminderPayload.fromNote(note, fallbackToNotification)
-            return createIntent(context, payload)
-        }
 
         fun createIntent(context: Context, payload: ReminderPayload): Intent {
             return Intent(context, ReminderAlarmReceiver::class.java).apply {
@@ -160,10 +164,15 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             }
         }
 
-        fun createBaseIntent(context: Context, noteId: Long): Intent {
+        fun createBaseIntent(
+            context: Context,
+            noteId: Long,
+            kind: ReminderPayload.Kind,
+        ): Intent {
             return Intent(context, ReminderAlarmReceiver::class.java).apply {
                 action = ACTION_SHOW_NOTE_REMINDER
                 putExtra(ReminderPayload.EXTRA_NOTE_ID, noteId)
+                putExtra(EXTRA_BASE_KIND, kind.name)
             }
         }
 

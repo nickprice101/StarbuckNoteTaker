@@ -18,7 +18,7 @@ class NoteDetailScreenTest {
             allDay = false,
             timeZone = "UTC",
             location = "Melkweg\nLijnbaansgracht 234A, Amsterdam",
-            reminderMinutesBeforeStart = null,
+            alarmMinutesBeforeStart = null,
         )
 
         val summary = invokeBuildEventSummary(event)
@@ -40,7 +40,7 @@ class NoteDetailScreenTest {
             allDay = false,
             timeZone = "UTC",
             location = "Lijnbaansgracht 234A, Amsterdam",
-            reminderMinutesBeforeStart = null,
+            alarmMinutesBeforeStart = null,
         )
         val display = EventLocationDisplay(
             name = "Melkweg",
@@ -63,7 +63,7 @@ class NoteDetailScreenTest {
             allDay = false,
             timeZone = "UTC",
             location = "Melkweg\nLijnbaansgracht 234A, Amsterdam",
-            reminderMinutesBeforeStart = null,
+            alarmMinutesBeforeStart = null,
         )
         val note = Note(
             title = "Concert",

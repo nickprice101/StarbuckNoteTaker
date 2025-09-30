@@ -102,8 +102,18 @@ class EncryptedNoteStore(
             }
             val eventObj = obj.optJSONObject("event")
             val event = eventObj?.let {
-                val reminderMinutes = if (it.has("reminderMinutesBeforeStart") && !it.isNull("reminderMinutesBeforeStart")) {
-                    it.optInt("reminderMinutesBeforeStart")
+                val alarmMinutes = when {
+                    it.has("alarmMinutesBeforeStart") && !it.isNull("alarmMinutesBeforeStart") ->
+                        it.optInt("alarmMinutesBeforeStart")
+                    it.has("reminderMinutesBeforeStart") && !it.isNull("reminderMinutesBeforeStart") ->
+                        it.optInt("reminderMinutesBeforeStart")
+                    else -> null
+                }
+                val notificationMinutes = if (
+                    it.has("notificationMinutesBeforeStart") &&
+                        !it.isNull("notificationMinutesBeforeStart")
+                ) {
+                    it.optInt("notificationMinutesBeforeStart")
                 } else {
                     null
                 }
@@ -114,7 +124,8 @@ class EncryptedNoteStore(
                     timeZone = it.optString("timeZone", java.util.TimeZone.getDefault().id),
                     location = it.optString("location", null)
                         ?.takeIf { location -> location.isNotBlank() },
-                    reminderMinutesBeforeStart = reminderMinutes,
+                    alarmMinutesBeforeStart = alarmMinutes,
+                    notificationMinutesBeforeStart = notificationMinutes,
                 )
             }
             notes.add(
@@ -197,7 +208,14 @@ class EncryptedNoteStore(
                 eo.put("allDay", event.allDay)
                 eo.put("timeZone", event.timeZone)
                 event.location?.let { eo.put("location", it) }
-                event.reminderMinutesBeforeStart?.let { eo.put("reminderMinutesBeforeStart", it) }
+                event.alarmMinutesBeforeStart?.let {
+                    eo.put("alarmMinutesBeforeStart", it)
+                    // Legacy field for backward compatibility with previous builds.
+                    eo.put("reminderMinutesBeforeStart", it)
+                }
+                event.notificationMinutesBeforeStart?.let {
+                    eo.put("notificationMinutesBeforeStart", it)
+                }
                 obj.put("event", eo)
             }
             obj.put("locked", note.isLocked)
