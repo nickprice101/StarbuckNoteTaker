@@ -181,7 +181,7 @@ class Summarizer(
                 emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
-                return label.humanReadable
+                return trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
             }
 
             if (enc == null || dec == null || tok == null) {
@@ -423,7 +423,7 @@ class Summarizer(
 
     fun fallbackSummary(text: String, event: NoteEvent?): String {
         val label = runBlocking { classifyFallbackLabel(text, event) }
-        return label.humanReadable
+        return trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
     }
 
     private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel {

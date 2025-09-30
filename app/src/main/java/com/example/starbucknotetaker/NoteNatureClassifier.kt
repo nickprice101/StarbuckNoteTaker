@@ -61,7 +61,9 @@ open class NoteNatureClassifier {
 
         val type = best.key
         val confidence = relativeScore.coerceIn(0.0, 1.0)
-        return NoteNatureLabel(type, type.humanReadable, confidence)
+        val definition = categoryDefinitionMap[type]
+        return definition?.buildLabel(context, confidence)
+            ?: NoteNatureLabel(type, type.humanReadable, confidence)
     }
 
     private fun normalizeTokens(text: String): List<String> {
@@ -92,7 +94,8 @@ open class NoteNatureClassifier {
         val keywordWeights: Map<String, Double>,
         val phraseWeights: Map<String, Double> = emptyMap(),
         val structuralBonus: (NormalizedContext) -> Double = { 0.0 },
-        val eventBonus: (NoteEvent?, NormalizedContext) -> Double = { _, _ -> 0.0 }
+        val eventBonus: (NoteEvent?, NormalizedContext) -> Double = { _, _ -> 0.0 },
+        val labelBuilder: ((NormalizedContext, Double) -> NoteNatureLabel)? = null
     ) {
         fun score(context: NormalizedContext, event: NoteEvent?): Double {
             var total = 0.0
@@ -110,6 +113,12 @@ open class NoteNatureClassifier {
             total += structuralBonus(context)
             total += eventBonus(event, context)
             return total
+        }
+
+        fun buildLabel(context: NormalizedContext, confidence: Double): NoteNatureLabel {
+            val builder = labelBuilder ?: return NoteNatureLabel(type, type.humanReadable, confidence)
+            val built = builder(context, confidence)
+            return if (built.type == type) built else built.copy(type = type, confidence = confidence)
         }
     }
 
@@ -142,6 +151,43 @@ open class NoteNatureClassifier {
             // German
             "der", "die", "das", "und", "oder", "ein", "eine", "mit", "von"
         )
+
+        private val COUNTRY_NAMES = listOf(
+            "Argentina",
+            "Australia",
+            "Brazil",
+            "Canada",
+            "Chile",
+            "China",
+            "Colombia",
+            "France",
+            "Germany",
+            "India",
+            "Italy",
+            "Japan",
+            "Mexico",
+            "Peru",
+            "Spain",
+            "United Kingdom",
+            "United States",
+            "South Africa"
+        )
+
+        private val COUNTRY_KEYWORD_WEIGHTS = buildMap {
+            put("country", 2.0)
+            put("countries", 2.5)
+            put("nation", 1.5)
+            put("nations", 1.5)
+            for (country in COUNTRY_NAMES) {
+                val normalized = country.lowercase(Locale.ROOT)
+                val token = normalized.substringBefore(" ")
+                put(token, 1.0)
+            }
+            put("travel", 0.5)
+            put("visited", 1.0)
+            put("visa", 0.5)
+            put("capital", 0.5)
+        }
 
         private val categoryDefinitions = listOf(
             CategoryDefinition(
@@ -216,6 +262,29 @@ open class NoteNatureClassifier {
                     }
                     val bonus = if (shortLines >= 3) 1.5 else 0.0
                     bonus + if (bulletLines >= 2) 1.0 else 0.0
+                },
+                labelBuilder = { context, confidence ->
+                    val trimmedLines = context.lines.map { it.trim() }
+                    val bulletItems = trimmedLines.filter { line ->
+                        line.isNotEmpty() && (
+                            line.startsWith("-") ||
+                                line.startsWith("*") ||
+                                line.startsWith("•") ||
+                                line.matches(Regex("\\d+\\. .*"))
+                            )
+                    }
+                    val compactLines = trimmedLines.filter { line ->
+                        line.isNotEmpty() && line.length <= 32
+                    }
+                    val itemCount = max(bulletItems.size, compactLines.size)
+                    val countText = if (itemCount > 0) itemCount else 0
+                    val description = if (countText > 0) {
+                        val noun = if (countText == 1) "item" else "items"
+                        "Shopping list with $countText $noun"
+                    } else {
+                        NoteNatureType.SHOPPING_LIST.humanReadable
+                    }
+                    NoteNatureLabel(NoteNatureType.SHOPPING_LIST, description, confidence)
                 }
             ),
             CategoryDefinition(
@@ -310,8 +379,138 @@ open class NoteNatureClassifier {
                     if (containsTimes) bonus += 1.0
                     bonus
                 }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.COUNTRY_LIST,
+                keywordWeights = COUNTRY_KEYWORD_WEIGHTS,
+                phraseWeights = mapOf(
+                    "country list" to 3.0,
+                    "list of countries" to 3.0,
+                    "visited countries" to 2.5,
+                    "countries to visit" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val bulletLines = context.lines.count { line ->
+                        val trimmed = line.trimStart()
+                        trimmed.startsWith("-") || trimmed.startsWith("*") || trimmed.startsWith("•") ||
+                            trimmed.matches(Regex("\\d+\\. .*"))
+                    }
+                    val recognizedCountries = countCountryMentions(context)
+                    var bonus = 0.0
+                    if (bulletLines >= 3) bonus += 1.5
+                    if (recognizedCountries >= 3) {
+                        bonus += 2.0
+                    } else if (recognizedCountries >= 1) {
+                        bonus += 0.5
+                    }
+                    bonus
+                },
+                labelBuilder = { context, confidence ->
+                    val recognized = extractCountryMentions(context)
+                    val bulletLines = context.lines.count { line ->
+                        val trimmed = line.trimStart()
+                        trimmed.startsWith("-") || trimmed.startsWith("*") || trimmed.startsWith("•") ||
+                            trimmed.matches(Regex("\\d+\\. .*"))
+                    }
+                    val entryCount = max(recognized.size, bulletLines)
+                    val noun = if (entryCount == 1) "entry" else "entries"
+                    val highlights = if (recognized.isNotEmpty()) {
+                        val preview = recognized.take(3).joinToString(", ")
+                        " including $preview"
+                    } else {
+                        ""
+                    }
+                    val description = if (entryCount > 0) {
+                        "Country list with $entryCount $noun$highlights"
+                    } else {
+                        NoteNatureType.COUNTRY_LIST.humanReadable
+                    }
+                    NoteNatureLabel(NoteNatureType.COUNTRY_LIST, description, confidence)
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.NEWS_REPORT,
+                keywordWeights = mapOf(
+                    "breaking" to 2.5,
+                    "news" to 3.0,
+                    "report" to 2.5,
+                    "headline" to 2.0,
+                    "update" to 1.5,
+                    "officials" to 1.0,
+                    "witnesses" to 1.0,
+                    "reported" to 1.5,
+                    "according" to 0.5,
+                    "incident" to 1.5,
+                    "investigation" to 1.5,
+                    "alert" to 1.5,
+                    "live" to 0.5
+                ),
+                phraseWeights = mapOf(
+                    "breaking news" to 3.5,
+                    "developing story" to 3.0,
+                    "according to" to 1.5,
+                    "news report" to 3.0,
+                    "press conference" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val datelineRegex = Regex("^[A-Z]{2,}(?:, [A-Z]{2,})? - ")
+                    val hasDateline = context.lines.firstOrNull()?.trim()?.let { datelineRegex.containsMatchIn(it) } == true
+                    val paragraphCount = context.originalText.split("\n\n").count { it.trim().isNotEmpty() }
+                    val quoteRegex = Regex("\"[^\"]+\"")
+                    val hasQuote = quoteRegex.containsMatchIn(context.originalText)
+                    val numericPrefixes = context.lines.count { line ->
+                        line.trimStart().matches(Regex("\\d+[:.)].*"))
+                    }
+                    var bonus = 0.0
+                    if (hasDateline) bonus += 1.5
+                    if (paragraphCount >= 2) bonus += 1.0
+                    if (hasQuote) bonus += 0.5
+                    if (numericPrefixes >= 1) bonus += 0.5
+                    bonus
+                },
+                labelBuilder = { context, confidence ->
+                    val topKeyword = context.tokenFrequency
+                        .filter { (token, _) ->
+                            token.length >= 4 && token !in stopWords && token.all { it.isLetter() }
+                        }
+                        .maxByOrNull { it.value }
+                        ?.key
+                    val topicText = topKeyword?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+                    val description = if (topicText != null) {
+                        "News report about $topicText"
+                    } else {
+                        NoteNatureType.NEWS_REPORT.humanReadable
+                    }
+                    NoteNatureLabel(NoteNatureType.NEWS_REPORT, description, confidence)
+                }
             )
         )
+
+        private val categoryDefinitionMap = categoryDefinitions.associateBy { it.type }
+
+        private fun countCountryMentions(context: NormalizedContext): Int {
+            val normalizedJoined = context.joined
+            var total = 0
+            for (country in COUNTRY_NAMES) {
+                val normalizedCountry = country.lowercase(Locale.ROOT)
+                if (normalizedJoined.contains(normalizedCountry)) {
+                    total += 1
+                }
+            }
+            return total
+        }
+
+        private fun extractCountryMentions(context: NormalizedContext): List<String> {
+            val normalizedJoined = context.joined
+            val mentions = mutableListOf<String>()
+            for (country in COUNTRY_NAMES) {
+                val normalizedCountry = country.lowercase(Locale.ROOT)
+                if (normalizedJoined.contains(normalizedCountry)) {
+                    mentions.add(country)
+                }
+            }
+            return mentions
+        }
     }
 }
 
@@ -333,5 +532,7 @@ enum class NoteNatureType(val humanReadable: String) {
     REMINDER("Reminder or follow-up"),
     JOURNAL_ENTRY("Personal journal reflection"),
     TRAVEL_PLAN("Travel or itinerary plan"),
+    COUNTRY_LIST("Country list overview"),
+    NEWS_REPORT("News report summary"),
     GENERAL_NOTE("General note overview")
 }
