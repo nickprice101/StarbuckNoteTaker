@@ -155,7 +155,10 @@ fun LocationAutocompleteField(
         ) {
             suggestions.forEach { suggestion ->
                 DropdownMenuItem(onClick = {
-                    onValueChange(suggestion.text)
+                    val formattedSelection = suggestion.display
+                        .toQueryString()
+                        .ifBlank { suggestion.text }
+                    onValueChange(formattedSelection)
                     expanded = false
                     suggestions = emptyList()
                     focusRequester.requestFocus()
