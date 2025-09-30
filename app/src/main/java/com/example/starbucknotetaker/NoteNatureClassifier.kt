@@ -6,14 +6,22 @@ import kotlin.math.max
 
 /**
  * Provides lightweight note intent classification for the app. The taxonomy is intentionally
- * narrow and tailored to the primary note-taking scenarios we support:
+ * compact but now spans the most common scenarios surfaced in user research:
  *
- * 1. [NoteNatureType.MEETING_RECAP] &ndash; agenda summaries, minutes, action items.
- * 2. [NoteNatureType.SHOPPING_LIST] &ndash; shopping or packing checklists.
- * 3. [NoteNatureType.REMINDER] &ndash; short, time-sensitive prompts or follow ups.
- * 4. [NoteNatureType.JOURNAL_ENTRY] &ndash; reflective journal or diary style notes.
- * 5. [NoteNatureType.TRAVEL_PLAN] &ndash; itineraries, reservations, and logistics.
- * 6. [NoteNatureType.GENERAL_NOTE] &ndash; catch-all fallback when confidence is low.
+ * 1. [NoteNatureType.PERSONAL_DAILY_LIFE] &ndash; everyday plans, social updates, and lifestyle notes.
+ * 2. [NoteNatureType.FINANCE_LEGAL] &ndash; budgets, invoices, policies, and legal checklists.
+ * 3. [NoteNatureType.SELF_IMPROVEMENT] &ndash; habit trackers, affirmations, and growth goals.
+ * 4. [NoteNatureType.HEALTH_WELLNESS] &ndash; workouts, medication logs, and meal planning.
+ * 5. [NoteNatureType.EDUCATION_LEARNING] &ndash; lecture notes, study guides, and assignments.
+ * 6. [NoteNatureType.HOME_FAMILY] &ndash; household coordination and family schedules.
+ * 7. [NoteNatureType.MEETING_RECAP] &ndash; work meetings, minutes, and action items.
+ * 8. [NoteNatureType.SHOPPING_LIST] &ndash; shopping or packing checklists.
+ * 9. [NoteNatureType.REMINDER] &ndash; short, time-sensitive prompts or follow ups.
+ * 10. [NoteNatureType.JOURNAL_ENTRY] &ndash; reflective journal or diary style notes.
+ * 11. [NoteNatureType.TRAVEL_PLAN] &ndash; itineraries, reservations, and logistics.
+ * 12. [NoteNatureType.COUNTRY_LIST] &ndash; geography collections and travel inspiration.
+ * 13. [NoteNatureType.NEWS_REPORT] &ndash; structured reportage and current event briefs.
+ * 14. [NoteNatureType.GENERAL_NOTE] &ndash; catch-all fallback when confidence is low.
  *
  * The classifier relies on language-agnostic normalization (lowercasing, accent removal, stop-word
  * filtering) and a collection of deterministic heuristics. Each category is scored via keyword
@@ -190,6 +198,256 @@ open class NoteNatureClassifier {
         }
 
         private val categoryDefinitions = listOf(
+            CategoryDefinition(
+                type = NoteNatureType.PERSONAL_DAILY_LIFE,
+                keywordWeights = mapOf(
+                    "today" to 1.5,
+                    "tonight" to 1.5,
+                    "weekend" to 2.0,
+                    "plans" to 1.5,
+                    "plan" to 1.0,
+                    "daily" to 1.5,
+                    "life" to 1.0,
+                    "errands" to 2.5,
+                    "chores" to 2.0,
+                    "dinner" to 1.5,
+                    "brunch" to 1.5,
+                    "friends" to 1.0,
+                    "outing" to 1.5,
+                    "celebration" to 1.5,
+                    "birthday" to 2.5,
+                    "weeknight" to 1.0,
+                    "schedule" to 1.0,
+                    "appointment" to 1.5
+                ),
+                phraseWeights = mapOf(
+                    "daily routine" to 2.5,
+                    "weekend plans" to 2.5,
+                    "to do today" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val dayCueRegex = Regex(
+                        "\\b(?:today|tonight|tomorrow|weekend|morning|afternoon|evening)\\b",
+                        RegexOption.IGNORE_CASE
+                    )
+                    val hasDayCue = dayCueRegex.containsMatchIn(context.originalText)
+                    val hasSocialCue = context.tokens.any { it in setOf("friends", "family", "dinner", "brunch") }
+                    var bonus = 0.0
+                    if (hasDayCue) bonus += 1.0
+                    if (hasSocialCue) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.FINANCE_LEGAL,
+                keywordWeights = mapOf(
+                    "budget" to 2.5,
+                    "invoice" to 3.0,
+                    "invoices" to 2.5,
+                    "expense" to 2.5,
+                    "expenses" to 2.5,
+                    "payment" to 2.0,
+                    "payments" to 2.0,
+                    "tax" to 3.0,
+                    "taxes" to 3.0,
+                    "contract" to 2.5,
+                    "agreement" to 2.0,
+                    "policy" to 1.5,
+                    "policies" to 1.5,
+                    "legal" to 2.5,
+                    "compliance" to 1.5,
+                    "insurance" to 2.0,
+                    "loan" to 2.0,
+                    "mortgage" to 2.0,
+                    "balance" to 1.5,
+                    "due" to 1.0
+                ),
+                phraseWeights = mapOf(
+                    "terms and conditions" to 3.0,
+                    "due date" to 2.5,
+                    "statement of work" to 3.0,
+                    "payment schedule" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val currencyRegex = Regex("[\\$€£¥]\\s?\\d")
+                    val hasCurrency = currencyRegex.containsMatchIn(context.originalText)
+                    val hasSectionLanguage = context.originalText.contains(
+                        Regex("\\b(section|clause|article)\\b", RegexOption.IGNORE_CASE)
+                    )
+                    val numericDense = context.originalText.contains(Regex("\\b\\d{3,}\\b"))
+                    var bonus = 0.0
+                    if (hasCurrency) bonus += 1.5
+                    if (numericDense) bonus += 0.5
+                    if (hasSectionLanguage) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.SELF_IMPROVEMENT,
+                keywordWeights = mapOf(
+                    "goal" to 1.5,
+                    "goals" to 1.5,
+                    "habit" to 2.5,
+                    "habits" to 2.5,
+                    "routine" to 1.5,
+                    "practice" to 1.0,
+                    "progress" to 1.5,
+                    "improvement" to 2.0,
+                    "motivation" to 1.5,
+                    "affirmation" to 2.0,
+                    "focus" to 1.0,
+                    "vision" to 1.0,
+                    "tracker" to 1.5,
+                    "reflection" to 1.0
+                ),
+                phraseWeights = mapOf(
+                    "habit tracker" to 3.0,
+                    "personal growth" to 2.5,
+                    "weekly goals" to 2.0,
+                    "growth plan" to 2.0
+                ),
+                structuralBonus = { context ->
+                    val checkboxCount = context.lines.count { line ->
+                        line.contains("[ ]") || line.contains("[x]", ignoreCase = true)
+                    }
+                    val hasProgressPercent = context.originalText.contains(Regex("\\b\\d{1,3}%\\b"))
+                    var bonus = 0.0
+                    if (checkboxCount >= 1) bonus += 1.0
+                    if (hasProgressPercent) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.HEALTH_WELLNESS,
+                keywordWeights = mapOf(
+                    "health" to 1.5,
+                    "wellness" to 1.5,
+                    "workout" to 2.5,
+                    "exercise" to 2.0,
+                    "training" to 2.0,
+                    "cardio" to 2.0,
+                    "run" to 1.0,
+                    "yoga" to 2.0,
+                    "meditation" to 1.5,
+                    "medication" to 2.5,
+                    "dose" to 1.5,
+                    "dosage" to 1.5,
+                    "calories" to 1.5,
+                    "nutrition" to 1.5,
+                    "meal" to 1.5,
+                    "hydration" to 1.5,
+                    "sleep" to 1.0,
+                    "symptoms" to 2.0,
+                    "therapy" to 1.5,
+                    "vitals" to 2.0
+                ),
+                phraseWeights = mapOf(
+                    "meal plan" to 2.5,
+                    "training session" to 2.0,
+                    "blood pressure" to 2.5,
+                    "medication schedule" to 2.5
+                ),
+                structuralBonus = { context ->
+                    val unitRegex = Regex(
+                        "\\b\\d+(?:\\.\\d+)?\\s?(?:km|mi|lbs|lb|kg|mg|bpm|cal|kcal|minutes)\\b",
+                        RegexOption.IGNORE_CASE
+                    )
+                    val hasUnit = unitRegex.containsMatchIn(context.originalText)
+                    val mealHeader = context.lines.any { line ->
+                        val trimmed = line.trimStart()
+                        trimmed.startsWith("breakfast", ignoreCase = true) ||
+                            trimmed.startsWith("lunch", ignoreCase = true) ||
+                            trimmed.startsWith("dinner", ignoreCase = true)
+                    }
+                    var bonus = 0.0
+                    if (hasUnit) bonus += 1.5
+                    if (mealHeader) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.EDUCATION_LEARNING,
+                keywordWeights = mapOf(
+                    "lecture" to 2.5,
+                    "class" to 2.0,
+                    "course" to 2.0,
+                    "lesson" to 1.5,
+                    "study" to 2.0,
+                    "studying" to 2.0,
+                    "assignment" to 2.5,
+                    "homework" to 2.5,
+                    "exam" to 2.5,
+                    "quiz" to 2.0,
+                    "syllabus" to 2.0,
+                    "research" to 1.5,
+                    "theory" to 1.5,
+                    "concepts" to 1.0,
+                    "notes" to 1.0
+                ),
+                phraseWeights = mapOf(
+                    "study guide" to 3.0,
+                    "key concepts" to 2.0,
+                    "practice problems" to 2.0,
+                    "reading list" to 2.0
+                ),
+                structuralBonus = { context ->
+                    val numberedSections = context.lines.count { line ->
+                        val trimmed = line.trimStart()
+                        trimmed.matches(Regex("(lesson|chapter|module)\\s+\\d+", RegexOption.IGNORE_CASE)) ||
+                            trimmed.matches(Regex("\\d+[.)].*"))
+                    }
+                    val hasStudyCue = context.originalText.contains(
+                        Regex("\\bsyllabus\\b|\\bstudy guide\\b", RegexOption.IGNORE_CASE)
+                    )
+                    var bonus = 0.0
+                    if (numberedSections >= 1) bonus += 1.0
+                    if (hasStudyCue) bonus += 0.5
+                    bonus
+                }
+            ),
+            CategoryDefinition(
+                type = NoteNatureType.HOME_FAMILY,
+                keywordWeights = mapOf(
+                    "family" to 2.5,
+                    "house" to 2.0,
+                    "home" to 1.5,
+                    "household" to 2.0,
+                    "kids" to 2.0,
+                    "children" to 2.0,
+                    "parents" to 1.5,
+                    "mom" to 1.5,
+                    "dad" to 1.5,
+                    "grandparents" to 2.0,
+                    "laundry" to 2.0,
+                    "cleaning" to 2.0,
+                    "chores" to 2.0,
+                    "tidy" to 1.5,
+                    "babysitter" to 2.0,
+                    "carpool" to 1.5,
+                    "schedule" to 1.0,
+                    "dropoff" to 1.5,
+                    "pickup" to 1.5
+                ),
+                phraseWeights = mapOf(
+                    "family schedule" to 3.0,
+                    "household chores" to 2.5,
+                    "meal prep" to 2.0,
+                    "family meeting" to 2.0
+                ),
+                structuralBonus = { context ->
+                    val timeRegex = Regex("\\b\\d{1,2}:\\d{2}\\s?(?:am|pm)?\\b", RegexOption.IGNORE_CASE)
+                    val hasTime = timeRegex.containsMatchIn(context.originalText)
+                    val familyMentions = context.tokens.count { it in setOf("family", "kids", "parents", "mom", "dad", "grandparents") }
+                    var bonus = 0.0
+                    if (hasTime) bonus += 0.5
+                    if (familyMentions >= 2) {
+                        bonus += 1.0
+                    } else if (familyMentions == 1) {
+                        bonus += 0.5
+                    }
+                    bonus
+                }
+            ),
             CategoryDefinition(
                 type = NoteNatureType.MEETING_RECAP,
                 keywordWeights = mapOf(
@@ -527,12 +785,18 @@ data class NoteNatureLabel(
  * Enumerated taxonomy for [NoteNatureClassifier].
  */
 enum class NoteNatureType(val humanReadable: String) {
-    MEETING_RECAP("Meeting recap and action items"),
-    SHOPPING_LIST("Shopping or packing list"),
-    REMINDER("Reminder or follow-up"),
+    PERSONAL_DAILY_LIFE("Personal & daily life plans"),
+    FINANCE_LEGAL("Finance & legal record"),
+    SELF_IMPROVEMENT("Self-improvement & habits"),
+    HEALTH_WELLNESS("Health & wellness tracker"),
+    EDUCATION_LEARNING("Education & learning notes"),
+    HOME_FAMILY("Home & family organization"),
+    MEETING_RECAP("Work & meeting recap"),
+    SHOPPING_LIST("Shopping & supplies list"),
+    REMINDER("Reminders & follow-ups"),
     JOURNAL_ENTRY("Personal journal reflection"),
-    TRAVEL_PLAN("Travel or itinerary plan"),
+    TRAVEL_PLAN("Travel & leisure plan"),
     COUNTRY_LIST("Country list overview"),
-    NEWS_REPORT("News report summary"),
+    NEWS_REPORT("News & current events brief"),
     GENERAL_NOTE("General note overview")
 }
