@@ -15,7 +15,7 @@ PROJECT_DIR="$(pwd)"  # assumes you're in the project root
 # Export paths
 export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$GRADLE_INSTALL_DIR/bin:$PATH"
 
-echo "📦 Starting Android SDK + Gradle setup..."
+echo "📦 Starting Android SDK + Gradle + Python dependency setup..."
 
 # ----------------------------
 # ANDROID SDK INSTALLATION
@@ -51,6 +51,28 @@ echo "📄 Writing local.properties with SDK path..."
 cat <<EOF > "$PROJECT_DIR/local.properties"
 sdk.dir=$ANDROID_SDK_ROOT
 EOF
+
+# ----------------------------
+# PYTHON DEPENDENCIES
+# ----------------------------
+PYTHON_BIN="$(command -v python3 || true)"
+if [ -z "$PYTHON_BIN" ]; then
+  echo "❌ Python 3 is required but was not found on PATH."
+  exit 1
+fi
+
+echo "🐍 Ensuring required Python packages are installed..."
+"$PYTHON_BIN" -m pip install --upgrade pip > /dev/null
+"$PYTHON_BIN" -m pip install \
+  "tensorflow==2.19.0" \
+  "tf-keras==2.19.0" \
+  "transformers==4.44.2" \
+  "huggingface_hub>=0.24.0" \
+  "numpy==2.0.2" \
+  "protobuf==5.29.1" \
+  "ml-dtypes>=0.5.0" \
+  "datasets==3.1.0" \
+  "sentencepiece>=0.2.0" > /dev/null
 
 # ----------------------------
 # GRADLE INSTALLATION

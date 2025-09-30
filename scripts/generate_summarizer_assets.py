@@ -14,6 +14,10 @@ REQUIRED_ASSET_RELATIVE_PATHS = [
 ]
 
 
+class TensorFlowUnavailableError(RuntimeError):
+    """Raised when TensorFlow (or its dependencies) cannot be imported."""
+
+
 def _ensure_package(module_name: str, *, package: str | None = None) -> None:
     """Install ``package`` via pip if ``module_name`` cannot be imported."""
 
@@ -22,6 +26,12 @@ def _ensure_package(module_name: str, *, package: str | None = None) -> None:
     except ModuleNotFoundError:
         install_target = package or module_name
         subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
+        try:
+            importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:  # pragma: no cover - sanity guard
+            raise TensorFlowUnavailableError(
+                f"Module '{module_name}' is unavailable even after installation"
+            ) from exc
 
 
 def _repo_root() -> Path:
@@ -42,16 +52,7 @@ def _report_missing_assets(missing_paths: list[Path]) -> None:
         print(f"  - {path.relative_to(_repo_root())}")
 
 
-def main() -> None:
-    required_paths = _resolve_required_asset_paths()
-
-    missing_paths = [path for path in required_paths if not path.exists()]
-    if not missing_paths:
-        print("Summarizer assets already present; skipping generation.")
-        return
-
-    _report_missing_assets(missing_paths)
-
+def _generate_with_tensorflow() -> None:
     required_packages = {
         "tensorflow": "tensorflow==2.19.0",
         "tf_keras": "tf-keras==2.19.0",
@@ -65,7 +66,12 @@ def main() -> None:
     }
 
     for module_name, package_spec in required_packages.items():
-        _ensure_package(module_name, package=package_spec)
+        try:
+            _ensure_package(module_name, package=package_spec)
+        except subprocess.CalledProcessError as exc:
+            raise TensorFlowUnavailableError(
+                f"Failed to install dependency for '{module_name}'"
+            ) from exc
 
     notebook = Path("build_tensor.ipynb")
     if not notebook.exists():
@@ -88,7 +94,25 @@ def main() -> None:
 
     code = compile("\n".join(filtered_lines), str(notebook), "exec")
     globals_dict = {"__name__": "__main__"}
-    exec(code, globals_dict)
+    try:
+        exec(code, globals_dict)
+    except ModuleNotFoundError as exc:
+        raise TensorFlowUnavailableError(
+            "TensorFlow dependencies missing while executing build_tensor.ipynb"
+        ) from exc
+
+
+def main() -> None:
+    required_paths = _resolve_required_asset_paths()
+
+    missing_paths = [path for path in required_paths if not path.exists()]
+    if not missing_paths:
+        print("Summarizer assets already present; skipping generation.")
+        return
+
+    _report_missing_assets(missing_paths)
+
+    _generate_with_tensorflow()
 
     remaining_missing = [path for path in required_paths if not path.exists()]
     if remaining_missing:
