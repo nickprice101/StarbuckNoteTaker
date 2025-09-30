@@ -2,6 +2,9 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import android.util.Base64
+import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.RichTextStyle
+import com.example.starbucknotetaker.richtext.StyleRange
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -128,11 +131,13 @@ class EncryptedNoteStore(
                     notificationMinutesBeforeStart = notificationMinutes,
                 )
             }
+            val styled = obj.optJSONObject("styledContent")?.let { deserializeRichText(it) }
             notes.add(
                 Note(
                     id = obj.getLong("id"),
                     title = obj.getString("title"),
                     content = obj.getString("content"),
+                    styledContent = styled,
                     date = obj.getLong("date"),
                     images = images,
                     files = files,
@@ -156,6 +161,7 @@ class EncryptedNoteStore(
             obj.put("id", note.id)
             obj.put("title", note.title)
             obj.put("content", note.content)
+            note.styledContent?.let { obj.put("styledContent", serializeRichText(it)) }
             obj.put("date", note.date)
             val imagesArray = JSONArray()
             note.images.forEach { image ->
@@ -278,6 +284,47 @@ class EncryptedNoteStore(
 
     private fun decodeBase64(data: String): ByteArray? {
         return runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull()
+    }
+
+    private fun serializeRichText(document: RichTextDocument): JSONObject {
+        val obj = JSONObject()
+        obj.put("text", document.text)
+        val spansArray = JSONArray()
+        document.spans.forEach { range ->
+            val span = JSONObject()
+            span.put("start", range.start)
+            span.put("end", range.end)
+            val styles = JSONArray()
+            range.styles.forEach { styles.put(it.name) }
+            span.put("styles", styles)
+            spansArray.put(span)
+        }
+        obj.put("spans", spansArray)
+        return obj
+    }
+
+    private fun deserializeRichText(obj: JSONObject): RichTextDocument {
+        val text = obj.optString("text", "")
+        val spansArray = obj.optJSONArray("spans") ?: return RichTextDocument(text)
+        val spans = mutableListOf<StyleRange>()
+        for (i in 0 until spansArray.length()) {
+            val spanObj = spansArray.optJSONObject(i) ?: continue
+            val start = spanObj.optInt("start", 0)
+            val end = spanObj.optInt("end", 0)
+            val stylesArray = spanObj.optJSONArray("styles")
+            val styles = buildSet {
+                if (stylesArray != null) {
+                    for (j in 0 until stylesArray.length()) {
+                        val name = stylesArray.optString(j, null)
+                        name?.let { runCatching { RichTextStyle.valueOf(it) }.getOrNull() }?.let { add(it) }
+                    }
+                }
+            }
+            if (styles.isNotEmpty() && start < end) {
+                spans.add(StyleRange(start, end, styles))
+            }
+        }
+        return RichTextDocument(text, spans)
     }
 
     private fun deriveKey(pin: String, salt: ByteArray): SecretKeySpec {

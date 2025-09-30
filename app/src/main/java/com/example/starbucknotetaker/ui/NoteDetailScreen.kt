@@ -37,8 +37,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +56,7 @@ import java.util.Locale
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import com.example.starbucknotetaker.richtext.RichTextDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -201,18 +202,50 @@ fun NoteDetailScreen(
                 EventDetailsCard(event, eventLocationDisplay)
                 Spacer(modifier = Modifier.height(16.dp))
             }
-            val lines = remember(note.content) { note.content.lines() }
-            lines.forEach { line ->
-                val trimmed = line.trim()
-                val imagePlaceholder = Regex("\\[\\[image:(\\d+)]]").matchEntire(trimmed)
-                val filePlaceholder = Regex("\\[\\[file:(\\d+)]]").matchEntire(trimmed)
-                val linkPlaceholder = Regex("\\[\\[link:(\\d+)]]").matchEntire(trimmed)
-                when {
-                    imagePlaceholder != null -> {
-                        val index = imagePlaceholder.groupValues[1].toInt()
-                        note.images.getOrNull(index)?.let { image ->
-                            var imageBytes by remember(note.id, index) { mutableStateOf<ByteArray?>(null) }
-                            LaunchedEffect(note.id, index, image.attachmentId, image.data) {
+            val styledSource = remember(note.styledContent, note.content) {
+                note.styledContent ?: RichTextDocument.fromPlainText(note.content)
+            }
+            val contentText = styledSource.text
+            val placeholderRegex = Regex("\\[\\[(image|file|link):(\\d+)]]")
+            var cursor = 0
+            placeholderRegex.findAll(contentText).forEach { match ->
+                val start = match.range.first
+                if (start > cursor) {
+                    val segment = styledSource.slice(cursor, start)
+                    if (segment.text.isNotEmpty()) {
+                        val base = segment.toAnnotatedString()
+                        val builder = AnnotatedString.Builder(base)
+                        val matcher = Patterns.WEB_URL.matcher(segment.text)
+                        while (matcher.find()) {
+                            val url = segment.text.substring(matcher.start(), matcher.end())
+                            builder.addStringAnnotation("URL", url, matcher.start(), matcher.end())
+                            builder.addStyle(
+                                SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
+                                matcher.start(),
+                                matcher.end()
+                            )
+                        }
+                        val annotated = builder.toAnnotatedString()
+                        ClickableText(
+                            text = annotated,
+                            onClick = { offset ->
+                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
+                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))) }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                        )
+                    }
+                }
+                val type = match.groupValues[1]
+                val indexValue = match.groupValues[2].toInt()
+                when (type) {
+                    "image" -> {
+                        note.images.getOrNull(indexValue)?.let { image ->
+                            var imageBytes by remember(note.id, indexValue) { mutableStateOf<ByteArray?>(null) }
+                            LaunchedEffect(note.id, indexValue, image.attachmentId, image.data) {
                                 imageBytes = when {
                                     !image.data.isNullOrBlank() ->
                                         runCatching { Base64.decode(image.data, Base64.DEFAULT) }.getOrNull()
@@ -236,9 +269,8 @@ fun NoteDetailScreen(
                             }
                         }
                     }
-                    filePlaceholder != null -> {
-                        val index = filePlaceholder.groupValues[1].toInt()
-                        note.files.getOrNull(index)?.let { file ->
+                    "file" -> {
+                        note.files.getOrNull(indexValue)?.let { file ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -282,9 +314,8 @@ fun NoteDetailScreen(
                             }
                         }
                     }
-                    linkPlaceholder != null -> {
-                        val index = linkPlaceholder.groupValues[1].toInt()
-                        note.linkPreviews.getOrNull(index)?.let { preview ->
+                    "link" -> {
+                        note.linkPreviews.getOrNull(indexValue)?.let { preview ->
                             LinkPreviewCard(
                                 preview = preview,
                                 awaitingCompletion = false,
@@ -298,35 +329,39 @@ fun NoteDetailScreen(
                             )
                         }
                     }
-                    else -> {
-                        val annotated = buildAnnotatedString {
-                            var lastIndex = 0
-                            val matcher = Patterns.WEB_URL.matcher(trimmed)
-                            while (matcher.find()) {
-                                    val start = matcher.start()
-                                    val end = matcher.end()
-                                    append(trimmed.substring(lastIndex, start))
-                                    val url = trimmed.substring(start, end)
-                                    pushStringAnnotation(tag = "URL", annotation = url)
-                                    pushStyle(SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline))
-                                    append(url)
-                                    pop()
-                                    pop()
-                                    lastIndex = end
-                                }
-                                append(trimmed.substring(lastIndex))
-                            }
-                            ClickableText(
-                                text = annotated,
-                                onClick = { offset ->
-                                    annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))
-                                        context.startActivity(intent)
-                                    }
-                                },
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
+                }
+                cursor = match.range.last + 1
+                if (cursor < contentText.length && contentText[cursor] == '\n') {
+                    cursor++
+                }
+            }
+            if (cursor < contentText.length) {
+                val segment = styledSource.slice(cursor, contentText.length)
+                if (segment.text.isNotEmpty()) {
+                    val base = segment.toAnnotatedString()
+                    val builder = AnnotatedString.Builder(base)
+                    val matcher = Patterns.WEB_URL.matcher(segment.text)
+                    while (matcher.find()) {
+                        val url = segment.text.substring(matcher.start(), matcher.end())
+                        builder.addStringAnnotation("URL", url, matcher.start(), matcher.end())
+                        builder.addStyle(
+                            SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
+                            matcher.start(),
+                            matcher.end()
+                        )
                     }
+                    val annotated = builder.toAnnotatedString()
+                    ClickableText(
+                        text = annotated,
+                        onClick = { offset ->
+                            annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))) }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    )
                 }
             }
         }

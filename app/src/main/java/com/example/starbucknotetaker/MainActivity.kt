@@ -405,8 +405,8 @@ fun AppContent(
         }
         composable("add") {
             AddNoteScreen(
-                onSave = { title, content, images, files, linkPreviews, event ->
-                    noteViewModel.addNote(title, content, images, files, linkPreviews, event)
+                onSave = { title, content, styledContent, images, files, linkPreviews, event ->
+                    noteViewModel.addNote(title, content, styledContent, images, files, linkPreviews, event)
                     noteViewModel.clearPendingShare()
                     navController.popBackStack()
                 },
@@ -423,9 +423,9 @@ fun AppContent(
         }
         composable("add_event") {
             AddNoteScreen(
-                onSave = { title, content, images, files, linkPreviews, event ->
+                onSave = { title, content, styledContent, images, files, linkPreviews, event ->
                     if (event != null) {
-                        noteViewModel.addNote(title, content, images, files, linkPreviews, event)
+                        noteViewModel.addNote(title, content, styledContent, images, files, linkPreviews, event)
                     }
                     navController.popBackStack()
                 },
@@ -471,8 +471,8 @@ fun AppContent(
             if (noteId != null && note != null) {
                 EditNoteScreen(
                     note = note,
-                    onSave = { title, content, images, files, linkPreviews, event ->
-                        noteViewModel.updateNote(noteId, title, content, images, files, linkPreviews, event)
+                    onSave = { title, content, styledContent, images, files, linkPreviews, event ->
+                        noteViewModel.updateNote(noteId, title, content, styledContent, images, files, linkPreviews, event)
                         navController.popBackStack()
                     },
                     onCancel = { navController.popBackStack() },

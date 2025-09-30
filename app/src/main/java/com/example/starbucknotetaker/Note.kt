@@ -3,10 +3,13 @@ package com.example.starbucknotetaker
 /**
  * Represents a note with title, textual content, creation date and optional attachments.
  */
+import com.example.starbucknotetaker.richtext.RichTextDocument
+
 data class Note(
     val id: Long = System.currentTimeMillis(),
     val title: String,
     val content: String,
+    val styledContent: RichTextDocument? = null,
     val date: Long = System.currentTimeMillis(),
     val images: List<NoteImage> = emptyList(),
     val files: List<NoteFile> = emptyList(),

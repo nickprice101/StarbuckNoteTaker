@@ -25,8 +25,11 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collect
+import com.example.starbucknotetaker.richtext.StyleRange
+import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.RichTextStyle
 
 /**
  * ViewModel storing notes in memory.
@@ -164,6 +167,7 @@ class NoteViewModel(
     fun addNote(
         title: String?,
         content: String,
+        styledContent: RichTextDocument,
         images: List<Pair<Uri, Int>>,
         files: List<Uri>,
         linkPreviews: List<NoteLinkPreview>,
@@ -174,8 +178,9 @@ class NoteViewModel(
         } else {
             title
         }
-        val processed = processNewNoteContent(content, images, files)
+        val processed = processNewNoteContent(content, styledContent, images, files)
         val finalContent = processed.text
+        val finalStyled = processed.styled
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
         val summarizerSource = buildSummarizerSource(finalTitle, finalContent, event)
@@ -187,6 +192,7 @@ class NoteViewModel(
         val note = Note(
             title = finalTitle,
             content = finalContent.trim(),
+            styledContent = finalStyled.trimmed(),
             date = event?.start ?: System.currentTimeMillis(),
             images = embeddedImages,
             files = embeddedFiles,
@@ -237,6 +243,7 @@ class NoteViewModel(
         id: Long,
         title: String?,
         content: String,
+        styledContent: RichTextDocument,
         images: List<NoteImage>,
         files: List<NoteFile>,
         linkPreviews: List<NoteLinkPreview>,
@@ -263,6 +270,7 @@ class NoteViewModel(
             val updated = note.copy(
                 title = finalTitle,
                 content = content.trim(),
+                styledContent = styledContent.trimmed(),
                 images = preparedImages,
                 files = preparedFiles,
                 linkPreviews = linkPreviews,
@@ -414,6 +422,7 @@ class NoteViewModel(
 
     private fun processNewNoteContent(
         content: String,
+        styledContent: RichTextDocument,
         images: List<Pair<Uri, Int>>,
         files: List<Uri>,
     ): ProcessedNoteContent {
@@ -421,6 +430,19 @@ class NoteViewModel(
         val embeddedFiles = mutableListOf<NoteFile>()
         val store = attachmentStore
         val currentPin = pin
+        var styledText = styledContent.text
+        val styledChars = styledContent.toCharacterStyles().map { it.toMutableSet() }.toMutableList()
+        fun insertPlaceholder(start: Int, originalLength: Int, replacement: String) {
+            if (start < 0) return
+            if (start > styledChars.size) return
+            repeat(originalLength.coerceAtMost((styledChars.size - start).coerceAtLeast(0))) {
+                if (start < styledChars.size) styledChars.removeAt(start)
+            }
+            replacement.forEachIndexed { index, _ ->
+                styledChars.add(start + index, mutableSetOf())
+            }
+            styledText = styledText.replaceRange(start, start + originalLength, replacement)
+        }
         context?.let { ctx ->
             images.forEach { (uri, rotation) ->
                 try {
@@ -498,6 +520,7 @@ class NoteViewModel(
 
         var finalContent = content
         val urlRegex = Regex("(https?://\\S+)")
+        var searchStart = 0
         urlRegex.findAll(content).forEach { match ->
             val url = match.value
             if (isImageUrl(url)) {
@@ -516,16 +539,60 @@ class NoteViewModel(
                         }
                     )
                     val idx = embeddedImages.size - 1
-                    finalContent = finalContent.replace(url, "[[image:$idx]]")
+                    val placeholder = "[[image:$idx]]"
+                    finalContent = finalContent.replaceFirst(url, placeholder)
+                    var indexInStyled = styledText.indexOf(url, searchStart)
+                    if (indexInStyled == -1) {
+                        indexInStyled = styledText.indexOf(url)
+                    }
+                    if (indexInStyled != -1) {
+                        insertPlaceholder(indexInStyled, url.length, placeholder)
+                        searchStart = indexInStyled + placeholder.length
+                    } else {
+                        searchStart = 0
+                    }
                 } catch (_: Exception) {}
+            }
+        }
+
+        while (styledChars.size < styledText.length) {
+            styledChars.add(mutableSetOf())
+        }
+        if (styledChars.size > styledText.length) {
+            while (styledChars.size > styledText.length) {
+                styledChars.removeAt(styledChars.lastIndex)
             }
         }
 
         return ProcessedNoteContent(
             text = finalContent,
+            styled = buildRichTextDocument(styledText, styledChars),
             images = embeddedImages,
             files = embeddedFiles,
         )
+    }
+
+    private fun buildRichTextDocument(
+        text: String,
+        characterStyles: List<MutableSet<RichTextStyle>>,
+    ): RichTextDocument {
+        if (text.isEmpty()) return RichTextDocument("")
+        val spans = mutableListOf<StyleRange>()
+        var index = 0
+        while (index < text.length && index < characterStyles.size) {
+            val styles = characterStyles[index].toSet()
+            if (styles.isNotEmpty()) {
+                var end = index + 1
+                while (end < text.length && end < characterStyles.size && characterStyles[end].toSet() == styles) {
+                    end++
+                }
+                spans.add(StyleRange(index, end, styles))
+                index = end
+            } else {
+                index++
+            }
+        }
+        return RichTextDocument(text, spans)
     }
 
     private fun buildSummarizerSource(title: String, content: String, event: NoteEvent?): String {
@@ -571,6 +638,7 @@ class NoteViewModel(
 
     private data class ProcessedNoteContent(
         val text: String,
+        val styled: RichTextDocument,
         val images: List<NoteImage>,
         val files: List<NoteFile>,
     )

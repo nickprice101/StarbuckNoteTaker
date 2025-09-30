@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -52,6 +51,8 @@ import com.example.starbucknotetaker.extractUrls
 import com.example.starbucknotetaker.PendingShare
 import com.example.starbucknotetaker.R
 import androidx.core.content.ContextCompat
+import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.RichTextDocumentBuilder
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -61,7 +62,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 fun AddNoteScreen(
-    onSave: (String?, String, List<Pair<Uri, Int>>, List<Uri>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
+    onSave: (String?, String, RichTextDocument, List<Pair<Uri, Int>>, List<Uri>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
@@ -74,7 +75,7 @@ fun AddNoteScreen(
     val blocks = remember(prefill) {
         val initialBlocks = mutableListOf<NoteBlock>()
         prefill?.text?.takeIf { it.isNotBlank() }?.let { text ->
-            initialBlocks.add(NoteBlock.Text(TextFieldValue(text)))
+            initialBlocks.add(NoteBlock.Text(RichTextValue.fromPlainText(text)))
         }
         prefill?.images.orEmpty().forEach { uri ->
             initialBlocks.add(NoteBlock.Image(uri, 0))
@@ -83,12 +84,12 @@ fun AddNoteScreen(
             initialBlocks.add(NoteBlock.File(uri))
         }
         if (initialBlocks.firstOrNull() !is NoteBlock.Text) {
-            initialBlocks.add(0, NoteBlock.Text(TextFieldValue("")))
+            initialBlocks.add(0, NoteBlock.Text(RichTextValue.fromPlainText("")))
         }
         val needsTrailingText = initialBlocks.isEmpty() ||
             (initialBlocks.last() as? NoteBlock.Text)?.value?.text?.isNotBlank() != false
         if (needsTrailingText) {
-            initialBlocks.add(NoteBlock.Text(TextFieldValue("")))
+            initialBlocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
         }
         mutableStateListOf<NoteBlock>().apply { addAll(initialBlocks) }
     }
@@ -293,10 +294,10 @@ fun AddNoteScreen(
             val last = blocks.lastOrNull()
             if (last is NoteBlock.Text && last.value.text.isBlank()) {
                 blocks[blocks.size - 1] = NoteBlock.Image(it, 0)
-                blocks.add(NoteBlock.Text(TextFieldValue("")))
+                blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             } else {
                 blocks.add(NoteBlock.Image(it, 0))
-                blocks.add(NoteBlock.Text(TextFieldValue("")))
+                blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             }
         }
         onEnablePinCheck()
@@ -311,10 +312,10 @@ fun AddNoteScreen(
             val last = blocks.lastOrNull()
             if (last is NoteBlock.Text && last.value.text.isBlank()) {
                 blocks[blocks.size - 1] = NoteBlock.File(it)
-                blocks.add(NoteBlock.Text(TextFieldValue("")))
+                blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             } else {
                 blocks.add(NoteBlock.File(it))
-                blocks.add(NoteBlock.Text(TextFieldValue("")))
+                blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             }
         }
         onEnablePinCheck()
@@ -326,16 +327,16 @@ fun AddNoteScreen(
         val lastIndex = blocks.lastIndex
         val last = blocks.getOrNull(lastIndex)
         if (last is NoteBlock.Text && last.value.text.isBlank()) {
-            val updated = last.copy(value = TextFieldValue(sanitized))
+            val updated = last.copy(value = RichTextValue.fromPlainText(sanitized))
             blocks[lastIndex] = updated
             syncLinkPreviews(lastIndex, updated, finalizePending = true)
-            blocks.add(NoteBlock.Text(TextFieldValue("")))
+            blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
         } else {
-            val newBlock = NoteBlock.Text(TextFieldValue(sanitized))
+            val newBlock = NoteBlock.Text(RichTextValue.fromPlainText(sanitized))
             blocks.add(newBlock)
             val index = blocks.lastIndex
             syncLinkPreviews(index, newBlock, finalizePending = true)
-            blocks.add(NoteBlock.Text(TextFieldValue("")))
+            blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
         }
     }
 
@@ -395,40 +396,43 @@ fun AddNoteScreen(
                         val imageList = mutableListOf<Pair<Uri, Int>>()
                         val fileList = mutableListOf<Uri>()
                         val linkPreviewList = mutableListOf<NoteLinkPreview>()
-                        val content = buildString {
-                            var imageIndex = 0
-                            var fileIndex = 0
-                            var linkIndex = 0
-                            blocks.forEach { block ->
-                                when (block) {
-                                    is NoteBlock.Text -> {
-                                        append(block.value.text)
-                                        append("\n")
-                                    }
-                                    is NoteBlock.Image -> {
-                                        append("[[image:")
-                                        append(imageIndex)
-                                        append("]]\n")
-                                        imageList.add(block.uri to block.rotation)
-                                        imageIndex++
-                                    }
-                                    is NoteBlock.File -> {
-                                        append("[[file:")
-                                        append(fileIndex)
-                                        append("]]\n")
-                                        fileList.add(block.uri)
-                                        fileIndex++
-                                    }
-                                    is NoteBlock.LinkPreview -> {
-                                        append("[[link:")
-                                        append(linkIndex)
-                                        append("]]\n")
-                                        linkPreviewList.add(block.preview)
-                                        linkIndex++
-                                    }
+                        val contentBuilder = StringBuilder()
+                        val styledBuilder = RichTextDocumentBuilder()
+                        var linkIndex = 0
+                        blocks.forEach { block ->
+                            when (block) {
+                                is NoteBlock.Text -> {
+                                    styledBuilder.append(block.value.toDocument())
+                                    styledBuilder.appendPlain("\n")
+                                    contentBuilder.append(block.value.text)
+                                    contentBuilder.append('\n')
+                                }
+                                is NoteBlock.Image -> {
+                                    styledBuilder.appendPlain("[[image:${imageList.size}]]\n")
+                                    contentBuilder.append("[[image:")
+                                    contentBuilder.append(imageList.size)
+                                    contentBuilder.append("]]\n")
+                                    imageList.add(block.uri to block.rotation)
+                                }
+                                is NoteBlock.File -> {
+                                    styledBuilder.appendPlain("[[file:${fileList.size}]]\n")
+                                    contentBuilder.append("[[file:")
+                                    contentBuilder.append(fileList.size)
+                                    contentBuilder.append("]]\n")
+                                    fileList.add(block.uri)
+                                }
+                                is NoteBlock.LinkPreview -> {
+                                    styledBuilder.appendPlain("[[link:$linkIndex]]\n")
+                                    contentBuilder.append("[[link:")
+                                    contentBuilder.append(linkIndex)
+                                    contentBuilder.append("]]\n")
+                                    linkPreviewList.add(block.preview)
+                                    linkIndex++
                                 }
                             }
-                        }.trim()
+                        }
+                        val content = contentBuilder.toString().trim()
+                        val styledContent = styledBuilder.build().trimmed()
                         hideKeyboard()
                         focusManager.clearFocus(force = true)
                         val event = if (entryMode == NoteEntryMode.Event) {
@@ -465,7 +469,7 @@ fun AddNoteScreen(
                         } else {
                             null
                         }
-                        onSave(title, content, imageList, fileList, linkPreviewList, event)
+                        onSave(title, content, styledContent, imageList, fileList, linkPreviewList, event)
                     }) {
                         Icon(Icons.Default.Check, contentDescription = "Save")
                     }
@@ -757,13 +761,6 @@ fun AddNoteScreen(
                                 label = if (blockIndex == 0 && entryMode == NoteEntryMode.Note) {
                                     { Text("Content") }
                                 } else null,
-                                onAction = { action ->
-                                    val current = blocks.getOrNull(blockIndex) as? NoteBlock.Text ?: return@RichTextEditor
-                                    val formatted = applyTextFormatting(current.value, action)
-                                    val updated = current.copy(value = formatted)
-                                    blocks[blockIndex] = updated
-                                    syncLinkPreviews(blockIndex, updated)
-                                },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -938,7 +935,7 @@ fun AddNoteScreen(
 private sealed class NoteBlock {
     abstract val id: Long
 
-    data class Text(val value: TextFieldValue, override val id: Long = nextNoteBlockId()) : NoteBlock()
+    data class Text(val value: RichTextValue, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class Image(val uri: Uri, val rotation: Int, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class File(val uri: Uri, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class LinkPreview(
