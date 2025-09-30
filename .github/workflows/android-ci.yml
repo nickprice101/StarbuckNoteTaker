@@ -33,9 +33,28 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (if needed)
         run: |
           set -euo pipefail
+
+          ASSETS_DIR="app/src/main/assets"
+          REQUIRED_FILES=(
+            "encoder_int8_dynamic.tflite"
+            "decoder_step_int8_dynamic.tflite"
+            "tokenizer.json"
+          )
+
+          missing=()
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "${ASSETS_DIR}/${file}" ]; then
+              missing+=("${file}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "Summarizer assets already present; skipping dependency installation."
+            exit 0
+          fi
 
           PYTHON_BIN="$(command -v python)"
           echo "🐍 Ensuring required Python packages are installed..."
