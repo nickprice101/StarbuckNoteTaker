@@ -497,7 +497,7 @@ class SummarizerTest {
         )
 
         val tokenizer = mock<SentencePieceProcessor>()
-        val prefix = "summarize: "
+        val prefix = "summarize the note type and structure: ${NoteNatureType.GENERAL_NOTE.humanReadable}\n\nNote: "
         val sourceTokens = intArrayOf(10, 11, 12, 13, 14)
         val summaryTokens = intArrayOf(20, 21, 22, 23)
         val abstractive = "Financial plan emphasizes launch readiness"
