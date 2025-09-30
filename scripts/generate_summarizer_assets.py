@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,16 +54,18 @@ def _report_missing_assets(missing_paths: list[Path]) -> None:
 
 
 def _generate_with_tensorflow() -> None:
+    os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
+
     required_packages = {
         "tensorflow": "tensorflow==2.19.0",
         "tf_keras": "tf-keras==2.19.0",
+        "sentencepiece": None,
         "transformers": "transformers==4.44.2",
         "huggingface_hub": "huggingface_hub>=0.24.0",
         "numpy": "numpy==2.0.2",
-        "protobuf": "protobuf==5.29.1",
+        "google.protobuf": "protobuf==5.29.1",
         "ml_dtypes": "ml-dtypes>=0.5.0",
         "datasets": "datasets==3.1.0",
-        "sentencepiece": None,
     }
 
     for module_name, package_spec in required_packages.items():
