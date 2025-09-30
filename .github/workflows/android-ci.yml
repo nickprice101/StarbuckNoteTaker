@@ -28,6 +28,29 @@ jobs:
             build-tools;34.0.0
             ndk;26.1.10909125
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+
+          PYTHON_BIN="$(command -v python)"
+          echo "🐍 Ensuring required Python packages are installed..."
+          "$PYTHON_BIN" -m pip install --upgrade pip > /dev/null
+          "$PYTHON_BIN" -m pip install \
+            "tensorflow==2.19.0" \
+            "tf-keras==2.19.0" \
+            "transformers==4.44.2" \
+            "huggingface_hub>=0.24.0" \
+            "numpy==2.0.2" \
+            "protobuf==5.29.1" \
+            "ml-dtypes>=0.5.0" \
+            "datasets==3.1.0" \
+            "sentencepiece>=0.2.0" > /dev/null
+
       - name: Configure local.properties
         run: |
           SDK_PATH="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
