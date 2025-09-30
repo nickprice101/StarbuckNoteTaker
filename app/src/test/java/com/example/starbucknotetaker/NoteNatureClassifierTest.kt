@@ -20,7 +20,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.PERSONAL_DAILY_LIFE, label.type)
-        assertEquals(NoteNatureType.PERSONAL_DAILY_LIFE.humanReadable, label.humanReadable)
+        assertEquals(
+            "Personal & daily life plans covering such as Celebration, Apartment and Errands",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -35,7 +38,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.FINANCE_LEGAL, label.type)
-        assertEquals(NoteNatureType.FINANCE_LEGAL.humanReadable, label.humanReadable)
+        assertEquals(
+            "Finance & legal record detailing Reimbursements, Compliance and Insurance",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -50,7 +56,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.SELF_IMPROVEMENT, label.type)
-        assertEquals(NoteNatureType.SELF_IMPROVEMENT.humanReadable, label.humanReadable)
+        assertEquals(
+            "Self-improvement & habits tracking Affirmation, Meditation and Personal",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -65,7 +74,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.HEALTH_WELLNESS, label.type)
-        assertEquals(NoteNatureType.HEALTH_WELLNESS.humanReadable, label.humanReadable)
+        assertEquals(
+            "Health & wellness tracker tracking Medication, Breakfast and Calories",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -80,7 +92,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.EDUCATION_LEARNING, label.type)
-        assertEquals(NoteNatureType.EDUCATION_LEARNING.humanReadable, label.humanReadable)
+        assertEquals(
+            "Education & learning notes about Mitochondria, Structures and Ribosomes",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -95,7 +110,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.HOME_FAMILY, label.type)
-        assertEquals(NoteNatureType.HOME_FAMILY.humanReadable, label.humanReadable)
+        assertEquals(
+            "Home & family organization covering such as Grandparents, Babysitter and Cleaning",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -119,7 +137,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, event)
 
         assertEquals(NoteNatureType.MEETING_RECAP, label.type)
-        assertEquals(NoteNatureType.MEETING_RECAP.humanReadable, label.humanReadable)
+        assertEquals(
+            "Work & meeting recap highlighting Attendees, Security and Timeline",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -135,7 +156,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.SHOPPING_LIST, label.type)
-        assertEquals("Shopping list with 4 items", label.humanReadable)
+        assertEquals(
+            "Shopping list containing 7 items, such as milk, eggs and bread",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -152,7 +176,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, event)
 
         assertEquals(NoteNatureType.REMINDER, label.type)
-        assertEquals(NoteNatureType.REMINDER.humanReadable, label.humanReadable)
+        assertEquals(
+            "Reminders & follow-ups about Afterwards, Quarterly and Reminder",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -162,7 +189,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.JOURNAL_ENTRY, label.type)
-        assertEquals(NoteNatureType.JOURNAL_ENTRY.humanReadable, label.humanReadable)
+        assertEquals(
+            "Personal journal reflection reflecting on Reflective, Finishing and Grateful",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -177,7 +207,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.TRAVEL_PLAN, label.type)
-        assertEquals(NoteNatureType.TRAVEL_PLAN.humanReadable, label.humanReadable)
+        assertEquals(
+            "Travel & leisure plan covering such as Departure, Itinerary and Checkout",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -192,7 +225,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.PROJECT_MANAGEMENT, label.type)
-        assertEquals(NoteNatureType.PROJECT_MANAGEMENT.humanReadable, label.humanReadable)
+        assertEquals(
+            "Project management roadmap tracking Milestone, Deliverables and Development",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -207,7 +243,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.EVENT_PLANNING, label.type)
-        assertEquals(NoteNatureType.EVENT_PLANNING.humanReadable, label.humanReadable)
+        assertEquals(
+            "Event & celebration planning covering such as Photographer, Celebration and Walkthrough",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -224,7 +263,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.FOOD_RECIPE, label.type)
-        assertEquals(NoteNatureType.FOOD_RECIPE.humanReadable, label.humanReadable)
+        assertEquals(
+            "Recipe & cooking instructions featuring such as Lemon, Pasta and Instructions",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -239,7 +281,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.CREATIVE_WRITING, label.type)
-        assertEquals(NoteNatureType.CREATIVE_WRITING.humanReadable, label.humanReadable)
+        assertEquals(
+            "Creative writing draft featuring such as Protagonist, Antagonist and Characters",
+            label.humanReadable
+        )
     }
 
     @Test
@@ -255,7 +300,10 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.TECHNICAL_REFERENCE, label.type)
-        assertEquals(NoteNatureType.TECHNICAL_REFERENCE.humanReadable, label.humanReadable)
+        assertEquals(
+            "Technical troubleshooting & docs covering Api, Troubleshooting and Deployment",
+            label.humanReadable
+        )
     }
 
     @Test

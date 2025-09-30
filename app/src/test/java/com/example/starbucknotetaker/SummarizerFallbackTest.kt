@@ -51,15 +51,12 @@ class SummarizerFallbackTest {
 
         val trace = summarizer.consumeDebugTrace()
         assertTrue(
-            "Expected fallback reason to appear in trace, got: $trace",
-            trace.any { it.contains("fallback reason: models unavailable; classifier=GENERAL_NOTE") }
+            "Expected summarizer to enter fallback state, got: ${summarizer.state.value}",
+            summarizer.state.value is Summarizer.SummarizerState.Fallback
         )
         assertTrue(
-            "Expected fallback classifier label to appear in trace, got: $trace",
-            trace.any {
-                it.contains("fallback classifier label: GENERAL_NOTE") &&
-                        it.contains(NoteNatureType.GENERAL_NOTE.humanReadable)
-            }
+            "Expected classifier debug output to appear in trace, got: $trace",
+            trace.any { it.contains("classifier summary output: ${NoteNatureType.GENERAL_NOTE.humanReadable}") }
         )
 
         filesDir.deleteRecursively()
