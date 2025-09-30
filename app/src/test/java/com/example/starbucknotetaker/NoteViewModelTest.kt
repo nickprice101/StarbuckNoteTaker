@@ -1,6 +1,7 @@
 package com.example.starbucknotetaker
 
 import androidx.lifecycle.SavedStateHandle
+import com.example.starbucknotetaker.richtext.RichTextDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -41,7 +42,14 @@ class NoteViewModelTest {
         val viewModel = NoteViewModel(SavedStateHandle())
         setField(viewModel, "summarizer", summarizer)
 
-        viewModel.addNote("Title", "Content", emptyList(), emptyList(), emptyList())
+        viewModel.addNote(
+            "Title",
+            "Content",
+            RichTextDocument.fromPlainText("Content"),
+            emptyList(),
+            emptyList(),
+            emptyList(),
+        )
 
         assertEquals(NoteNatureType.GENERAL_NOTE.humanReadable, viewModel.notes[0].summary)
 

@@ -87,4 +87,86 @@ class RichTextState(initialValue: RichTextValue) {
         value = value.copy(characterStyles = updated)
         activeStyles = value.stylesAt(selection)
     }
+
+    fun applyFormattingAction(action: FormattingAction) {
+        val newValue = when (action) {
+            FormattingAction.BulletList -> value.applyListFormatting { "- " }
+            FormattingAction.NumberedList -> value.applyListFormatting { index -> "${index + 1}. " }
+        }
+        if (newValue != value) {
+            value = newValue
+        }
+        activeStyles = value.stylesAt(value.selection)
+    }
+}
+
+private fun RichTextValue.applyListFormatting(
+    prefixGenerator: (index: Int) -> String,
+): RichTextValue {
+    if (text.isEmpty()) return this
+    val start = selection.start.coerceAtMost(selection.end).coerceIn(0, text.length)
+    val end = selection.end.coerceAtLeast(selection.start).coerceIn(0, text.length)
+    val lineStart = text.lastIndexOf('\n', start - 1).let { if (it == -1) 0 else it + 1 }
+    val lineEnd = text.indexOf('\n', end).let { if (it == -1) text.length else it }
+    if (lineStart >= lineEnd) return this
+
+    val replacementBuilder = StringBuilder()
+    val replacementStyles = mutableListOf<Set<RichTextStyle>>()
+    var lineIndex = 0
+    var current = lineStart
+    while (current < lineEnd) {
+        val nextBreakRaw = text.indexOf('\n', current)
+        val nextBreak = when {
+            nextBreakRaw == -1 -> lineEnd
+            nextBreakRaw > lineEnd -> lineEnd
+            else -> nextBreakRaw
+        }
+        val lineText = text.substring(current, nextBreak)
+        val firstNonWhitespace = lineText.indexOfFirst { !it.isWhitespace() }
+        val indentLength = if (firstNonWhitespace == -1) lineText.length else firstNonWhitespace
+        val trimmedStart = current + indentLength
+        val prefix = if (indentLength == lineText.length) {
+            ""
+        } else {
+            prefixGenerator(lineIndex)
+        }
+
+        if (indentLength > 0) {
+            for (i in current until trimmedStart.coerceAtMost(nextBreak)) {
+                replacementBuilder.append(text[i])
+                replacementStyles.add(characterStyles.getOrNull(i) ?: emptySet())
+            }
+        }
+
+        if (prefix.isNotEmpty()) {
+            replacementBuilder.append(prefix)
+            repeat(prefix.length) { replacementStyles.add(emptySet()) }
+        }
+
+        for (i in trimmedStart until nextBreak) {
+            replacementBuilder.append(text[i])
+            replacementStyles.add(characterStyles.getOrNull(i) ?: emptySet())
+        }
+
+        if (nextBreak < lineEnd) {
+            replacementBuilder.append('\n')
+            replacementStyles.add(characterStyles.getOrNull(nextBreak) ?: emptySet())
+        }
+
+        current = if (nextBreak < lineEnd) nextBreak + 1 else lineEnd
+        lineIndex++
+    }
+
+    val replacement = replacementBuilder.toString()
+    val newText = text.replaceRange(lineStart, lineEnd, replacement)
+    val newStyles = characterStyles.toMutableList()
+    val removeCount = lineEnd - lineStart
+    repeat(removeCount) {
+        if (lineStart < newStyles.size) {
+            newStyles.removeAt(lineStart)
+        }
+    }
+    newStyles.addAll(lineStart, replacementStyles)
+    val newSelection = TextRange(lineStart, lineStart + replacement.length)
+    return copy(text = newText, selection = newSelection, characterStyles = newStyles)
 }
