@@ -77,6 +77,7 @@ class Summarizer(
             _state.emit(SummarizerState.Error(t.message ?: "Failed to prepare models"))
             return
         }
+
         try {
             if (!ensureNativeTokenizerLib()) {
                 logger(
@@ -1088,6 +1089,8 @@ class Summarizer(
         private const val HEADLINE_VERB_LENGTH_LIMIT = 8
         private const val HEADLINE_SHORT_VERB_LENGTH_LIMIT = 6
         private const val SEMANTIC_SIMILARITY_THRESHOLD = 0.7f
+        private const val PLACEHOLDER_SENTINEL = "STARBUCK_NOTE_TAKER_SUMMARIZER_PLACEHOLDER"
+        private val PLACEHOLDER_SIGNATURE = PLACEHOLDER_SENTINEL.encodeToByteArray()
         private val STOP_WORDS = setOf(
             "a",
             "an",
