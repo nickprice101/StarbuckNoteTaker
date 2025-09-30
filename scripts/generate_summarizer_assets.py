@@ -10,9 +10,18 @@ def main() -> None:
         raise FileNotFoundError("build_tensor.ipynb not found")
 
     filtered_lines: list[str] = []
+    skip_continuation = False
     for line in notebook.read_text().splitlines():
-        if line.lstrip().startswith("%pip"):
+        stripped = line.lstrip()
+
+        if skip_continuation:
+            skip_continuation = stripped.endswith("\\")
             continue
+
+        if stripped.startswith("%pip"):
+            skip_continuation = stripped.endswith("\\")
+            continue
+
         filtered_lines.append(line)
 
     code = compile("\n".join(filtered_lines), str(notebook), "exec")
