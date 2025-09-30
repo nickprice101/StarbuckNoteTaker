@@ -342,6 +342,24 @@ internal fun EventLocationDisplay.mergeWithFallback(fallback: EventLocationDispl
     )
 }
 
+internal fun EventLocationDisplay.toQueryString(): String {
+    val trimmedName = name.trim()
+    val trimmedAddress = address
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && !it.equals(trimmedName, ignoreCase = true) }
+
+    if (trimmedName.isNotEmpty() && trimmedAddress != null) {
+        val addressContainsName = trimmedAddress.contains(trimmedName, ignoreCase = true)
+        return if (addressContainsName) {
+            trimmedAddress
+        } else {
+            "$trimmedName, $trimmedAddress"
+        }
+    }
+
+    return trimmedName.ifEmpty { trimmedAddress.orEmpty() }
+}
+
 private fun Address.extractPoiName(): String? {
     return extractValidVenueName(this)
 }
