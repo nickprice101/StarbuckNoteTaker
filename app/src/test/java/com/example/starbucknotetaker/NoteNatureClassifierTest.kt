@@ -45,7 +45,7 @@ class NoteNatureClassifierTest {
         val label = classifier.classify(text, null)
 
         assertEquals(NoteNatureType.SHOPPING_LIST, label.type)
-        assertEquals(NoteNatureType.SHOPPING_LIST.humanReadable, label.humanReadable)
+        assertEquals("Shopping list with 4 items", label.humanReadable)
     }
 
     @Test
