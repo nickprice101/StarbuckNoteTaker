@@ -1,8 +1,42 @@
 package com.example.starbucknotetaker
 
 import java.text.Normalizer
+import java.util.LinkedHashSet
 import java.util.Locale
 import kotlin.math.max
+
+private val HIGHLIGHT_STOP_WORDS = setOf(
+    "agenda",
+    "action",
+    "actions",
+    "assignment",
+    "assignments",
+    "chores",
+    "entry",
+    "entries",
+    "goal",
+    "goals",
+    "items",
+    "item",
+    "list",
+    "lists",
+    "meeting",
+    "meetings",
+    "note",
+    "notes",
+    "plan",
+    "plans",
+    "project",
+    "projects",
+    "report",
+    "reports",
+    "schedule",
+    "task",
+    "tasks",
+    "todo",
+    "update",
+    "updates"
+)
 
 /**
  * Provides lightweight note intent classification for the app. The taxonomy is intentionally
@@ -129,7 +163,7 @@ open class NoteNatureClassifier {
         }
 
         fun buildLabel(context: NormalizedContext, confidence: Double): NoteNatureLabel {
-            val builder = labelBuilder ?: return NoteNatureLabel(type, type.humanReadable, confidence)
+            val builder = labelBuilder ?: defaultLabelBuilder(type)
             val built = builder(context, confidence)
             return if (built.type == type) built else built.copy(type = type, confidence = confidence)
         }
@@ -164,6 +198,100 @@ open class NoteNatureClassifier {
             // German
             "der", "die", "das", "und", "oder", "ein", "eine", "mit", "von"
         )
+
+        private fun defaultLabelBuilder(type: NoteNatureType): (NormalizedContext, Double) -> NoteNatureLabel {
+            return { context, confidence ->
+                val description = buildDefaultDescription(type, context)
+                NoteNatureLabel(type, description, confidence)
+            }
+        }
+
+        private fun buildDefaultDescription(type: NoteNatureType, context: NormalizedContext): String {
+            val base = type.humanReadable
+            val highlights = extractHighlights(context, 3)
+            if (highlights.isEmpty()) {
+                return base
+            }
+            val connector = when (type) {
+                NoteNatureType.FINANCE_LEGAL -> "detailing"
+                NoteNatureType.SELF_IMPROVEMENT, NoteNatureType.HEALTH_WELLNESS, NoteNatureType.PROJECT_MANAGEMENT -> "tracking"
+                NoteNatureType.MEETING_RECAP -> "highlighting"
+                NoteNatureType.REMINDER, NoteNatureType.EDUCATION_LEARNING -> "about"
+                NoteNatureType.JOURNAL_ENTRY -> "reflecting on"
+                NoteNatureType.FOOD_RECIPE, NoteNatureType.CREATIVE_WRITING -> "featuring"
+                NoteNatureType.TECHNICAL_REFERENCE -> "covering"
+                NoteNatureType.GENERAL_NOTE -> "mentioning"
+                else -> "covering"
+            }
+            val useSuchAs = when (type) {
+                NoteNatureType.PERSONAL_DAILY_LIFE,
+                NoteNatureType.TRAVEL_PLAN,
+                NoteNatureType.EVENT_PLANNING,
+                NoteNatureType.HOME_FAMILY,
+                NoteNatureType.FOOD_RECIPE,
+                NoteNatureType.CREATIVE_WRITING,
+                NoteNatureType.GENERAL_NOTE -> true
+                else -> false
+            }
+            val highlightText = formatList(highlights)
+            val phrase = if (useSuchAs) {
+                "such as $highlightText"
+            } else {
+                highlightText
+            }
+            return "$base $connector $phrase"
+        }
+
+        private fun extractHighlights(context: NormalizedContext, limit: Int): List<String> {
+            if (limit <= 0) return emptyList()
+            val seen = LinkedHashSet<String>()
+            val sorted = context.tokenFrequency
+                .asSequence()
+                .filter { (token, _) ->
+                    token.length >= 3 &&
+                        token.any { it.isLetter() } &&
+                        token.none { it.isDigit() } &&
+                        token !in HIGHLIGHT_STOP_WORDS
+                }
+                .sortedWith(
+                    compareByDescending<Map.Entry<String, Int>> { it.value }
+                        .thenByDescending { it.key.length }
+                        .thenBy { it.key }
+                )
+                .map { prettifyToken(it.key) }
+                .iterator()
+            val highlights = mutableListOf<String>()
+            while (sorted.hasNext() && highlights.size < limit) {
+                val candidate = sorted.next()
+                val lowered = candidate.lowercase(Locale.ROOT)
+                if (seen.add(lowered)) {
+                    highlights.add(candidate)
+                }
+            }
+            return highlights
+        }
+
+        private fun prettifyToken(token: String): String {
+            if (token.length <= 1) return token
+            return token.replaceFirstChar { char ->
+                if (char.isLowerCase()) char.titlecase(Locale.ROOT) else char.toString()
+            }
+        }
+
+        private fun formatList(items: List<String>): String {
+            if (items.isEmpty()) return ""
+            if (items.size == 1) return items.first()
+            if (items.size == 2) return items.joinToString(" and ")
+            val prefix = items.dropLast(1).joinToString(", ")
+            return "$prefix and ${items.last()}"
+        }
+
+        private fun normalizeListEntry(text: String): String {
+            var cleaned = text.trim()
+            cleaned = cleaned.replaceFirst(Regex("^[\\-*•]+\\s*"), "")
+            cleaned = cleaned.replaceFirst(Regex("^\\d+[.)]\\s*"), "")
+            return cleaned.trim()
+        }
 
         private val COUNTRY_NAMES = listOf(
             "Argentina",
@@ -217,13 +345,19 @@ open class NoteNatureClassifier {
                     "chores" to 2.0,
                     "dinner" to 1.5,
                     "brunch" to 1.5,
+                    "hangout" to 1.5,
+                    "gathering" to 1.5,
+                    "movie" to 1.5,
+                    "concert" to 1.5,
+                    "tickets" to 1.0,
                     "friends" to 1.0,
                     "outing" to 1.5,
                     "celebration" to 1.5,
                     "birthday" to 2.5,
                     "weeknight" to 1.0,
                     "schedule" to 1.0,
-                    "appointment" to 1.5
+                    "appointment" to 1.5,
+                    "pickup" to 1.0
                 ),
                 phraseWeights = mapOf(
                     "daily routine" to 2.5,
@@ -262,6 +396,13 @@ open class NoteNatureClassifier {
                     "legal" to 2.5,
                     "compliance" to 1.5,
                     "insurance" to 2.0,
+                    "claim" to 2.0,
+                    "claims" to 2.0,
+                    "premium" to 1.5,
+                    "billing" to 2.0,
+                    "receipt" to 1.5,
+                    "receipts" to 1.5,
+                    "ledger" to 2.0,
                     "loan" to 2.0,
                     "mortgage" to 2.0,
                     "balance" to 1.5,
@@ -300,10 +441,14 @@ open class NoteNatureClassifier {
                     "improvement" to 2.0,
                     "motivation" to 1.5,
                     "affirmation" to 2.0,
+                    "affirmations" to 2.0,
                     "focus" to 1.0,
                     "vision" to 1.0,
                     "tracker" to 1.5,
-                    "reflection" to 1.0
+                    "reflection" to 1.0,
+                    "milestone" to 1.5,
+                    "mindset" to 1.5,
+                    "discipline" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "habit tracker" to 3.0,
@@ -344,7 +489,12 @@ open class NoteNatureClassifier {
                     "sleep" to 1.0,
                     "symptoms" to 2.0,
                     "therapy" to 1.5,
-                    "vitals" to 2.0
+                    "vitals" to 2.0,
+                    "doctor" to 2.0,
+                    "clinic" to 1.5,
+                    "appointment" to 1.5,
+                    "stretch" to 1.0,
+                    "reps" to 1.0
                 ),
                 phraseWeights = mapOf(
                     "meal plan" to 2.5,
@@ -387,7 +537,11 @@ open class NoteNatureClassifier {
                     "research" to 1.5,
                     "theory" to 1.5,
                     "concepts" to 1.0,
-                    "notes" to 1.0
+                    "notes" to 1.0,
+                    "seminar" to 1.5,
+                    "tutorial" to 1.5,
+                    "worksheet" to 1.5,
+                    "revision" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "study guide" to 3.0,
@@ -431,7 +585,10 @@ open class NoteNatureClassifier {
                     "carpool" to 1.5,
                     "schedule" to 1.0,
                     "dropoff" to 1.5,
-                    "pickup" to 1.5
+                    "pickup" to 1.5,
+                    "playdate" to 1.5,
+                    "daycare" to 1.5,
+                    "mealplan" to 1.0
                 ),
                 phraseWeights = mapOf(
                     "family schedule" to 3.0,
@@ -469,7 +626,10 @@ open class NoteNatureClassifier {
                     "next" to 0.5,
                     "steps" to 1.5,
                     "decision" to 1.5,
-                    "summary" to 1.0
+                    "summary" to 1.0,
+                    "sync" to 1.5,
+                    "standup" to 1.5,
+                    "retro" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "action items" to 2.5,
@@ -502,12 +662,15 @@ open class NoteNatureClassifier {
                     "purchase" to 2.0,
                     "groceries" to 2.5,
                     "grocery" to 2.5,
+                    "market" to 1.5,
+                    "pharmacy" to 1.5,
                     "store" to 1.0,
                     "need" to 1.0,
                     "pick" to 1.0,
                     "pack" to 1.0,
                     "items" to 0.5,
-                    "supplies" to 1.0
+                    "supplies" to 1.0,
+                    "cart" to 1.0
                 ),
                 phraseWeights = mapOf(
                     "to buy" to 2.0,
@@ -539,13 +702,30 @@ open class NoteNatureClassifier {
                     val compactLines = trimmedLines.filter { line ->
                         line.isNotEmpty() && line.length <= 32
                     }
+                    val normalizedItems = (bulletItems + compactLines)
+                        .map { normalizeListEntry(it) }
+                        .filter { it.isNotEmpty() }
                     val itemCount = max(bulletItems.size, compactLines.size)
-                    val countText = if (itemCount > 0) itemCount else 0
-                    val description = if (countText > 0) {
-                        val noun = if (countText == 1) "item" else "items"
-                        "Shopping list with $countText $noun"
+                        .coerceAtLeast(normalizedItems.size)
+                    val previewSet = LinkedHashSet<String>()
+                    val previewItems = mutableListOf<String>()
+                    for (item in normalizedItems) {
+                        val lowered = item.lowercase(Locale.ROOT)
+                        if (previewSet.add(lowered)) {
+                            previewItems.add(item)
+                        }
+                        if (previewItems.size >= 3) break
+                    }
+                    val noun = if (itemCount == 1) "item" else "items"
+                    val baseDescription = if (itemCount > 0) {
+                        "Shopping list containing $itemCount $noun"
                     } else {
                         NoteNatureType.SHOPPING_LIST.humanReadable
+                    }
+                    val description = if (previewItems.isNotEmpty()) {
+                        "$baseDescription, such as ${formatList(previewItems)}"
+                    } else {
+                        baseDescription
                     }
                     NoteNatureLabel(NoteNatureType.SHOPPING_LIST, description, confidence)
                 }
@@ -564,7 +744,10 @@ open class NoteNatureClassifier {
                     "today" to 1.0,
                     "follow" to 0.5,
                     "up" to 0.5,
-                    "urgent" to 2.0
+                    "urgent" to 2.0,
+                    "notify" to 1.5,
+                    "pay" to 1.5,
+                    "renew" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "don't forget" to 3.0,
@@ -597,7 +780,10 @@ open class NoteNatureClassifier {
                     "grateful" to 2.5,
                     "learned" to 1.5,
                     "experience" to 1.0,
-                    "thoughts" to 1.0
+                    "thoughts" to 1.0,
+                    "memories" to 1.5,
+                    "emotions" to 1.5,
+                    "gratitude" to 2.0
                 ),
                 phraseWeights = mapOf(
                     "i am grateful" to 3.0,
@@ -625,7 +811,11 @@ open class NoteNatureClassifier {
                     "packing" to 1.5,
                     "passport" to 1.5,
                     "gate" to 1.0,
-                    "boarding" to 1.5
+                    "boarding" to 1.5,
+                    "airbnb" to 1.5,
+                    "excursion" to 1.5,
+                    "tour" to 1.5,
+                    "roadtrip" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "flight number" to 2.5,
@@ -668,7 +858,11 @@ open class NoteNatureClassifier {
                     "dependency" to 1.5,
                     "dependencies" to 1.5,
                     "launch" to 1.0,
-                    "release" to 1.0
+                    "release" to 1.0,
+                    "okr" to 2.0,
+                    "kanban" to 1.5,
+                    "initiative" to 1.5,
+                    "scrum" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "project plan" to 3.0,
@@ -719,7 +913,10 @@ open class NoteNatureClassifier {
                     "schedule" to 1.0,
                     "invitation" to 1.5,
                     "invites" to 1.5,
-                    "photographer" to 2.0
+                    "photographer" to 2.0,
+                    "anniversary" to 2.0,
+                    "baby" to 1.5,
+                    "shower" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "guest list" to 3.0,
@@ -766,7 +963,11 @@ open class NoteNatureClassifier {
                     "cup" to 1.0,
                     "cups" to 1.0,
                     "oven" to 1.0,
-                    "skillet" to 1.0
+                    "skillet" to 1.0,
+                    "marinate" to 1.5,
+                    "broth" to 1.5,
+                    "grill" to 1.5,
+                    "roast" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "ingredient list" to 3.0,
@@ -809,6 +1010,10 @@ open class NoteNatureClassifier {
                     "dialogue" to 2.0,
                     "outline" to 1.5,
                     "draft" to 1.5,
+                    "poem" to 1.5,
+                    "poetry" to 1.5,
+                    "screenplay" to 2.0,
+                    "script" to 1.5,
                     "arc" to 1.0,
                     "theme" to 1.0,
                     "setting" to 1.5
@@ -866,7 +1071,11 @@ open class NoteNatureClassifier {
                     "bug" to 1.5,
                     "issue" to 1.5,
                     "patch" to 1.0,
-                    "rollback" to 1.5
+                    "rollback" to 1.5,
+                    "yaml" to 1.5,
+                    "json" to 1.5,
+                    "configmap" to 1.5,
+                    "monitoring" to 1.5
                 ),
                 phraseWeights = mapOf(
                     "steps to reproduce" to 3.0,
@@ -925,9 +1134,9 @@ open class NoteNatureClassifier {
                     }
                     val entryCount = max(recognized.size, bulletLines)
                     val noun = if (entryCount == 1) "entry" else "entries"
-                    val highlights = if (recognized.isNotEmpty()) {
-                        val preview = recognized.take(3).joinToString(", ")
-                        " including $preview"
+                    val preview = recognized.take(3)
+                    val highlights = if (preview.isNotEmpty()) {
+                        ", including ${formatList(preview)}"
                     } else {
                         ""
                     }
@@ -954,7 +1163,10 @@ open class NoteNatureClassifier {
                     "incident" to 1.5,
                     "investigation" to 1.5,
                     "alert" to 1.5,
-                    "live" to 0.5
+                    "live" to 0.5,
+                    "article" to 1.5,
+                    "coverage" to 1.5,
+                    "journalists" to 1.0
                 ),
                 phraseWeights = mapOf(
                     "breaking news" to 3.5,
@@ -980,15 +1192,9 @@ open class NoteNatureClassifier {
                     bonus
                 },
                 labelBuilder = { context, confidence ->
-                    val topKeyword = context.tokenFrequency
-                        .filter { (token, _) ->
-                            token.length >= 4 && token !in stopWords && token.all { it.isLetter() }
-                        }
-                        .maxByOrNull { it.value }
-                        ?.key
-                    val topicText = topKeyword?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
-                    val description = if (topicText != null) {
-                        "News report about $topicText"
+                    val highlights = extractHighlights(context, 3)
+                    val description = if (highlights.isNotEmpty()) {
+                        "News report covering ${formatList(highlights)}"
                     } else {
                         NoteNatureType.NEWS_REPORT.humanReadable
                     }
