@@ -149,18 +149,25 @@ class Summarizer(
         debugTrace.set(trace)
         try {
             emitDebug("summarizing text of length ${text.length}")
+            var classifierLabel: NoteNatureLabel? = null
+            var classifierSummary: String? = null
+            var fallbackLabelLogged = false
             val classifierInstance = ensureClassifier()
             if (classifierInstance != null) {
                 try {
                     val label = classifierInstance.classify(text, null)
+                    classifierLabel = label
                     emitDebug(
                         "classifier label=${label.type} confidence=${String.format(Locale.US, "%.3f", label.confidence)}"
                     )
-                    if (label.humanReadable.isNotBlank() && label.confidence > 0.0) {
+                    if (label.humanReadable.isNotBlank()) {
                         val trimmed = trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+                        classifierSummary = trimmed
                         emitDebug("classifier summary output: $trimmed")
-                        _state.emit(SummarizerState.Ready)
-                        return@withContext trimmed
+                        if (label.confidence > 0.0) {
+                            _state.emit(SummarizerState.Ready)
+                            return@withContext trimmed
+                        }
                     }
                     emitDebug("classifier confidence insufficient; continuing with generative summary")
                 } catch (t: Throwable) {
@@ -176,20 +183,39 @@ class Summarizer(
             val dec = decoder
             val tok = tokenizer
 
+            suspend fun ensureClassifierDetails(): Pair<NoteNatureLabel, String> {
+                val label = classifierLabel ?: classifyFallbackLabel(text, null).also {
+                    classifierLabel = it
+                    fallbackLabelLogged = true
+                }
+                val summary = classifierSummary ?: trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+                    .also { classifierSummary = it }
+                return label to summary
+            }
+
             suspend fun fallback(reason: String, throwable: Throwable? = null): String {
-                val label = classifyFallbackLabel(text, null)
+                val (label, summary) = ensureClassifierDetails()
+                if (!fallbackLabelLogged) {
+                    emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
+                    fallbackLabelLogged = true
+                }
                 emitDebug("fallback reason: $reason; classifier=${label.type}")
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
-                return trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+                return summary
             }
 
             if (enc == null || dec == null || tok == null) {
                 return@withContext fallback("models unavailable")
             }
 
-            val prefix = "summarize: "
-            val inputIds = tok.encodeAsIds(prefix + text)
+            val (_, classifierPrompt) = ensureClassifierDetails()
+            val promptPrefix = if (classifierPrompt.isNotBlank()) {
+                "summarize the note type and structure: $classifierPrompt\n\nNote: "
+            } else {
+                "summarize the note type and structure.\n\nNote: "
+            }
+            val inputIds = tok.encodeAsIds(promptPrefix + text)
             val sourceKeywords = buildKeywordStats(text)
 
             if (enc.inputTensorCount != 2) {
