@@ -39,27 +39,64 @@ jobs:
 
       - name: Ensure summarizer model assets
         run: |
+
+          set -euo pipefail
+
           ASSETS_DIR="app/src/main/assets"
           mkdir -p "$ASSETS_DIR"
+
+          REQUIRED_FILES=(
+            "encoder_int8_dynamic.tflite"
+            "decoder_step_int8_dynamic.tflite"
+            "tokenizer.json"
+          )
+
+          missing=()
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "${ASSETS_DIR}/${file}" ]; then
+              missing+=("${file}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "All summarizer assets already present."
+            exit 0
+          fi
+
+          echo "Missing summarizer assets: ${missing[*]}"
+          python -m pip install --upgrade "pip<25"
+          python -m pip install --no-cache-dir \
+            "tensorflow==2.19.0" "tf-keras==2.19.0" \
+            "transformers==4.44.2" "huggingface_hub>=0.24.0" \
+            "numpy==2.0.2" "protobuf==5.29.1" "ml-dtypes>=0.5.0" \
+            "datasets==3.1.0"
+
           python <<'PY'
-import hashlib
 from pathlib import Path
 
-assets_dir = Path("app/src/main/assets")
-required_assets = {
-    "encoder_int8_dynamic.tflite": b"TFLITE\0",
-    "decoder_step_int8_dynamic.tflite": b"TFLITE\1",
-    "tokenizer.json": b"{}\n",
-}
+notebook = Path("build_tensor.ipynb")
+if not notebook.exists():
+    raise FileNotFoundError("build_tensor.ipynb not found")
 
-for name, default_content in required_assets.items():
-    target = assets_dir / name
-    if target.exists():
-        print(f"✅ {name} already present (sha256={hashlib.sha256(target.read_bytes()).hexdigest()[:8]})")
+filtered_lines = []
+for line in notebook.read_text().splitlines():
+    if line.lstrip().startswith("%pip"):
         continue
-    target.write_bytes(default_content)
-    print(f"🆕 Generated placeholder for {name} at {target}")
+    filtered_lines.append(line)
+
+code = compile("\n".join(filtered_lines), str(notebook), "exec")
+globals_dict = {"__name__": "__main__"}
+exec(code, globals_dict)
 PY
+
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "${ASSETS_DIR}/${file}" ]; then
+              echo "::error::Failed to generate ${file} via build_tensor.ipynb"
+              exit 1
+            fi
+          done
+
+          echo "Summarizer assets generated successfully."
 
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
