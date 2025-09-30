@@ -39,6 +39,7 @@ jobs:
 
       - name: Ensure summarizer model assets
         run: |
+
           set -euo pipefail
 
           ASSETS_DIR="app/src/main/assets"
