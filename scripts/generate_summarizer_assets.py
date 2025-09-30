@@ -1,10 +1,25 @@
 """Utility script for android-ci workflow to generate summarizer assets."""
 from __future__ import annotations
 
+import importlib
+import subprocess
+import sys
 from pathlib import Path
 
 
+def _ensure_package(module_name: str, *, package: str | None = None) -> None:
+    """Install ``package`` via pip if ``module_name`` cannot be imported."""
+
+    try:
+        importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        install_target = package or module_name
+        subprocess.check_call([sys.executable, "-m", "pip", "install", install_target])
+
+
 def main() -> None:
+    _ensure_package("sentencepiece")
+
     notebook = Path("build_tensor.ipynb")
     if not notebook.exists():
         raise FileNotFoundError("build_tensor.ipynb not found")
