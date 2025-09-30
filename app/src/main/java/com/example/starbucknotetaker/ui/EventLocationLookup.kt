@@ -21,220 +21,162 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
     }
     val context = LocalContext.current
     val geocoder = remember(context) { Geocoder(context, Locale.getDefault()) }
+    
     val display by produceState(initialValue = fallback, key1 = query, key2 = geocoder) {
-        
         Log.d("EventLocationLookup", "Processing query: '$query'")
-        Log.d("EventLocationLookup", "Fallback result: name='${fallback.name}', address='${fallback.address}'")
         
-        // IRON-CLAD RULE: If user input looks like a venue name, preserve it absolutely
-        val userVenueName = extractAndNormalizeVenueName(query)
-        Log.d("EventLocationLookup", "Extracted user venue name: '$userVenueName'")
-        
-        if (userVenueName != null) {
-            // User entered a venue name - this is sacred, we must preserve it
-            val enhancedResult = withContext(Dispatchers.IO) {
-                runCatching {
-                    enhanceVenueNameWithGeocoding(geocoder, query, userVenueName)
-                }.getOrNull()
-            }
+        val result = withContext(Dispatchers.IO) {
+            // Step 1: Always check if user input is a venue name first
+            val userVenueName = extractAndFormatVenueName(query)
             
-            if (enhancedResult != null) {
-                Log.d("EventLocationLookup", "Using enhanced venue result: name='${enhancedResult.name}', address='${enhancedResult.address}'")
-                value = enhancedResult
+            if (userVenueName != null) {
+                Log.d("EventLocationLookup", "User entered venue name: '$userVenueName'")
+                
+                // Step 2: Get address information via geocoding
+                val addresses = runCatching {
+                    geocoder.getFromLocationName(query, 5) ?: emptyList()
+                }.getOrElse { emptyList() }
+                
+                Log.d("EventLocationLookup", "Found ${addresses.size} geocoding results")
+                
+                if (addresses.isNotEmpty()) {
+                    // Step 3: Look for a more complete venue name in the geocoding results
+                    val enhancedVenueName = findEnhancedVenueName(userVenueName, addresses)
+                    val finalVenueName = enhancedVenueName ?: userVenueName
+                    
+                    // Step 4: Build the address string
+                    val addressString = buildFullAddress(addresses.first())
+                    
+                    Log.d("EventLocationLookup", "Final venue name: '$finalVenueName'")
+                    Log.d("EventLocationLookup", "Address: '$addressString'")
+                    
+                    EventLocationDisplay(
+                        name = finalVenueName,
+                        address = addressString.takeIf { it.isNotEmpty() }
+                    )
+                } else {
+                    // No geocoding results, but we still have the venue name
+                    EventLocationDisplay(name = userVenueName, address = null)
+                }
             } else {
-                // Geocoding failed, but we still have the user's venue name
-                val result = EventLocationDisplay(name = userVenueName, address = null)
-                Log.d("EventLocationLookup", "Using user venue name only: name='${result.name}'")
-                value = result
-            }
-        } else {
-            // User input doesn't look like a venue name, use normal geocoding
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
+                // User input doesn't look like a venue name, use standard processing
+                Log.d("EventLocationLookup", "User input doesn't look like venue name, using standard processing")
+                val venueResult = runCatching {
                     lookupVenueAtAddress(geocoder, query)
                 }.getOrNull()
-            }
-            
-            if (result != null) {
-                Log.d("EventLocationLookup", "Using venue lookup result: name='${result.name}', address='${result.address}'")
-                value = result
-            } else {
-                Log.d("EventLocationLookup", "Using fallback: name='${fallback.name}', address='${fallback.address}'")
-                value = fallback
+                
+                venueResult ?: fallback
             }
         }
+        
+        value = result
     }
+    
     return display
 }
 
 /**
- * IRON-CLAD venue name extraction and normalization
- * This function determines if user input is a venue name and normalizes it
+ * Extracts and properly formats a venue name from user input
  */
-private fun extractAndNormalizeVenueName(query: String): String? {
+private fun extractAndFormatVenueName(query: String): String? {
     val trimmed = query.trim()
     
-    // Handle multi-part input (separated by commas or newlines)
+    // Split by common separators
     val parts = trimmed.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
-    
     if (parts.isEmpty()) return null
     
     val firstPart = parts[0]
     
-    // Check if the first part looks like a venue name
-    if (looksLikeVenueName(firstPart)) {
-        return capitalizeEachWord(firstPart)
+    // Check if this looks like a venue name
+    if (isVenueName(firstPart)) {
+        return formatVenueName(firstPart)
     }
     
-    // If it's a single word/phrase without separators, and it looks like a venue, use it
-    if (parts.size == 1 && looksLikeVenueName(trimmed)) {
-        return capitalizeEachWord(trimmed)
+    // If it's a single input without separators, check if it's a venue name
+    if (parts.size == 1 && isVenueName(trimmed)) {
+        return formatVenueName(trimmed)
     }
     
     return null
 }
 
 /**
- * Capitalizes each word in a venue name properly
+ * Determines if a string looks like a venue name
  */
-private fun capitalizeEachWord(text: String): String {
-    return text.split(' ')
-        .joinToString(" ") { word ->
-            if (word.isEmpty()) {
-                word
-            } else {
-                word.lowercase().replaceFirstChar { it.titlecase() }
-            }
-        }
-}
-
-/**
- * IRON-CLAD venue name determination
- * This function determines if a string looks like a venue name
- */
-private fun looksLikeVenueName(text: String): Boolean {
+private fun isVenueName(text: String): Boolean {
     val trimmed = text.trim()
     
-    // Must have reasonable length
-    if (trimmed.length < 2 || trimmed.length > 100) return false
+    // Basic checks
+    if (trimmed.length < 2) return false
+    if (trimmed.matches(Regex("^\\d+.*"))) return false // Starts with number
+    if (trimmed.matches(Regex("^\\d+$"))) return false // Only numbers
     
-    // Must not be purely numeric
-    if (trimmed.matches(Regex("^\\d+$"))) return false
-    
-    // Must not start with a number (street addresses typically do)
-    if (trimmed.matches(Regex("^\\d+.*"))) return false
-    
-    // Must not contain street/address keywords
+    // Check for address keywords that indicate it's NOT a venue name
     val addressKeywords = listOf(
-        "street", "st\\b", "avenue", "ave\\b", "road", "rd\\b", "lane", "ln\\b",
-        "drive", "dr\\b", "boulevard", "blvd", "straat", "gracht", "plein", 
-        "singel", "kade", "way", "place", "pl\\b", "court", "ct\\b"
+        "street", "st", "avenue", "ave", "road", "rd", "lane", "ln",
+        "drive", "dr", "boulevard", "blvd", "straat", "gracht", 
+        "plein", "singel", "kade", "way", "place", "pl", "court", "ct"
     )
     
-    val addressPattern = addressKeywords.joinToString("|") { "\\b$it\\b" }
-    if (trimmed.matches(Regex(".*($addressPattern).*", RegexOption.IGNORE_CASE))) {
-        return false
+    val hasAddressKeyword = addressKeywords.any { keyword ->
+        trimmed.contains("\\b$keyword\\b".toRegex(RegexOption.IGNORE_CASE))
     }
     
-    // Must not be a postal code
+    if (hasAddressKeyword) return false
+    
+    // Check for postal code patterns
     if (trimmed.matches(Regex("\\d{4,5}\\s*[A-Z]{0,2}"))) return false
     
-    // Looks like a venue name
     return true
 }
 
 /**
- * IRON-CLAD venue name enhancement
- * This function tries to enhance/complete venue names using geocoding results
- * but NEVER replaces them with something completely different
+ * Formats a venue name with proper capitalization
  */
-private suspend fun enhanceVenueNameWithGeocoding(
-    geocoder: Geocoder, 
-    originalQuery: String, 
-    userVenueName: String
-): EventLocationDisplay? {
-    return withContext(Dispatchers.IO) {
-        try {
-            Log.d("EventLocationLookup", "Enhancing venue name '$userVenueName' with geocoding")
-            
-            // Get geocoding results
-            val addresses = geocoder.getFromLocationName(originalQuery, 10) ?: return@withContext null
-            
-            var bestVenueName = userVenueName
-            var bestAddress: String? = null
-            
-            // Look through results for venue name enhancements
-            for ((index, address) in addresses.withIndex()) {
-                val addressLine = address.getAddressLine(0) ?: ""
-                val fullAddress = buildAddressString(address)
-                
-                Log.d("EventLocationLookup", "Checking address $index: $addressLine")
-                
-                // Look for venue names in the address result
-                val foundVenueName = extractVenueNameFromAddressLine(addressLine, userVenueName)
-                if (foundVenueName != null) {
-                    Log.d("EventLocationLookup", "Found enhanced venue name: '$foundVenueName'")
-                    bestVenueName = foundVenueName
-                    bestAddress = fullAddress
-                    break
-                }
-                
-                // If no enhanced venue name found but we have a good address, use it
-                if (bestAddress == null && fullAddress.isNotEmpty()) {
-                    bestAddress = fullAddress
-                }
-            }
-            
-            return@withContext EventLocationDisplay(
-                name = bestVenueName,
-                address = bestAddress
-            )
-            
-        } catch (e: Exception) {
-            Log.e("EventLocationLookup", "Failed to enhance venue name", e)
-            return@withContext EventLocationDisplay(name = userVenueName, address = null)
+private fun formatVenueName(venueName: String): String {
+    return venueName.split(" ").joinToString(" ") { word ->
+        if (word.isEmpty()) {
+            word
+        } else {
+            word.lowercase().replaceFirstChar { it.uppercaseChar() }
         }
     }
 }
 
 /**
- * IRON-CLAD venue name extraction from address lines
- * This function looks for enhanced venue names in geocoding results
- * but only returns names that are clearly related to the user's input
+ * Looks for a more complete venue name in geocoding results
+ * For example, if user typed "Paard Van" and geocoding found "Paard Van Marken", return the complete name
  */
-private fun extractVenueNameFromAddressLine(addressLine: String, userVenueName: String): String? {
-    // Split the address line by commas to get potential components
-    val components = addressLine.split(',').map { it.trim() }
+private fun findEnhancedVenueName(userVenueName: String, addresses: List<android.location.Address>): String? {
+    val userLower = userVenueName.lowercase().trim()
     
-    val userLower = userVenueName.lowercase()
-    
-    for (component in components) {
-        val componentLower = component.lowercase()
-        
-        // Skip obvious address components
-        if (looksLikeStreetAddress(component)) continue
-        if (looksLikeCity(component)) continue
-        if (looksLikePostalCode(component)) continue
-        
-        // Check if this component contains or extends the user's venue name
-        when {
-            // Exact match (different case)
-            componentLower == userLower -> {
-                return capitalizeEachWord(component)
+    for (address in addresses) {
+        // Check various sources for venue names
+        val candidates = listOfNotNull(
+            address.featureName,
+            address.premises,
+            address.extras?.getString("name"),
+            address.extras?.getString("establishment"),
+            address.extras?.getString("point_of_interest"),
+            address.extras?.getString("place_name"),
+            // Also check the address line for venue names
+            address.getAddressLine(0)?.let { line ->
+                // Extract potential venue name from address line
+                extractVenueFromAddressLine(line, userVenueName)
             }
+        )
+        
+        for (candidate in candidates) {
+            val candidateLower = candidate.lowercase().trim()
             
-            // Component contains the user's venue name (completion case)
-            componentLower.contains(userLower) && component.length <= userVenueName.length * 2 -> {
-                // Make sure it's not just a substring in a larger address
-                if (isVenueNameExtension(component, userVenueName)) {
-                    return capitalizeEachWord(component)
-                }
-            }
-            
-            // User's venue name contains the component (user typed more than needed)
-            userLower.contains(componentLower) && componentLower.length >= 3 -> {
-                if (isVenueNameExtension(userVenueName, component)) {
-                    return capitalizeEachWord(userVenueName) // Keep user's more complete version
+            // Check if the candidate contains the user's input as a prefix or partial match
+            if (candidateLower.startsWith(userLower) || 
+                candidateLower.contains(userLower)) {
+                
+                // Make sure it's not just a street address
+                if (isVenueName(candidate)) {
+                    Log.d("EventLocationLookup", "Found enhanced venue name: '$candidate' for user input: '$userVenueName'")
+                    return formatVenueName(candidate)
                 }
             }
         }
@@ -244,43 +186,30 @@ private fun extractVenueNameFromAddressLine(addressLine: String, userVenueName: 
 }
 
 /**
- * Checks if one string is a reasonable extension/completion of another for venue names
+ * Extracts venue name from an address line if it contains the user's input
  */
-private fun isVenueNameExtension(longer: String, shorter: String): Boolean {
-    val longerLower = longer.lowercase().trim()
-    val shorterLower = shorter.lowercase().trim()
+private fun extractVenueFromAddressLine(addressLine: String, userInput: String): String? {
+    val userLower = userInput.lowercase().trim()
+    val lineLower = addressLine.lowercase()
     
-    // The longer string should start with the shorter one (word boundary)
-    if (!longerLower.startsWith(shorterLower)) return false
+    if (!lineLower.contains(userLower)) return null
     
-    // The extension should be reasonable (not too long)
-    if (longer.length > shorter.length * 3) return false
+    // Split the address line by commas and look for the part containing the user input
+    val parts = addressLine.split(',').map { it.trim() }
     
-    // Should not contain obvious address components after the venue name
-    val extension = longerLower.substring(shorterLower.length).trim()
-    if (extension.matches(Regex(".*\\b(street|st|avenue|ave|road|rd|\\d+)\\b.*"))) {
-        return false
+    for (part in parts) {
+        if (part.lowercase().contains(userLower) && isVenueName(part)) {
+            return part.trim()
+        }
     }
     
-    return true
+    return null
 }
 
-private fun looksLikeStreetAddress(text: String): Boolean {
-    return text.matches(Regex("^\\d+.*")) || 
-           text.contains(Regex("\\b(street|st|avenue|ave|road|rd|lane|ln|drive|dr|boulevard|blvd|straat|gracht)\\b", RegexOption.IGNORE_CASE))
-}
-
-private fun looksLikeCity(text: String): Boolean {
-    // This is a simple heuristic - could be improved
-    return text.length > 2 && text.matches(Regex("^[A-Za-z\\s-]+$")) && 
-           !text.contains(Regex("\\b(the|and|of|van|de|le|la)\\b", RegexOption.IGNORE_CASE))
-}
-
-private fun looksLikePostalCode(text: String): Boolean {
-    return text.matches(Regex("\\d{4,5}\\s*[A-Z]{0,2}"))
-}
-
-private fun buildAddressString(address: android.location.Address): String {
+/**
+ * Builds a complete address string from geocoding results
+ */
+private fun buildFullAddress(address: android.location.Address): String {
     val parts = mutableListOf<String>()
     
     // Street address
@@ -291,7 +220,7 @@ private fun buildAddressString(address: android.location.Address): String {
         parts.add(streetParts.joinToString(" "))
     }
     
-    // City with postal code
+    // Postal code and city
     val cityParts = mutableListOf<String>()
     address.postalCode?.trim()?.takeIf { it.isNotEmpty() }?.let { cityParts.add(it) }
     address.locality?.trim()?.takeIf { it.isNotEmpty() }?.let { cityParts.add(it) }
@@ -299,12 +228,12 @@ private fun buildAddressString(address: android.location.Address): String {
         parts.add(cityParts.joinToString(" "))
     }
     
-    // Region
+    // Sub-admin area (if different from locality)
     address.subAdminArea?.trim()?.takeIf { 
         it.isNotEmpty() && !it.equals(address.locality?.trim(), ignoreCase = true) 
     }?.let { parts.add(it) }
     
-    // State/Province
+    // Admin area (state/province)
     address.adminArea?.trim()?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
     
     // Country
