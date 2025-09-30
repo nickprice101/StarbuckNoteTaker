@@ -9,9 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
-import org.mockito.kotlin.never
 import org.mockito.kotlin.whenever
-import org.mockito.kotlin.verify
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicBoolean
@@ -19,16 +17,30 @@ import kotlin.math.max
 
 class SummarizerTest {
     private val context: Context = mock()
-    private val modelsDir: File = Files.createTempDirectory("models").toFile()
+    private val filesDir: File = Files.createTempDirectory("files").toFile()
+    private val modelsDir: File = File(filesDir, Summarizer.MODELS_DIR_NAME).apply { mkdirs() }
 
     init {
-        whenever(context.filesDir).thenReturn(modelsDir)
+        whenever(context.filesDir).thenReturn(filesDir)
     }
 
     @After
     fun tearDown() {
-        modelsDir.deleteRecursively()
+        filesDir.deleteRecursively()
         resetTokenizerLoader()
+    }
+
+    private fun writeModelFiles(
+        encoderBytes: ByteArray = ByteArray(4),
+        decoderBytes: ByteArray = ByteArray(4),
+        tokenizerBytes: ByteArray = ByteArray(4),
+    ) {
+        File(modelsDir, Summarizer.ENCODER_ASSET_NAME).apply {
+            parentFile?.mkdirs()
+            writeBytes(encoderBytes)
+        }
+        File(modelsDir, Summarizer.DECODER_ASSET_NAME).apply { writeBytes(decoderBytes) }
+        File(modelsDir, Summarizer.TOKENIZER_ASSET_NAME).apply { writeBytes(tokenizerBytes) }
     }
 
     @Test
@@ -48,20 +60,11 @@ class SummarizerTest {
 
     @Test
     fun summarizeFallsBackWhenTokenizerNativeMissing() = runBlocking {
-        // Create dummy model files so fetcher doesn't attempt network
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(byteArrayOf()) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(byteArrayOf()) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(byteArrayOf()) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles(encoderBytes = ByteArray(1), decoderBytes = ByteArray(1), tokenizerBytes = ByteArray(1))
 
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher,
             nativeLoader = { false },
             classifierFactory = { classifier },
             logger = { _, _ -> },
@@ -83,17 +86,16 @@ class SummarizerTest {
                 confidence = 0.9
             )
         )
-        val fetcher = mock<ModelFetcher>()
 
         val debugMessages = mutableListOf<String>()
         val logs = mutableListOf<String>()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             classifierFactory = { classifier },
             nativeLoader = { throw AssertionError("native loader should not run during classification") },
             logger = { message, throwable -> logs.add("$message:${throwable.javaClass.simpleName}:${throwable.message}") },
-            debugSink = { debugMessages.add(it) }
+            debugSink = { debugMessages.add(it) },
+            assetLoader = { _, _ -> throw AssertionError("asset loader should not run during classification") }
         )
 
         val summary = summarizer.summarize("Any note content")
@@ -103,21 +105,13 @@ class SummarizerTest {
         assertTrue("expected classifier trace but was: $trace logs=$logs", trace.any { it.contains("classifier summary output") })
         assertEquals(expected, summary)
         assertTrue(Summarizer.wordCount(summary) <= 15)
-        verify(fetcher, never()).ensureModels(any())
 
         summarizer.close()
     }
 
     @Test
     fun summarizeStopsDecodingWhenEosTokenAppears() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9)
@@ -138,7 +132,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -158,14 +151,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeAvoidsDegenerateOutput() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
@@ -205,7 +191,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -225,14 +210,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeKeepsConciseHeadline() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9, 10)
@@ -261,7 +239,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -278,14 +255,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeTurnsKeywordListIntoReadableSentence() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9, 10)
@@ -324,7 +294,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -346,14 +315,7 @@ class SummarizerTest {
 
     @Test
     fun summarizePrefersNoteKeywordsOverGenericOpeners() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
@@ -395,7 +357,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -418,14 +379,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeAcceptsMorphologicalParaphrases() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
@@ -468,7 +422,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -491,14 +444,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeAcceptsSemanticParaphraseWithoutKeywordOverlap() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val prefix = "summarize the note type and structure: ${NoteNatureType.GENERAL_NOTE.humanReadable}\n\nNote: "
@@ -545,7 +491,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -565,14 +510,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeKeepsHyphenatedParaphrase() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9, 10, 11, 12)
@@ -610,7 +548,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -632,14 +569,7 @@ class SummarizerTest {
 
     @Test
     fun summarizeFeedsFullHistoryWhenDecoderLacksCache() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
         val encodedIds = intArrayOf(7, 8, 9)
@@ -660,7 +590,6 @@ class SummarizerTest {
         val classifier = zeroConfidenceClassifier()
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { tokenizer },
             nativeLoader = { true },
             interpreterFactory = { interpreters.removeFirst() },
@@ -679,16 +608,9 @@ class SummarizerTest {
 
     @Test
     fun warmUpReportsFallbackWhenNativeTokenizerMissing() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(byteArrayOf()) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(byteArrayOf()) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(byteArrayOf()) }
+        writeModelFiles(encoderBytes = ByteArray(1), decoderBytes = ByteArray(1), tokenizerBytes = ByteArray(1))
 
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
-
-        val summarizer = Summarizer(context, fetcher, nativeLoader = { false }, logger = { _, _ -> }, debugSink = { })
+        val summarizer = Summarizer(context, nativeLoader = { false }, logger = { _, _ -> }, debugSink = { })
 
         val state = summarizer.warmUp()
         assertEquals(Summarizer.SummarizerState.Fallback, state)
@@ -696,14 +618,7 @@ class SummarizerTest {
 
     @Test
     fun warmUpIsReadyWhenNativeTokenizerLoads() = runBlocking {
-        val encFile = File(modelsDir, ModelFetcher.ENCODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val decFile = File(modelsDir, ModelFetcher.DECODER_NAME).apply { writeBytes(ByteArray(4)) }
-        val tokenizerFile = File(modelsDir, ModelFetcher.TOKENIZER_NAME).apply { writeBytes(ByteArray(4)) }
-
-        val fetcher = mock<ModelFetcher>()
-        whenever(fetcher.ensureModels(any())).thenReturn(
-            ModelFetcher.Result.Success(encFile, decFile, tokenizerFile)
-        )
+        writeModelFiles()
 
         val tokenizer = mock<SentencePieceProcessor>()
 
@@ -728,7 +643,6 @@ class SummarizerTest {
 
         val summarizer = Summarizer(
             context,
-            fetcher = fetcher,
             spFactory = { _ -> tokenizer },
             nativeLoader = { NativeLibraryLoader.ensureTokenizer(it) },
             interpreterFactory = { interpreters.removeFirst() },

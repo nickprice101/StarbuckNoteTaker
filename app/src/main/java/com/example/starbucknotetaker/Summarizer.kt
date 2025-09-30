@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
@@ -19,19 +21,19 @@ import kotlin.math.sqrt
 /**
  * Simple on-device text summarizer.
  *
- * Downloads T5 encoder/decoder and SentencePiece tokenizer on demand and performs
+ * Loads bundled T5 encoder/decoder and SentencePiece tokenizer assets and performs
  * greedy sequence-to-sequence inference. If anything fails it falls back to a
  * lightweight extractive strategy.
  */
 class Summarizer(
     private val context: Context,
-    private val fetcher: ModelFetcher = ModelFetcher(),
     private val spFactory: (Context) -> SentencePieceProcessor = { SentencePieceProcessor() },
     private val nativeLoader: (Context) -> Boolean = { NativeLibraryLoader.ensureTokenizer(it) },
     private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
     private val classifierFactory: (Context) -> NoteNatureClassifier = { NoteNatureClassifier() },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
     private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") },
+    private val assetLoader: (Context, String) -> InputStream = { ctx, name -> ctx.assets.open(name) },
     classifier: NoteNatureClassifier? = null,
 ) {
     private var encoder: LiteInterpreter? = null
@@ -62,39 +64,56 @@ class Summarizer(
         if (encoder != null && decoder != null && tokenizer != null) return
         emitDebug("loading summarizer models")
         _state.emit(SummarizerState.Loading)
-        when (val result = fetcher.ensureModels(context)) {
-            is ModelFetcher.Result.Success -> {
-                try {
-                    if (!ensureNativeTokenizerLib()) {
-                        logger(
-                            "summarizer missing native tokenizer lib",
-                            UnsatisfiedLinkError("libdjl_tokenizer.so not found")
-                        )
-                        _state.emit(SummarizerState.Fallback)
-                        return
-                    }
-                    encoder = interpreterFactory(mapFile(result.encoder))
-                    decoder = interpreterFactory(mapFile(result.decoder))
-                    tokenizer = spFactory(context).apply { load(context, result.tokenizer.absolutePath) }
-                    emitDebug("summarizer models ready")
-                    _state.emit(SummarizerState.Ready)
-                } catch (e: Throwable) {
-                    logger("summarizer failed to load models", e)
-                    _state.emit(SummarizerState.Error(e.message ?: "Failed to load models"))
-                }
+        val models = try {
+            withContext(Dispatchers.IO) {
+                val modelsDir = File(context.filesDir, MODELS_DIR_NAME).apply { mkdirs() }
+                val encoderFile = ensureAsset(modelsDir, ENCODER_ASSET_NAME)
+                val decoderFile = ensureAsset(modelsDir, DECODER_ASSET_NAME)
+                val tokenizerFile = ensureAsset(modelsDir, TOKENIZER_ASSET_NAME)
+                Triple(encoderFile, decoderFile, tokenizerFile)
             }
-            is ModelFetcher.Result.Failure -> {
-                logger("summarizer failed to fetch models", result.throwable ?: Exception(result.message))
-                _state.emit(SummarizerState.Error(result.message))
-            }
+        } catch (t: Throwable) {
+            logger("summarizer failed to prepare bundled models", t)
+            _state.emit(SummarizerState.Error(t.message ?: "Failed to prepare models"))
+            return
         }
-        // leave interpreters null to trigger fallback
+        try {
+            if (!ensureNativeTokenizerLib()) {
+                logger(
+                    "summarizer missing native tokenizer lib",
+                    UnsatisfiedLinkError("libdjl_tokenizer.so not found")
+                )
+                _state.emit(SummarizerState.Fallback)
+                return
+            }
+            encoder = interpreterFactory(mapFile(models.first))
+            decoder = interpreterFactory(mapFile(models.second))
+            tokenizer = spFactory(context).apply { load(context, models.third.absolutePath) }
+            emitDebug("summarizer models ready")
+            _state.emit(SummarizerState.Ready)
+        } catch (e: Throwable) {
+            logger("summarizer failed to load models", e)
+            _state.emit(SummarizerState.Error(e.message ?: "Failed to load models"))
+        }
+        // leave interpreters null to trigger fallback on failure
     }
 
     private fun mapFile(file: File): MappedByteBuffer {
         RandomAccessFile(file, "r").use { raf ->
             return raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
         }
+    }
+
+    @Suppress("BlockingMethodInNonBlockingContext")
+    private suspend fun ensureAsset(modelsDir: File, assetName: String): File {
+        val target = File(modelsDir, assetName)
+        if (target.exists() && target.length() > 0) return target
+        assetLoader(context, assetName).use { input ->
+            FileOutputStream(target).use { output ->
+                input.copyTo(output)
+            }
+        }
+        return target
     }
 
     private var nativeTokenizerLoaded = false
@@ -1027,6 +1046,10 @@ class Summarizer(
     }
 
     companion object {
+        internal const val MODELS_DIR_NAME = "models"
+        internal const val ENCODER_ASSET_NAME = "encoder_int8_dynamic.tflite"
+        internal const val DECODER_ASSET_NAME = "decoder_step_int8_dynamic.tflite"
+        internal const val TOKENIZER_ASSET_NAME = "tokenizer.json"
         private const val MAX_INPUT_TOKENS = 256
         private const val MAX_OUTPUT_TOKENS = 64
         private const val START_TOKEN = 0

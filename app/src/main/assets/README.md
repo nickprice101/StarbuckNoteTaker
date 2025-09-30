@@ -1,14 +1,12 @@
 # Model assets
 
-This directory is intentionally left empty. On first run the application
-downloads the required TensorFlow Lite models from the project's GitHub
-Releases and stores them under the app's internal `files/models` directory.
-
-If you prefer to bundle the models manually (for offline installs), place the
-following files here:
+This directory ships the summarisation assets that are embedded in the APK. The
+`build_tensor.ipynb` notebook fine-tunes FLAN-T5, converts it to TensorFlow Lite
+and copies the following files into this folder:
 
 - `encoder_int8_dynamic.tflite`
 - `decoder_step_int8_dynamic.tflite`
-- `spiece.model`
+- `tokenizer.json`
 
-These binaries remain untracked by git.
+The app copies these assets into `context.filesDir/models` before loading them,
+and the binaries remain untracked by git for size reasons.
