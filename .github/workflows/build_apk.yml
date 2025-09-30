@@ -1,0 +1,132 @@
+name: Android CI (StarbuckNoteTaker)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 13114758
+          packages: >-
+            platform-tools
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;26.1.10909125
+
+      - name: Configure local.properties
+        run: |
+          SDK_PATH="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [ -z "$SDK_PATH" ]; then
+            echo "Android SDK path not available" >&2
+            exit 1
+          fi
+          echo "sdk.dir=$SDK_PATH" > local.properties
+
+      - name: Ensure summarizer model assets
+        run: |
+
+          set -euo pipefail
+
+          ASSETS_DIR="app/src/main/assets"
+          mkdir -p "$ASSETS_DIR"
+
+          REQUIRED_FILES=(
+            "encoder_int8_dynamic.tflite"
+            "decoder_step_int8_dynamic.tflite"
+            "tokenizer.json"
+          )
+
+          missing=()
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "${ASSETS_DIR}/${file}" ]; then
+              missing+=("${file}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "All summarizer assets already present."
+            exit 0
+          fi
+
+          echo "Missing summarizer assets: ${missing[*]}"
+          python -m pip install --upgrade "pip<25"
+          python -m pip install --no-cache-dir \
+            "tensorflow==2.19.0" "tf-keras==2.19.0" \
+            "transformers==4.44.2" "huggingface_hub>=0.24.0" \
+            "numpy==2.0.2" "protobuf==5.29.1" "ml-dtypes>=0.5.0" \
+            "datasets==3.1.0"
+
+          python <<'PY'
+from pathlib import Path
+
+notebook = Path("build_tensor.ipynb")
+if not notebook.exists():
+    raise FileNotFoundError("build_tensor.ipynb not found")
+
+filtered_lines = []
+for line in notebook.read_text().splitlines():
+    if line.lstrip().startswith("%pip"):
+        continue
+    filtered_lines.append(line)
+
+code = compile("\n".join(filtered_lines), str(notebook), "exec")
+globals_dict = {"__name__": "__main__"}
+exec(code, globals_dict)
+PY
+
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "${ASSETS_DIR}/${file}" ]; then
+              echo "::error::Failed to generate ${file} via build_tensor.ipynb"
+              exit 1
+            fi
+          done
+
+          echo "Summarizer assets generated successfully."
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Show Gradle version
+        run: ./gradlew --version
+
+      #- name: Decode keystore
+      #  run: |
+      #    mkdir -p app
+      #    echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/starbucknotetaker.jks
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+        env:
+          ANDROID_KEYSTORE_PATH: app/starbucknotetaker.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Rename APK with build version
+        run: |
+          mkdir -p build-out
+          VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "build-out/StarbuckNoteTaker-${VERSION_NAME}.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarbuckNoteTaker-1.0.${{ github.run_number }}
+          path: build-out/StarbuckNoteTaker-1.0.${{ github.run_number }}.apk
+          if-no-files-found: error
