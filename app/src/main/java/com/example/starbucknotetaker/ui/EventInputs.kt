@@ -70,7 +70,6 @@ fun LocationAutocompleteField(
     val geocoderAvailable = remember { Geocoder.isPresent() }
     if (!geocoderAvailable) {
         Column(modifier = modifier) {
-            FormattingToolbar()
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -122,7 +121,6 @@ fun LocationAutocompleteField(
     }
 
     Column(modifier = modifier) {
-        FormattingToolbar()
         ExposedDropdownMenuBox(
             expanded = expanded,
             onExpandedChange = {

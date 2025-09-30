@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -73,7 +74,7 @@ fun AddNoteScreen(
     val blocks = remember(prefill) {
         val initialBlocks = mutableListOf<NoteBlock>()
         prefill?.text?.takeIf { it.isNotBlank() }?.let { text ->
-            initialBlocks.add(NoteBlock.Text(text))
+            initialBlocks.add(NoteBlock.Text(TextFieldValue(text)))
         }
         prefill?.images.orEmpty().forEach { uri ->
             initialBlocks.add(NoteBlock.Image(uri, 0))
@@ -82,12 +83,12 @@ fun AddNoteScreen(
             initialBlocks.add(NoteBlock.File(uri))
         }
         if (initialBlocks.firstOrNull() !is NoteBlock.Text) {
-            initialBlocks.add(0, NoteBlock.Text(""))
+            initialBlocks.add(0, NoteBlock.Text(TextFieldValue("")))
         }
         val needsTrailingText = initialBlocks.isEmpty() ||
-            (initialBlocks.last() as? NoteBlock.Text)?.text?.isNotBlank() != false
+            (initialBlocks.last() as? NoteBlock.Text)?.value?.text?.isNotBlank() != false
         if (needsTrailingText) {
-            initialBlocks.add(NoteBlock.Text(""))
+            initialBlocks.add(NoteBlock.Text(TextFieldValue("")))
         }
         mutableStateListOf<NoteBlock>().apply { addAll(initialBlocks) }
     }
@@ -207,7 +208,7 @@ fun AddNoteScreen(
         textBlock: NoteBlock.Text,
         finalizePending: Boolean = false,
     ) {
-        val detections = extractUrls(textBlock.text, finalizePending)
+        val detections = extractUrls(textBlock.value.text, finalizePending)
         val existingBlocks = mutableMapOf<String, NoteBlock.LinkPreview>()
         var cursor = index + 1
         while (cursor < blocks.size) {
@@ -275,7 +276,7 @@ fun AddNoteScreen(
 
     LaunchedEffect(prefill) {
         if (!prefill?.text.isNullOrBlank()) {
-            val index = blocks.indexOfFirst { it is NoteBlock.Text && it.text.isNotBlank() }
+            val index = blocks.indexOfFirst { it is NoteBlock.Text && it.value.text.isNotBlank() }
             val block = blocks.getOrNull(index) as? NoteBlock.Text ?: return@LaunchedEffect
             syncLinkPreviews(index, block, finalizePending = true)
         }
@@ -290,12 +291,12 @@ fun AddNoteScreen(
                 )
             }
             val last = blocks.lastOrNull()
-            if (last is NoteBlock.Text && last.text.isBlank()) {
+            if (last is NoteBlock.Text && last.value.text.isBlank()) {
                 blocks[blocks.size - 1] = NoteBlock.Image(it, 0)
-                blocks.add(NoteBlock.Text(""))
+                blocks.add(NoteBlock.Text(TextFieldValue("")))
             } else {
                 blocks.add(NoteBlock.Image(it, 0))
-                blocks.add(NoteBlock.Text(""))
+                blocks.add(NoteBlock.Text(TextFieldValue("")))
             }
         }
         onEnablePinCheck()
@@ -308,12 +309,12 @@ fun AddNoteScreen(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
             val last = blocks.lastOrNull()
-            if (last is NoteBlock.Text && last.text.isBlank()) {
+            if (last is NoteBlock.Text && last.value.text.isBlank()) {
                 blocks[blocks.size - 1] = NoteBlock.File(it)
-                blocks.add(NoteBlock.Text(""))
+                blocks.add(NoteBlock.Text(TextFieldValue("")))
             } else {
                 blocks.add(NoteBlock.File(it))
-                blocks.add(NoteBlock.Text(""))
+                blocks.add(NoteBlock.Text(TextFieldValue("")))
             }
         }
         onEnablePinCheck()
@@ -324,17 +325,17 @@ fun AddNoteScreen(
         if (sanitized.isEmpty()) return
         val lastIndex = blocks.lastIndex
         val last = blocks.getOrNull(lastIndex)
-        if (last is NoteBlock.Text && last.text.isBlank()) {
-            val updated = last.copy(text = sanitized)
+        if (last is NoteBlock.Text && last.value.text.isBlank()) {
+            val updated = last.copy(value = TextFieldValue(sanitized))
             blocks[lastIndex] = updated
             syncLinkPreviews(lastIndex, updated, finalizePending = true)
-            blocks.add(NoteBlock.Text(""))
+            blocks.add(NoteBlock.Text(TextFieldValue("")))
         } else {
-            val newBlock = NoteBlock.Text(sanitized)
+            val newBlock = NoteBlock.Text(TextFieldValue(sanitized))
             blocks.add(newBlock)
             val index = blocks.lastIndex
             syncLinkPreviews(index, newBlock, finalizePending = true)
-            blocks.add(NoteBlock.Text(""))
+            blocks.add(NoteBlock.Text(TextFieldValue("")))
         }
     }
 
@@ -401,7 +402,7 @@ fun AddNoteScreen(
                             blocks.forEach { block ->
                                 when (block) {
                                     is NoteBlock.Text -> {
-                                        append(block.text)
+                                        append(block.value.text)
                                         append("\n")
                                     }
                                     is NoteBlock.Image -> {
@@ -497,7 +498,6 @@ fun AddNoteScreen(
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
                 ) {
-                    FormattingToolbar()
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
@@ -739,6 +739,7 @@ fun AddNoteScreen(
                 }
             }
             itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
+                val blockIndex = index
                 when (block) {
                     is NoteBlock.Text -> {
                         Column(
@@ -746,18 +747,24 @@ fun AddNoteScreen(
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
                         ) {
-                            FormattingToolbar()
-                            OutlinedTextField(
-                                value = block.text,
-                                onValueChange = { newText ->
-                                    val updated = block.copy(text = newText)
-                                    blocks[index] = updated
-                                    syncLinkPreviews(index, updated)
+                            RichTextEditor(
+                                value = block.value,
+                                onValueChange = { newValue ->
+                                    val updated = block.copy(value = newValue)
+                                    blocks[blockIndex] = updated
+                                    syncLinkPreviews(blockIndex, updated)
                                 },
-                                label = if (index == 0 && entryMode == NoteEntryMode.Note) {
+                                label = if (blockIndex == 0 && entryMode == NoteEntryMode.Note) {
                                     { Text("Content") }
                                 } else null,
-                                modifier = Modifier.fillMaxWidth()
+                                onAction = { action ->
+                                    val current = blocks.getOrNull(blockIndex) as? NoteBlock.Text ?: return@RichTextEditor
+                                    val formatted = applyTextFormatting(current.value, action)
+                                    val updated = current.copy(value = formatted)
+                                    blocks[blockIndex] = updated
+                                    syncLinkPreviews(blockIndex, updated)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
@@ -931,7 +938,7 @@ fun AddNoteScreen(
 private sealed class NoteBlock {
     abstract val id: Long
 
-    data class Text(val text: String, override val id: Long = nextNoteBlockId()) : NoteBlock()
+    data class Text(val value: TextFieldValue, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class Image(val uri: Uri, val rotation: Int, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class File(val uri: Uri, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class LinkPreview(
