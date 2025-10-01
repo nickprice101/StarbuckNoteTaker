@@ -79,6 +79,97 @@ data class RichTextValue(
         return true
     }
 
+    fun handleListEnter(): RichTextValue? {
+        if (!selection.collapsed) return null
+        if (text.isEmpty()) return null
+        val caret = selection.start.coerceIn(0, text.length)
+        val context = listItemContextAt(caret) ?: return null
+        if (caret < context.prefixStart) return null
+
+        val textBuilder = StringBuilder(text)
+        val stylesBuilder = characterStyles.toMutableList()
+
+        val contentBlank = text.substring(context.contentStart, context.lineEnd).isBlank()
+        return if (contentBlank && caret >= context.contentStart) {
+            val removalStart = context.prefixStart
+            val removalEnd = context.contentStart
+            val removedCount = removalEnd - removalStart
+            if (removedCount > 0) {
+                textBuilder.delete(removalStart, removalEnd)
+                repeat(removedCount) { stylesBuilder.removeAt(removalStart) }
+            }
+            val caretAfterRemoval = (caret - removedCount).coerceAtLeast(removalStart)
+            textBuilder.insert(caretAfterRemoval, '\n')
+            stylesBuilder.add(caretAfterRemoval, emptySet())
+            RichTextValue(
+                text = textBuilder.toString(),
+                selection = TextRange(caretAfterRemoval + 1),
+                characterStyles = stylesBuilder,
+            )
+        } else {
+            val nextPrefix = when (context.type) {
+                ListItemType.Bullet -> context.prefixText
+                ListItemType.Numbered -> context.nextNumberPrefix()
+            }
+            val insertPosition = caret
+            val insertText = buildString {
+                append('\n')
+                append(context.indent)
+                append(nextPrefix)
+            }
+            val insertStyles = List(insertText.length) { emptySet<RichTextStyle>() }
+            textBuilder.insert(insertPosition, insertText)
+            stylesBuilder.addAll(insertPosition, insertStyles)
+            RichTextValue(
+                text = textBuilder.toString(),
+                selection = TextRange(insertPosition + insertText.length),
+                characterStyles = stylesBuilder,
+            )
+        }
+    }
+
+    internal fun applyListFormatting(prefix: String, type: ListItemType): RichTextValue {
+        val caret = selection.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', caret - 1).let { if (it == -1) 0 else it + 1 }
+        val lineEnd = text.indexOf('\n', caret).let { if (it == -1) text.length else it }
+        val lineText = text.substring(lineStart, lineEnd)
+        val indentLength = lineText.indexOfFirst { !it.isWhitespace() }.let { if (it == -1) lineText.length else it }
+        val prefixStart = lineStart + indentLength
+        val existing = listItemContextAt(prefixStart)
+
+        val targetPrefix = when (type) {
+            ListItemType.Bullet -> prefix
+            ListItemType.Numbered -> prefix
+        }
+
+        val textBuilder = StringBuilder(text)
+        val stylesBuilder = characterStyles.toMutableList()
+
+        val replaceStart = prefixStart
+        val replaceEnd = existing?.contentStart ?: prefixStart
+        if (replaceEnd > replaceStart) {
+            textBuilder.delete(replaceStart, replaceEnd)
+            repeat(replaceEnd - replaceStart) { stylesBuilder.removeAt(replaceStart) }
+        }
+        textBuilder.insert(replaceStart, targetPrefix)
+        stylesBuilder.addAll(replaceStart, List(targetPrefix.length) { emptySet() })
+
+        val oldCaret = selection.start
+        val oldPrefixEnd = replaceEnd
+        val newPrefixEnd = replaceStart + targetPrefix.length
+        val caretAfterInsertion = when {
+            oldCaret <= replaceStart -> newPrefixEnd
+            oldCaret <= oldPrefixEnd -> newPrefixEnd
+            else -> oldCaret + targetPrefix.length - (oldPrefixEnd - replaceStart)
+        }.coerceIn(0, textBuilder.length)
+
+        return RichTextValue(
+            text = textBuilder.toString(),
+            selection = TextRange(caretAfterInsertion),
+            characterStyles = stylesBuilder,
+        )
+    }
+
     companion object {
         fun empty(): RichTextValue = RichTextValue("", TextRange.Zero, emptyList())
 
@@ -97,3 +188,85 @@ data class RichTextValue(
         }
     }
 }
+
+internal enum class ListItemType {
+    Bullet,
+    Numbered,
+}
+
+internal data class ListItemContext(
+    val type: ListItemType,
+    val indent: String,
+    val prefixText: String,
+    val prefixStart: Int,
+    val contentStart: Int,
+    val lineStart: Int,
+    val lineEnd: Int,
+    val number: Int? = null,
+    val numberSuffix: String = "",
+)
+
+internal fun ListItemContext.nextNumberPrefix(): String {
+    val nextNumber = (number ?: 0) + 1
+    return nextNumber.toString() + numberSuffix
+}
+
+private val bulletPrefixes = listOf("• ", "- ", "* ", "– ")
+
+internal fun RichTextValue.listItemContextAt(position: Int): ListItemContext? {
+    if (text.isEmpty()) return null
+    val caret = position.coerceIn(0, text.length)
+    val lineStart = text.lastIndexOf('\n', caret - 1).let { if (it == -1) 0 else it + 1 }
+    val lineEnd = text.indexOf('\n', caret).let { if (it == -1) text.length else it }
+    if (lineStart >= lineEnd) return null
+    val lineText = text.substring(lineStart, lineEnd)
+    val firstNonWhitespace = lineText.indexOfFirst { !it.isWhitespace() }
+    if (firstNonWhitespace == -1) return null
+    val indent = lineText.substring(0, firstNonWhitespace)
+    val afterIndent = lineText.substring(firstNonWhitespace)
+    val prefixStart = lineStart + indent.length
+    val bullet = bulletPrefixes.firstOrNull { afterIndent.startsWith(it) }
+    if (bullet != null) {
+        val contentStart = prefixStart + bullet.length
+        return ListItemContext(
+            type = ListItemType.Bullet,
+            indent = indent,
+            prefixText = bullet,
+            prefixStart = prefixStart,
+            contentStart = contentStart,
+            lineStart = lineStart,
+            lineEnd = lineEnd,
+        )
+    }
+    val digits = afterIndent.takeWhile { it.isDigit() }
+    if (digits.isNotEmpty()) {
+        val number = digits.toIntOrNull() ?: return null
+        var index = digits.length
+        if (index >= afterIndent.length) return null
+        val punctuation = afterIndent[index]
+        if (!punctuation.isNumberPunctuation()) return null
+        index++
+        val whitespaceStart = index
+        while (index < afterIndent.length && afterIndent[index].isWhitespace()) {
+            index++
+        }
+        if (index == whitespaceStart) return null
+        val suffix = afterIndent.substring(digits.length, index)
+        val prefixText = digits + suffix
+        val contentStart = prefixStart + prefixText.length
+        return ListItemContext(
+            type = ListItemType.Numbered,
+            indent = indent,
+            prefixText = prefixText,
+            prefixStart = prefixStart,
+            contentStart = contentStart,
+            lineStart = lineStart,
+            lineEnd = lineEnd,
+            number = number,
+            numberSuffix = suffix,
+        )
+    }
+    return null
+}
+
+private fun Char.isNumberPunctuation(): Boolean = this == '.' || this == ')' || this == ']' || this == ':'
