@@ -2,6 +2,8 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import android.util.Base64
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextStyle
 import com.example.starbucknotetaker.richtext.StyleRange
@@ -14,6 +16,7 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import java.util.Locale
 
 class EncryptedNoteStore(
     private val context: Context,
@@ -295,7 +298,9 @@ class EncryptedNoteStore(
             span.put("start", range.start)
             span.put("end", range.end)
             val styles = JSONArray()
-            range.styles.forEach { styles.put(it.name) }
+            range.styles.forEach { style ->
+                styles.put(serializeStyle(style))
+            }
             span.put("styles", styles)
             spansArray.put(span)
         }
@@ -312,12 +317,11 @@ class EncryptedNoteStore(
             val start = spanObj.optInt("start", 0)
             val end = spanObj.optInt("end", 0)
             val stylesArray = spanObj.optJSONArray("styles")
-            val styles = buildSet {
-                if (stylesArray != null) {
-                    for (j in 0 until stylesArray.length()) {
-                        val name = stylesArray.optString(j, null)
-                        name?.let { runCatching { RichTextStyle.valueOf(it) }.getOrNull() }?.let { add(it) }
-                    }
+            val styles = mutableSetOf<RichTextStyle>()
+            if (stylesArray != null) {
+                for (j in 0 until stylesArray.length()) {
+                    val entry = stylesArray.opt(j)
+                    deserializeStyle(entry)?.let { styles.add(it) }
                 }
             }
             if (styles.isNotEmpty() && start < end) {
@@ -325,6 +329,51 @@ class EncryptedNoteStore(
             }
         }
         return RichTextDocument(text, spans)
+    }
+
+    private fun serializeStyle(style: RichTextStyle): Any {
+        return when (style) {
+            RichTextStyle.Bold -> "Bold"
+            RichTextStyle.Italic -> "Italic"
+            RichTextStyle.Underline -> "Underline"
+            is RichTextStyle.Highlight -> JSONObject().apply {
+                put("type", "highlight")
+                put("color", colorToHex(style.color))
+            }
+            is RichTextStyle.TextColor -> JSONObject().apply {
+                put("type", "text_color")
+                put("color", colorToHex(style.color))
+            }
+        }
+    }
+
+    private fun deserializeStyle(entry: Any?): RichTextStyle? {
+        return when (entry) {
+            is String -> when (entry) {
+                "Bold" -> RichTextStyle.Bold
+                "Italic" -> RichTextStyle.Italic
+                "Underline" -> RichTextStyle.Underline
+                else -> null
+            }
+            is JSONObject -> when (entry.optString("type", "").lowercase(Locale.US)) {
+                "highlight" -> entry.optString("color").takeIf { it.isNotEmpty() }
+                    ?.let { parseColorHex(it) }
+                    ?.let { RichTextStyle.Highlight(it) }
+                "text_color" -> entry.optString("color").takeIf { it.isNotEmpty() }
+                    ?.let { parseColorHex(it) }
+                    ?.let { RichTextStyle.TextColor(it) }
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    private fun parseColorHex(hex: String): Color? {
+        return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrNull()
+    }
+
+    private fun colorToHex(color: Color): String {
+        return String.format(Locale.US, "#%08X", color.toArgb())
     }
 
     private fun deriveKey(pin: String, salt: ByteArray): SecretKeySpec {

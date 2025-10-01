@@ -89,16 +89,28 @@ data class RichTextValue(
         val textBuilder = StringBuilder(text)
         val stylesBuilder = characterStyles.toMutableList()
 
+        val indent = if (context.indent.isEmpty()) DEFAULT_LIST_INDENT else context.indent
         val contentBlank = text.substring(context.contentStart, context.lineEnd).isBlank()
         return if (contentBlank && caret >= context.contentStart) {
-            val removalStart = context.prefixStart
-            val removalEnd = context.contentStart
+            val indentLength = context.indent.length
+            var prefixStart = context.prefixStart
+            var contentStart = context.contentStart
+            var caretAfterAdjustments = caret
+            if (indentLength > 0) {
+                textBuilder.delete(context.lineStart, context.prefixStart)
+                repeat(indentLength) { stylesBuilder.removeAt(context.lineStart) }
+                prefixStart -= indentLength
+                contentStart -= indentLength
+                caretAfterAdjustments = (caretAfterAdjustments - indentLength).coerceAtLeast(context.lineStart)
+            }
+            val removalStart = prefixStart
+            val removalEnd = contentStart
             val removedCount = removalEnd - removalStart
             if (removedCount > 0) {
                 textBuilder.delete(removalStart, removalEnd)
                 repeat(removedCount) { stylesBuilder.removeAt(removalStart) }
             }
-            val caretAfterRemoval = (caret - removedCount).coerceAtLeast(removalStart)
+            val caretAfterRemoval = (caretAfterAdjustments - removedCount).coerceAtLeast(removalStart)
             textBuilder.insert(caretAfterRemoval, '\n')
             stylesBuilder.add(caretAfterRemoval, emptySet())
             RichTextValue(
@@ -114,7 +126,7 @@ data class RichTextValue(
             val insertPosition = caret
             val insertText = buildString {
                 append('\n')
-                append(context.indent)
+                append(indent)
                 append(nextPrefix)
             }
             val insertStyles = List(insertText.length) { emptySet<RichTextStyle>() }
@@ -134,8 +146,10 @@ data class RichTextValue(
         val lineEnd = text.indexOf('\n', caret).let { if (it == -1) text.length else it }
         val lineText = text.substring(lineStart, lineEnd)
         val indentLength = lineText.indexOfFirst { !it.isWhitespace() }.let { if (it == -1) lineText.length else it }
-        val prefixStart = lineStart + indentLength
-        val existing = listItemContextAt(prefixStart)
+        val existingIndent = if (indentLength > 0) lineText.substring(0, indentLength) else ""
+        val indentToUse = existingIndent.ifEmpty { DEFAULT_LIST_INDENT }
+        val originalPrefixStart = lineStart + indentLength
+        val existing = listItemContextAt(originalPrefixStart)
 
         val targetPrefix = when (type) {
             ListItemType.Bullet -> prefix
@@ -145,8 +159,16 @@ data class RichTextValue(
         val textBuilder = StringBuilder(text)
         val stylesBuilder = characterStyles.toMutableList()
 
+        val indentInserted = existingIndent.isEmpty() && indentToUse.isNotEmpty()
+        if (indentInserted) {
+            textBuilder.insert(lineStart, indentToUse)
+            stylesBuilder.addAll(lineStart, List(indentToUse.length) { emptySet<RichTextStyle>() })
+        }
+
+        val prefixStart = lineStart + indentToUse.length
+
         val replaceStart = prefixStart
-        val replaceEnd = existing?.contentStart ?: prefixStart
+        val replaceEnd = existing?.contentStart?.let { it + (prefixStart - originalPrefixStart) } ?: prefixStart
         if (replaceEnd > replaceStart) {
             textBuilder.delete(replaceStart, replaceEnd)
             repeat(replaceEnd - replaceStart) { stylesBuilder.removeAt(replaceStart) }
@@ -155,12 +177,17 @@ data class RichTextValue(
         stylesBuilder.addAll(replaceStart, List(targetPrefix.length) { emptySet() })
 
         val oldCaret = selection.start
+        val caretAfterIndent = if (indentInserted && oldCaret >= lineStart) {
+            oldCaret + indentToUse.length
+        } else {
+            oldCaret
+        }
         val oldPrefixEnd = replaceEnd
         val newPrefixEnd = replaceStart + targetPrefix.length
         val caretAfterInsertion = when {
-            oldCaret <= replaceStart -> newPrefixEnd
-            oldCaret <= oldPrefixEnd -> newPrefixEnd
-            else -> oldCaret + targetPrefix.length - (oldPrefixEnd - replaceStart)
+            caretAfterIndent <= replaceStart -> newPrefixEnd
+            caretAfterIndent <= oldPrefixEnd -> newPrefixEnd
+            else -> caretAfterIndent + targetPrefix.length - (oldPrefixEnd - replaceStart)
         }.coerceIn(0, textBuilder.length)
 
         return RichTextValue(
@@ -212,6 +239,8 @@ internal fun ListItemContext.nextNumberPrefix(): String {
 }
 
 private val bulletPrefixes = listOf("• ", "- ", "* ", "– ")
+
+private const val DEFAULT_LIST_INDENT = "    "
 
 internal fun RichTextValue.listItemContextAt(position: Int): ListItemContext? {
     if (text.isEmpty()) return null

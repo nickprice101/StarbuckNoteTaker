@@ -1,5 +1,6 @@
 package com.example.starbucknotetaker.richtext
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -81,13 +82,18 @@ data class RichTextDocument(
             if (string.spanStyles.isEmpty()) {
                 return RichTextDocument(string.text)
             }
-            val ranges = string.spanStyles.map { styleRange ->
-                StyleRange(
-                    start = styleRange.start,
-                    end = styleRange.end,
-                    styles = setOfNotNull(styleRange.item.toRichTextStyle()),
-                )
-            }.filter { it.styles.isNotEmpty() }
+            val ranges = string.spanStyles.mapNotNull { styleRange ->
+                val styles = styleRange.item.toRichTextStyles()
+                if (styles.isEmpty()) {
+                    null
+                } else {
+                    StyleRange(
+                        start = styleRange.start,
+                        end = styleRange.end,
+                        styles = styles,
+                    )
+                }
+            }
             return RichTextDocument(string.text, ranges)
         }
 
@@ -95,17 +101,32 @@ data class RichTextDocument(
     }
 }
 
-private fun SpanStyle.toRichTextStyle(): RichTextStyle? = when {
-    fontWeight == FontWeight.Bold -> RichTextStyle.Bold
-    fontStyle == FontStyle.Italic -> RichTextStyle.Italic
-    textDecoration == TextDecoration.Underline -> RichTextStyle.Underline
-    else -> null
+private fun SpanStyle.toRichTextStyles(): Set<RichTextStyle> {
+    val styles = mutableSetOf<RichTextStyle>()
+    if (fontWeight == FontWeight.Bold) {
+        styles += RichTextStyle.Bold
+    }
+    if (fontStyle == FontStyle.Italic) {
+        styles += RichTextStyle.Italic
+    }
+    if (textDecoration?.contains(TextDecoration.Underline) == true) {
+        styles += RichTextStyle.Underline
+    }
+    if (background != Color.Unspecified) {
+        styles += RichTextStyle.Highlight(background)
+    }
+    if (color != Color.Unspecified) {
+        styles += RichTextStyle.TextColor(color)
+    }
+    return styles
 }
 
 private fun RichTextStyle.toSpanStyle(): SpanStyle = when (this) {
     RichTextStyle.Bold -> SpanStyle(fontWeight = FontWeight.Bold)
     RichTextStyle.Italic -> SpanStyle(fontStyle = FontStyle.Italic)
     RichTextStyle.Underline -> SpanStyle(textDecoration = TextDecoration.Underline)
+    is RichTextStyle.Highlight -> SpanStyle(background = color)
+    is RichTextStyle.TextColor -> SpanStyle(color = color)
 }
 
 /**

@@ -7,15 +7,17 @@ import org.junit.Test
 
 class RichTextListBehaviorTest {
 
+    private val indent = "    "
+
     @Test
     fun bulletEnterInsertsNewItemPrefix() {
-        val initialText = "• First"
+        val initialText = "${indent}• First"
         val state = RichTextState(plainValue(initialText, initialText.length))
 
         val handled = state.handleEnterKey()
 
         assertTrue(handled)
-        assertEquals("• First\n• ", state.value.text)
+        assertEquals("${indent}• First\n${indent}• ", state.value.text)
         assertEquals(state.value.text.length, state.value.selection.start)
         assertEquals(state.value.selection.start, state.value.selection.end)
         assertEquals(state.value.text.length, state.value.characterStyles.size)
@@ -23,7 +25,7 @@ class RichTextListBehaviorTest {
 
     @Test
     fun bulletEnterOnEmptyItemExitsList() {
-        val state = RichTextState(plainValue("• ", 2))
+        val state = RichTextState(plainValue("${indent}• ", indent.length + 2))
 
         val handled = state.handleEnterKey()
 
@@ -36,27 +38,27 @@ class RichTextListBehaviorTest {
 
     @Test
     fun numberedEnterAddsIncrementedItem() {
-        val initialText = "1. Item"
+        val initialText = "${indent}1. Item"
         val state = RichTextState(plainValue(initialText, initialText.length))
 
         val handled = state.handleEnterKey()
 
         assertTrue(handled)
-        assertEquals("1. Item\n2. ", state.value.text)
+        assertEquals("${indent}1. Item\n${indent}2. ", state.value.text)
         assertEquals(state.value.text.length, state.value.selection.start)
         assertEquals(state.value.selection.start, state.value.selection.end)
     }
 
     @Test
     fun bulletEnterSplitsParagraph() {
-        val initialText = "• Hello world"
-        val caret = "• Hello ".length
+        val initialText = "${indent}• Hello world"
+        val caret = "${indent}• Hello ".length
         val state = RichTextState(plainValue(initialText, caret))
 
         val handled = state.handleEnterKey()
 
         assertTrue(handled)
-        assertEquals("• Hello \n• world", state.value.text)
+        assertEquals("${indent}• Hello \n${indent}• world", state.value.text)
     }
 
     @Test
@@ -65,8 +67,8 @@ class RichTextListBehaviorTest {
 
         state.applyFormattingAction(FormattingAction.BulletList)
 
-        assertEquals("• ", state.value.text)
-        assertEquals(TextRange(2), state.value.selection)
+        assertEquals("${indent}• ", state.value.text)
+        assertEquals(TextRange(indent.length + 2), state.value.selection)
     }
 
     @Test
@@ -76,8 +78,8 @@ class RichTextListBehaviorTest {
 
         state.applyFormattingAction(FormattingAction.NumberedList)
 
-        assertEquals("1. Example", state.value.text)
-        assertEquals(TextRange(baseText.length + 3), state.value.selection)
+        assertEquals("${indent}1. Example", state.value.text)
+        assertEquals(TextRange(baseText.length + 3 + indent.length), state.value.selection)
     }
 
     private fun plainValue(text: String, selection: Int): RichTextValue {

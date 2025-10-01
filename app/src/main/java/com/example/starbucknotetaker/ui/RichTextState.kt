@@ -3,6 +3,7 @@ package com.example.starbucknotetaker.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.example.starbucknotetaker.richtext.RichTextStyle
@@ -59,7 +60,7 @@ class RichTextState(initialValue: RichTextValue) {
         }
     }
 
-    fun toggleStyle(style: RichTextStyle) {
+    fun toggleInlineStyle(style: RichTextStyle) {
         val selection = value.selection
         if (selection.start == selection.end) {
             activeStyles = if (activeStyles.contains(style)) {
@@ -88,6 +89,18 @@ class RichTextState(initialValue: RichTextValue) {
         activeStyles = value.stylesAt(selection)
     }
 
+    fun toggleHighlight(color: Color) {
+        updateExclusiveStyle(RichTextStyle.Highlight(color)) { it is RichTextStyle.Highlight }
+    }
+
+    fun applyTextColor(color: Color) {
+        updateExclusiveStyle(RichTextStyle.TextColor(color)) { it is RichTextStyle.TextColor }
+    }
+
+    fun clearTextColor() {
+        updateExclusiveStyle(null) { it is RichTextStyle.TextColor }
+    }
+
     fun applyFormattingAction(action: FormattingAction) {
         val newValue = when (action) {
             FormattingAction.BulletList -> value.applyListFormatting("• ", ListItemType.Bullet)
@@ -104,5 +117,35 @@ class RichTextState(initialValue: RichTextValue) {
         value = newValue
         activeStyles = value.stylesAt(value.selection)
         return true
+    }
+
+    private fun updateExclusiveStyle(
+        style: RichTextStyle?,
+        groupMatcher: (RichTextStyle) -> Boolean,
+    ) {
+        val selection = value.selection
+        if (selection.start == selection.end) {
+            val filtered = activeStyles.filterNot(groupMatcher).toMutableSet()
+            if (style != null && !activeStyles.contains(style)) {
+                filtered.add(style)
+            }
+            activeStyles = filtered
+            return
+        }
+        val start = selection.start.coerceAtMost(selection.end).coerceIn(0, value.text.length)
+        val end = selection.end.coerceAtLeast(selection.start).coerceIn(0, value.text.length)
+        val shouldAdd = style != null && !value.rangeHasStyle(style, start, end)
+        val updated = value.characterStyles.toMutableList()
+        for (index in start until end) {
+            if (index >= updated.size) continue
+            val set = updated[index].toMutableSet()
+            set.removeAll { groupMatcher(it) }
+            if (shouldAdd && style != null) {
+                set.add(style)
+            }
+            updated[index] = set
+        }
+        value = value.copy(characterStyles = updated)
+        activeStyles = value.stylesAt(selection)
     }
 }

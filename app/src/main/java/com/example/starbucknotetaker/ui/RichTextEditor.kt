@@ -84,8 +84,24 @@ fun RichTextEditor(
                         FormattingToolbar(
                             visible = isFocused,
                             activeStyles = state.activeStyles,
-                            onToggle = { style: RichTextStyle ->
-                                state.toggleStyle(style)
+                            onToggleStyle = { style: RichTextStyle ->
+                                state.toggleInlineStyle(style)
+                                if (state.value != value) {
+                                    onValueChange(state.value)
+                                }
+                            },
+                            onToggleHighlight = { color ->
+                                state.toggleHighlight(color)
+                                if (state.value != value) {
+                                    onValueChange(state.value)
+                                }
+                            },
+                            onSelectTextColor = { color ->
+                                if (color == null) {
+                                    state.clearTextColor()
+                                } else {
+                                    state.applyTextColor(color)
+                                }
                                 if (state.value != value) {
                                     onValueChange(state.value)
                                 }
@@ -111,7 +127,7 @@ fun RichTextEditor(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = if (isFocused) 52.dp else 24.dp,
+                    top = if (isFocused) 0.dp else 16.dp,
                     bottom = 16.dp,
                 ),
             )
