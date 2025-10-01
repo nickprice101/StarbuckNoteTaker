@@ -13,7 +13,6 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,20 +41,7 @@ fun SummarizerStatusBanner(
                 Text("Loading AI summarizer…")
             }
         }
-        Summarizer.SummarizerState.Fallback -> {
-            BannerContainer(
-                background = MaterialTheme.colors.primary.copy(alpha = 0.08f),
-                modifier = modifier
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colors.primary
-                )
-                Spacer(Modifier.size(12.dp))
-                Text("Using fallback summarization")
-            }
-        }
+        Summarizer.SummarizerState.Fallback -> Unit
         is Summarizer.SummarizerState.Error -> {
             BannerContainer(
                 background = MaterialTheme.colors.error.copy(alpha = 0.1f),

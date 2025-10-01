@@ -486,6 +486,9 @@ class Summarizer(
         for (line in text.lineSequence()) {
             if (lines.size >= FALLBACK_LINE_LIMIT) break
             val trimmed = line.trim()
+            if (trimmed.startsWith("Title:", ignoreCase = true)) {
+                continue
+            }
             if (trimmed.isNotEmpty()) {
                 lines.add(trimmed)
             }
