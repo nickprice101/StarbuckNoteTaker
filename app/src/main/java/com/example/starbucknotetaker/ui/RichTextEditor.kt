@@ -19,6 +19,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.richtext.RichTextStyle
@@ -50,7 +55,21 @@ fun RichTextEditor(
             state.updateFromTextField(newValue)
             onValueChange(state.value)
         },
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                ) {
+                    val handled = state.handleEnterKey()
+                    if (handled) {
+                        onValueChange(state.value)
+                    }
+                    handled
+                } else {
+                    false
+                }
+            },
         textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colors.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colors.primary),
         keyboardOptions = keyboardOptions,
