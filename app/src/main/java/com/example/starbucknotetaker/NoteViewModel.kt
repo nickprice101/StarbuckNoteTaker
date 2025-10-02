@@ -663,29 +663,16 @@ class NoteViewModel(
                 }
             }.trim()
         }
-        val zoneId = runCatching { java.time.ZoneId.of(event.timeZone) }
-            .getOrDefault(java.time.ZoneId.systemDefault())
-        val start = java.time.Instant.ofEpochMilli(event.start).atZone(zoneId)
-        val end = java.time.Instant.ofEpochMilli(event.end).atZone(zoneId)
-        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        if (trimmedContent.isEmpty()) {
+            return ""
+        }
         return buildString {
             if (trimmedTitle.isNotEmpty()) {
                 append("Title: ")
                 append(trimmedTitle)
-                append('\n')
-            }
-            append("Event from ")
-            append(start.format(formatter))
-            append(" to ")
-            append(end.format(formatter))
-            if (!event.location.isNullOrBlank()) {
-                append(" at ")
-                append(event.location)
-            }
-            if (trimmedContent.isNotEmpty()) {
                 append("\n\n")
-                append(trimmedContent)
             }
+            append(trimmedContent)
         }.trim()
     }
 

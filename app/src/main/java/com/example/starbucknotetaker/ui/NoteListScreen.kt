@@ -276,25 +276,27 @@ fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier)
                 color = MaterialTheme.colors.primary,
                 modifier = Modifier.padding(top = 2.dp)
             )
-            event.location?.takeIf { it.isNotBlank() }?.let { location ->
-                val locationDisplay = rememberEventLocationDisplay(location)
-                Text(
-                    text = locationDisplay?.name ?: location,
-                    style = MaterialTheme.typography.body2,
-                    modifier = Modifier.padding(top = 2.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val secondary = locationDisplay?.address
-                    ?.takeIf { !it.equals(locationDisplay.name, ignoreCase = true) }
-                secondary?.let { address ->
+            if (!note.isLocked) {
+                event.location?.takeIf { it.isNotBlank() }?.let { location ->
+                    val locationDisplay = rememberEventLocationDisplay(location)
                     Text(
-                        text = address,
-                        style = MaterialTheme.typography.caption,
-                        modifier = Modifier.padding(top = 1.dp),
+                        text = locationDisplay?.name ?: location,
+                        style = MaterialTheme.typography.body2,
+                        modifier = Modifier.padding(top = 2.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val secondary = locationDisplay?.address
+                        ?.takeIf { !it.equals(locationDisplay.name, ignoreCase = true) }
+                    secondary?.let { address ->
+                        Text(
+                            text = address,
+                            style = MaterialTheme.typography.caption,
+                            modifier = Modifier.padding(top = 1.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
