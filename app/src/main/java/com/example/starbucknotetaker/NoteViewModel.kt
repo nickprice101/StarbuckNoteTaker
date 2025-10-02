@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collect
+import com.example.starbucknotetaker.ChecklistItem
+import com.example.starbucknotetaker.asChecklistContent
 import com.example.starbucknotetaker.richtext.StyleRange
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextStyle
@@ -164,6 +166,24 @@ class NoteViewModel(
         const val PENDING_UNLOCK_NAVIGATION_NOTE_ID_KEY = "pending_unlock_navigation_note_id"
     }
 
+    fun updateChecklistItems(id: Long, items: List<ChecklistItem>) {
+        val note = getNoteById(id) ?: return
+        val normalized = normalizeChecklistItems(items)
+        val content = normalized.asChecklistContent()
+        val styled = RichTextDocument.fromPlainText(content)
+        updateNote(
+            id = id,
+            title = note.title,
+            content = content,
+            styledContent = styled,
+            images = note.images,
+            files = note.files,
+            linkPreviews = note.linkPreviews,
+            event = note.event,
+            checklistItems = normalized,
+        )
+    }
+
     fun addNote(
         title: String?,
         content: String,
@@ -172,13 +192,23 @@ class NoteViewModel(
         files: List<Uri>,
         linkPreviews: List<NoteLinkPreview>,
         event: NoteEvent? = null,
+        checklistItems: List<ChecklistItem>? = null,
     ) {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
         } else {
             title
         }
-        val processed = processNewNoteContent(content, styledContent, images, files)
+        val normalizedChecklist = checklistItems?.let(::normalizeChecklistItems)
+        val checklistContent = normalizedChecklist?.asChecklistContent()
+        val contentForProcessing = checklistContent ?: content
+        val styledForProcessing =
+            if (normalizedChecklist != null) {
+                RichTextDocument.fromPlainText(contentForProcessing)
+            } else {
+                styledContent
+            }
+        val processed = processNewNoteContent(contentForProcessing, styledForProcessing, images, files)
         val finalContent = processed.text
         val finalStyled = processed.styled
         val embeddedImages = processed.images
@@ -199,6 +229,7 @@ class NoteViewModel(
             linkPreviews = linkPreviews,
             summary = initialSummary,
             event = event,
+            checklistItems = normalizedChecklist,
         )
         _notes.add(note)
         reorderNotes()
@@ -248,13 +279,23 @@ class NoteViewModel(
         files: List<NoteFile>,
         linkPreviews: List<NoteLinkPreview>,
         event: NoteEvent? = null,
+        checklistItems: List<ChecklistItem>? = null,
     ) {
         val index = _notes.indexOfFirst { it.id == id }
         if (index != -1) {
             val note = _notes[index]
             val finalTitle = if (title.isNullOrBlank()) note.title else title
             val finalEvent = event ?: note.event
-            val summarizerSource = buildSummarizerSource(finalTitle, content, finalEvent)
+            val normalizedChecklist = checklistItems?.let(::normalizeChecklistItems)
+            val finalChecklistItems = normalizedChecklist ?: note.checklistItems
+            val contentForUpdate = normalizedChecklist?.asChecklistContent() ?: content
+            val styledForUpdate =
+                if (normalizedChecklist != null) {
+                    RichTextDocument.fromPlainText(contentForUpdate)
+                } else {
+                    styledContent
+                }
+            val summarizerSource = buildSummarizerSource(finalTitle, contentForUpdate, finalEvent)
             val initialSummary = if (summarizerSource.isBlank()) {
                 ""
             } else {
@@ -269,14 +310,15 @@ class NoteViewModel(
                     preparedFiles.mapNotNull { it.attachmentId }.toSet()
             val updated = note.copy(
                 title = finalTitle,
-                content = content.trim(),
-                styledContent = styledContent.trimmed(),
+                content = contentForUpdate.trim(),
+                styledContent = styledForUpdate.trimmed(),
                 images = preparedImages,
                 files = preparedFiles,
                 linkPreviews = linkPreviews,
                 summary = initialSummary,
                 event = finalEvent,
                 date = updatedDate,
+                checklistItems = finalChecklistItems,
             )
             _notes[index] = updated
             reorderNotes()
@@ -418,6 +460,17 @@ class NoteViewModel(
             note.files.mapNotNullTo(this) { it.attachmentId }
         }
         deleteAttachments(ids)
+    }
+
+    private fun normalizeChecklistItems(items: List<ChecklistItem>): List<ChecklistItem> {
+        return items.mapNotNull { item ->
+            val text = item.text.trim()
+            if (text.isEmpty()) {
+                null
+            } else {
+                ChecklistItem(text = text, isChecked = item.isChecked)
+            }
+        }
     }
 
     private fun processNewNoteContent(

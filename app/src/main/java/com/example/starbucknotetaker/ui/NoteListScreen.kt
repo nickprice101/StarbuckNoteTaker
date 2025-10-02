@@ -12,10 +12,13 @@ import androidx.compose.material.rememberSwipeableState
 import androidx.compose.material.swipeable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.runtime.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
@@ -24,9 +27,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.Summarizer
@@ -41,6 +46,7 @@ import java.time.format.DateTimeFormatter
 fun NoteListScreen(
     notes: List<Note>,
     onAddNote: () -> Unit,
+    onAddChecklist: () -> Unit,
     onAddEvent: () -> Unit,
     onOpenNote: (Note) -> Unit,
     onDeleteNote: (Long) -> Unit,
@@ -106,6 +112,14 @@ fun NoteListScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("New Note")
+                        }
+                        DropdownMenuItem(onClick = {
+                            creationMenuExpanded = false
+                            onAddChecklist()
+                        }) {
+                            Icon(Icons.Default.ViewList, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("New Checklist")
                         }
                         DropdownMenuItem(onClick = {
                             creationMenuExpanded = false
@@ -284,17 +298,66 @@ fun NoteListItem(note: Note, onClick: () -> Unit, modifier: Modifier = Modifier)
                 }
             }
         }
-        if (note.summary.isNotBlank()) {
-            if (note.isLocked) {
-                LockedSummaryPlaceholder(modifier = Modifier.padding(top = 2.dp))
-            } else {
+        when {
+            note.checklistItems != null -> {
+                if (note.isLocked) {
+                    LockedSummaryPlaceholder(modifier = Modifier.padding(top = 2.dp))
+                } else {
+                    ChecklistPreview(items = note.checklistItems, modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+            note.summary.isNotBlank() -> {
+                if (note.isLocked) {
+                    LockedSummaryPlaceholder(modifier = Modifier.padding(top = 2.dp))
+                } else {
+                    Text(
+                        text = note.summary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChecklistPreview(items: List<ChecklistItem>, modifier: Modifier = Modifier) {
+    if (items.isEmpty()) {
+        return
+    }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        items.take(3).forEach { item ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (item.isChecked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                    contentDescription = null,
+                    tint = MaterialTheme.colors.primary.copy(alpha = if (item.isChecked) 0.9f else 0.6f)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = note.summary,
-                    maxLines = 2,
+                    text = item.text,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp)
+                    style = MaterialTheme.typography.body2,
+                    color = if (item.isChecked) MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                    else MaterialTheme.colors.onSurface,
+                    textDecoration = if (item.isChecked) TextDecoration.LineThrough else null,
                 )
             }
+        }
+        if (items.size > 3) {
+            Text(
+                text = "+${items.size - 3} more",
+                style = MaterialTheme.typography.caption,
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+            )
         }
     }
 }

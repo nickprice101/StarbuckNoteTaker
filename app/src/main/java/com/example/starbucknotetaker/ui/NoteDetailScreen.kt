@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -56,6 +57,7 @@ import java.util.Locale
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -69,6 +71,7 @@ fun NoteDetailScreen(
     onLockRequest: () -> Unit,
     onUnlockRequest: () -> Unit,
     openAttachment: suspend (String) -> ByteArray?,
+    onChecklistChange: (List<ChecklistItem>) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -202,13 +205,20 @@ fun NoteDetailScreen(
                 EventDetailsCard(event, eventLocationDisplay)
                 Spacer(modifier = Modifier.height(16.dp))
             }
-            val styledSource = remember(note.styledContent, note.content) {
-                note.styledContent ?: RichTextDocument.fromPlainText(note.content)
-            }
-            val contentText = styledSource.text
-            val placeholderRegex = Regex("\\[\\[(image|file|link):(\\d+)]]")
-            var cursor = 0
-            placeholderRegex.findAll(contentText).forEach { match ->
+            if (note.checklistItems != null) {
+                ChecklistDetailSection(
+                    noteId = note.id,
+                    items = note.checklistItems,
+                    onChecklistChange = onChecklistChange,
+                )
+            } else {
+                val styledSource = remember(note.styledContent, note.content) {
+                    note.styledContent ?: RichTextDocument.fromPlainText(note.content)
+                }
+                val contentText = styledSource.text
+                val placeholderRegex = Regex("\\[\\[(image|file|link):(\\d+)]]")
+                var cursor = 0
+                placeholderRegex.findAll(contentText).forEach { match ->
                 val start = match.range.first
                 if (start > cursor) {
                     val segment = styledSource.slice(cursor, start)
@@ -364,6 +374,7 @@ fun NoteDetailScreen(
                     )
                 }
             }
+            }
         }
         fullImage?.let { img ->
             Box(
@@ -415,6 +426,64 @@ fun NoteDetailScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChecklistDetailSection(
+    noteId: Long,
+    items: List<ChecklistItem>,
+    onChecklistChange: (List<ChecklistItem>) -> Unit,
+) {
+    val checklistState = remember(noteId, items) {
+        mutableStateListOf<ChecklistItem>().apply { addAll(items) }
+    }
+    LaunchedEffect(items) {
+        checklistState.clear()
+        checklistState.addAll(items)
+    }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        for (index in checklistState.indices) {
+            val item = checklistState[index]
+            ChecklistDetailRow(
+                item = item,
+                onCheckedChange = { checked ->
+                    if (checklistState[index].isChecked != checked) {
+                        checklistState[index] = item.copy(isChecked = checked)
+                        onChecklistChange(checklistState.toList())
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChecklistDetailRow(
+    item: ChecklistItem,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Checkbox(
+            checked = item.isChecked,
+            onCheckedChange = onCheckedChange
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = item.text,
+            style = MaterialTheme.typography.body1,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            textDecoration = if (item.isChecked) TextDecoration.LineThrough else null,
+            color = if (item.isChecked) MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+            else MaterialTheme.colors.onSurface,
+        )
     }
 }
 

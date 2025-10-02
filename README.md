@@ -5,6 +5,7 @@ A simple Android note taking application built with Kotlin and Jetpack Compose. 
 ## Features
 
 - Create notes with titles, text content and image attachments
+- Build interactive checklist notes with tappable completion states that stay in sync across the list and detail views
 - Search and browse notes from a list
 - View note details with clickable links and inline images
 - Built entirely with Jetpack Compose and Navigation

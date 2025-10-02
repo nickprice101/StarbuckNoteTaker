@@ -1,6 +1,8 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import com.example.starbucknotetaker.ChecklistItem
+import com.example.starbucknotetaker.asChecklistContent
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -30,7 +32,14 @@ class EncryptedNoteStoreTest {
 
     @Test
     fun saveAndLoadRoundTrip() {
-        val notes = listOf(Note(title = "t", content = "c"))
+        val notes = listOf(
+            Note(title = "t", content = "c"),
+            Note(
+                title = "Checklist",
+                content = listOf(ChecklistItem(text = "Task", isChecked = true)).asChecklistContent(),
+                checklistItems = listOf(ChecklistItem(text = "Task", isChecked = true))
+            )
+        )
         val store = EncryptedNoteStore(context)
         store.saveNotes(notes, "1234")
         val loaded = store.loadNotes("1234")

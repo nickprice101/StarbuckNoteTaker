@@ -58,8 +58,8 @@ class EncryptedNoteStore(
             for (j in 0 until imagesJson.length()) {
                 when (val entry = imagesJson.get(j)) {
                     is JSONObject -> {
-                        val attachmentId = entry.optString("id", null)?.takeIf { it.isNotBlank() }
-                        val data = entry.optString("data", null)?.takeIf { it.isNotBlank() }
+                        val attachmentId = entry.optString("id").takeIf { it.isNotBlank() }
+                        val data = entry.optString("data").takeIf { it.isNotBlank() }
                         val resolved = resolveImage(attachmentId, data, pin)
                         if (resolved.attachmentId != attachmentId) {
                             migrated = true
@@ -83,8 +83,8 @@ class EncryptedNoteStore(
                 val f = filesJson.getJSONObject(j)
                 val name = f.optString("name", "file")
                 val mime = f.optString("mime", "application/octet-stream")
-                val attachmentId = f.optString("id", null)?.takeIf { it.isNotBlank() }
-                val data = f.optString("data", null)?.takeIf { it.isNotBlank() }
+                val attachmentId = f.optString("id").takeIf { it.isNotBlank() }
+                val data = f.optString("data").takeIf { it.isNotBlank() }
                 val resolved = resolveFile(name, mime, attachmentId, data, pin)
                 if (resolved.attachmentId != attachmentId) {
                     migrated = true
@@ -98,11 +98,10 @@ class EncryptedNoteStore(
                 linkPreviews.add(
                     NoteLinkPreview(
                         url = l.getString("url"),
-                        title = l.optString("title", null),
-                        description = l.optString("description", null),
-                        imageUrl = l.optString("imageUrl", null),
-                        cachedImagePath = l.optString("cachedImagePath", null)
-                            ?.takeIf { it.isNotBlank() }
+                        title = l.optString("title").takeIf { it.isNotBlank() },
+                        description = l.optString("description").takeIf { it.isNotBlank() },
+                        imageUrl = l.optString("imageUrl").takeIf { it.isNotBlank() },
+                        cachedImagePath = l.optString("cachedImagePath").takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -128,11 +127,22 @@ class EncryptedNoteStore(
                     end = it.getLong("end"),
                     allDay = it.optBoolean("allDay", false),
                     timeZone = it.optString("timeZone", java.util.TimeZone.getDefault().id),
-                    location = it.optString("location", null)
-                        ?.takeIf { location -> location.isNotBlank() },
+                    location = it.optString("location")
+                        .takeIf { location -> location.isNotBlank() },
                     alarmMinutesBeforeStart = alarmMinutes,
                     notificationMinutesBeforeStart = notificationMinutes,
                 )
+            }
+            val checklistJson = obj.optJSONArray("checklistItems")
+            val checklistItems = checklistJson?.let { array ->
+                buildList {
+                    for (j in 0 until array.length()) {
+                        val entry = array.optJSONObject(j) ?: continue
+                        val text = entry.optString("text", "")
+                        val checked = entry.optBoolean("checked", false)
+                        add(ChecklistItem(text = text, isChecked = checked))
+                    }
+                }
             }
             val styled = obj.optJSONObject("styledContent")?.let { deserializeRichText(it) }
             notes.add(
@@ -148,6 +158,7 @@ class EncryptedNoteStore(
                     summary = obj.optString("summary", ""),
                     event = event,
                     isLocked = obj.optBoolean("locked", false),
+                    checklistItems = checklistItems,
                 )
             )
         }
@@ -228,6 +239,18 @@ class EncryptedNoteStore(
                 obj.put("event", eo)
             }
             obj.put("locked", note.isLocked)
+            note.checklistItems?.let { checklist ->
+                val checklistArray = JSONArray()
+                checklist.forEach { item ->
+                    checklistArray.put(
+                        JSONObject().apply {
+                            put("text", item.text)
+                            put("checked", item.isChecked)
+                        }
+                    )
+                }
+                obj.put("checklistItems", checklistArray)
+            }
             arr.put(obj)
         }
         val root = JSONObject().apply {
