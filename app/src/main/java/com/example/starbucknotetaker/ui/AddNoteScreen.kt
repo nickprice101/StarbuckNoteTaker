@@ -143,6 +143,16 @@ fun AddNoteScreen(
     var awaitingReminderEnable by remember { mutableStateOf(false) }
     var canScheduleExactAlarm by remember { mutableStateOf(NoteAlarmScheduler.canScheduleExactAlarms(context)) }
     var pendingNotificationTarget by remember { mutableStateOf<ReminderPermissionTarget?>(null) }
+    val eventHasPassed = !eventEnd.isAfter(ZonedDateTime.now(zoneId))
+
+    LaunchedEffect(eventEnd, zoneId) {
+        if (!eventEnd.isAfter(ZonedDateTime.now(zoneId))) {
+            awaitingAlarmEnable = false
+            awaitingReminderEnable = false
+            alarmEnabled = false
+            reminderEnabled = false
+        }
+    }
     val exactAlarmPermissionLauncher =
         rememberLauncherForActivityResult(StartActivityForResult()) {
             canScheduleExactAlarm = NoteAlarmScheduler.canScheduleExactAlarms(context)
@@ -636,108 +646,110 @@ fun AddNoteScreen(
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = stringResource(R.string.event_alarm_toggle_label))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Switch(
-                                checked = alarmEnabled,
-                                onCheckedChange = { checked ->
-                                    if (checked) {
-                                        awaitingAlarmEnable = true
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            val granted = ContextCompat.checkSelfPermission(
-                                                context,
-                                                Manifest.permission.POST_NOTIFICATIONS
-                                            ) == PackageManager.PERMISSION_GRANTED
-                                            if (!granted) {
-                                                pendingNotificationTarget = ReminderPermissionTarget.Alarm
-                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                                return@Switch
+                        if (!eventHasPassed) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = stringResource(R.string.event_alarm_toggle_label))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Switch(
+                                    checked = alarmEnabled,
+                                    onCheckedChange = { checked ->
+                                        if (checked) {
+                                            awaitingAlarmEnable = true
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                val granted = ContextCompat.checkSelfPermission(
+                                                    context,
+                                                    Manifest.permission.POST_NOTIFICATIONS
+                                                ) == PackageManager.PERMISSION_GRANTED
+                                                if (!granted) {
+                                                    pendingNotificationTarget = ReminderPermissionTarget.Alarm
+                                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                                    return@Switch
+                                                }
                                             }
-                                        }
-                                        val launched = requestExactAlarmPermission(
-                                            context = context,
-                                            updateCanSchedule = { canScheduleExactAlarm = it },
-                                            onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
-                                        )
-                                        if (!launched) {
-                                            alarmEnabled = true
+                                            val launched = requestExactAlarmPermission(
+                                                context = context,
+                                                updateCanSchedule = { canScheduleExactAlarm = it },
+                                                onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
+                                            )
+                                            if (!launched) {
+                                                alarmEnabled = true
+                                                awaitingAlarmEnable = false
+                                            }
+                                        } else {
                                             awaitingAlarmEnable = false
+                                            alarmEnabled = false
                                         }
-                                    } else {
-                                        awaitingAlarmEnable = false
-                                        alarmEnabled = false
                                     }
-                                }
-                            )
-                        }
-                        if (alarmEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canScheduleExactAlarm) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(R.string.reminder_exact_alarm_permission_needed),
-                                style = MaterialTheme.typography.body2,
-                            )
-                            TextButton(onClick = {
-                                requestExactAlarmPermission(
-                                    context = context,
-                                    updateCanSchedule = { canScheduleExactAlarm = it },
-                                    onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
                                 )
-                            }) {
-                                Text(text = stringResource(R.string.reminder_exact_alarm_permission_action))
                             }
-                        }
-                        if (alarmEnabled) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            ReminderOffsetDropdown(
-                                selectedMinutes = alarmMinutes,
-                                onMinutesSelected = { alarmMinutes = it },
-                                fieldLabel = stringResource(R.string.event_alarm_lead_time_label),
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = stringResource(R.string.event_reminder_toggle_label))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Switch(
-                                checked = reminderEnabled,
-                                onCheckedChange = { checked ->
-                                    if (checked) {
-                                        awaitingReminderEnable = true
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            val granted = ContextCompat.checkSelfPermission(
-                                                context,
-                                                Manifest.permission.POST_NOTIFICATIONS
-                                            ) == PackageManager.PERMISSION_GRANTED
-                                            if (!granted) {
-                                                pendingNotificationTarget = ReminderPermissionTarget.Reminder
-                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                                return@Switch
-                                            }
-                                        }
-                                        reminderEnabled = true
-                                        awaitingReminderEnable = false
-                                    } else {
-                                        awaitingReminderEnable = false
-                                        reminderEnabled = false
-                                    }
+                            if (alarmEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canScheduleExactAlarm) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = stringResource(R.string.reminder_exact_alarm_permission_needed),
+                                    style = MaterialTheme.typography.body2,
+                                )
+                                TextButton(onClick = {
+                                    requestExactAlarmPermission(
+                                        context = context,
+                                        updateCanSchedule = { canScheduleExactAlarm = it },
+                                        onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
+                                    )
+                                }) {
+                                    Text(text = stringResource(R.string.reminder_exact_alarm_permission_action))
                                 }
-                            )
-                        }
-                        if (reminderEnabled) {
+                            }
+                            if (alarmEnabled) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                ReminderOffsetDropdown(
+                                    selectedMinutes = alarmMinutes,
+                                    onMinutesSelected = { alarmMinutes = it },
+                                    fieldLabel = stringResource(R.string.event_alarm_lead_time_label),
+                                )
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
-                            ReminderOffsetDropdown(
-                                selectedMinutes = reminderMinutes,
-                                onMinutesSelected = { reminderMinutes = it },
-                                fieldLabel = stringResource(R.string.event_reminder_lead_time_label),
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = stringResource(R.string.event_reminder_toggle_label))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Switch(
+                                    checked = reminderEnabled,
+                                    onCheckedChange = { checked ->
+                                        if (checked) {
+                                            awaitingReminderEnable = true
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                val granted = ContextCompat.checkSelfPermission(
+                                                    context,
+                                                    Manifest.permission.POST_NOTIFICATIONS
+                                                ) == PackageManager.PERMISSION_GRANTED
+                                                if (!granted) {
+                                                    pendingNotificationTarget = ReminderPermissionTarget.Reminder
+                                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                                    return@Switch
+                                                }
+                                            }
+                                            reminderEnabled = true
+                                            awaitingReminderEnable = false
+                                        } else {
+                                            awaitingReminderEnable = false
+                                            reminderEnabled = false
+                                        }
+                                    }
+                                )
+                            }
+                            if (reminderEnabled) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                ReminderOffsetDropdown(
+                                    selectedMinutes = reminderMinutes,
+                                    onMinutesSelected = { reminderMinutes = it },
+                                    fieldLabel = stringResource(R.string.event_reminder_lead_time_label),
+                                )
+                            }
                         }
                     }
                 }
