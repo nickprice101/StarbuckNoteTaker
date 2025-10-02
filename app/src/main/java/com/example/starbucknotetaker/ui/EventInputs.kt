@@ -1,5 +1,6 @@
 package com.example.starbucknotetaker.ui
 
+import android.content.pm.ApplicationInfo
 import android.location.Address
 import android.location.Geocoder
 import android.util.Log
@@ -52,7 +53,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.example.starbucknotetaker.BuildConfig
 
 private data class LocationSuggestion(
     val text: String,
@@ -73,6 +73,9 @@ fun LocationAutocompleteField(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val geocoderAvailable = remember { Geocoder.isPresent() }
+    val isDebuggable = remember(context) {
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
     if (!geocoderAvailable) {
         Column(modifier = modifier) {
             OutlinedTextField(
@@ -100,7 +103,7 @@ fun LocationAutocompleteField(
             expanded = false
             return
         }
-        if (BuildConfig.DEBUG) {
+        if (isDebuggable) {
             val queryLog = buildString {
                 append("requestSuggestions query=\"")
                 append(query)
@@ -118,7 +121,7 @@ fun LocationAutocompleteField(
                     geocoder.getFromLocationName(query, 5)
                         ?.mapNotNull { address ->
                             val summary = address.toSuggestion() ?: return@mapNotNull null
-                            if (BuildConfig.DEBUG) {
+                            if (isDebuggable) {
                                 Log.d(
                                     LOCATION_AUTOCOMPLETE_TAG,
                                     "Geocoder summary for query=\"$query\": $summary",
@@ -126,7 +129,7 @@ fun LocationAutocompleteField(
                             }
                             val fallbackDisplay = fallbackEventLocationDisplay(summary)
                             val resolvedDisplay = address.toEventLocationDisplay()
-                            if (BuildConfig.DEBUG) {
+                            if (isDebuggable) {
                                 Log.d(
                                     LOCATION_AUTOCOMPLETE_TAG,
                                     "Resolved display present=${resolvedDisplay != null} for summary=\"$summary\"",
@@ -134,7 +137,7 @@ fun LocationAutocompleteField(
                             }
                             val mergedDisplay = resolvedDisplay?.mergeWithFallback(fallbackDisplay)
                                 ?: run {
-                                    if (BuildConfig.DEBUG) {
+                                    if (isDebuggable) {
                                         Log.w(
                                             LOCATION_AUTOCOMPLETE_TAG,
                                             "Falling back to merged display name=${fallbackDisplay.name}, address=${fallbackDisplay.address}",
@@ -198,7 +201,7 @@ fun LocationAutocompleteField(
                         val formattedSelection = suggestion.display
                             .toQueryString()
                             .ifBlank { suggestion.text }
-                        if (BuildConfig.DEBUG) {
+                        if (isDebuggable) {
                             Log.d(
                                 LOCATION_AUTOCOMPLETE_TAG,
                                 "Dropdown selection formatted=\"$formattedSelection\", display=${suggestion.display}, fromFallback=${suggestion.isFallback}",

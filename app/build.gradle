@@ -113,6 +113,7 @@ android {
     buildFeatures {
         compose true
         aidl true
+        buildConfig true
     }
 
     composeOptions {
@@ -257,7 +258,8 @@ tasks.withType(MergeNativeLibsTask).configureEach { task ->
     task.notCompatibleWithConfigurationCache('Aligns native libraries using an external script')
     doLast {
         def outputDir = task.outputDir.get().asFile
-        def alignedLibraries = task.project.fileTree(dir: outputDir, include: ['**/*.so']).files
-        alignNativeLibrariesAction(task.project, alignedLibraries)
+        def gradleProject = project
+        def alignedLibraries = gradleProject.fileTree(dir: outputDir, include: ['**/*.so']).files
+        alignNativeLibrariesAction(gradleProject, alignedLibraries)
     }
 }
