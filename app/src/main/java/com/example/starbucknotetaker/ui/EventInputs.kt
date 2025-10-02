@@ -2,6 +2,7 @@ package com.example.starbucknotetaker.ui
 
 import android.location.Address
 import android.location.Geocoder
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -51,11 +52,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.starbucknotetaker.BuildConfig
 
 private data class LocationSuggestion(
     val text: String,
     val display: EventLocationDisplay,
+    val isFallback: Boolean,
 )
+
+private const val LOCATION_AUTOCOMPLETE_TAG = "LocationAutocomplete"
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
@@ -95,6 +100,17 @@ fun LocationAutocompleteField(
             expanded = false
             return
         }
+        if (BuildConfig.DEBUG) {
+            val queryLog = buildString {
+                append("requestSuggestions query=\"")
+                append(query)
+                append('\"')
+                if (query.contains("melkweg", ignoreCase = true)) {
+                    append(" (contains melkweg)")
+                }
+            }
+            Log.d(LOCATION_AUTOCOMPLETE_TAG, queryLog)
+        }
         fetchJob = coroutineScope.launch {
             delay(300)
             val results = withContext(Dispatchers.IO) {
@@ -102,13 +118,34 @@ fun LocationAutocompleteField(
                     geocoder.getFromLocationName(query, 5)
                         ?.mapNotNull { address ->
                             val summary = address.toSuggestion() ?: return@mapNotNull null
+                            if (BuildConfig.DEBUG) {
+                                Log.d(
+                                    LOCATION_AUTOCOMPLETE_TAG,
+                                    "Geocoder summary for query=\"$query\": $summary",
+                                )
+                            }
                             val fallbackDisplay = fallbackEventLocationDisplay(summary)
                             val resolvedDisplay = address.toEventLocationDisplay()
-                                ?.mergeWithFallback(fallbackDisplay)
-                                ?: fallbackDisplay
+                            if (BuildConfig.DEBUG) {
+                                Log.d(
+                                    LOCATION_AUTOCOMPLETE_TAG,
+                                    "Resolved display present=${resolvedDisplay != null} for summary=\"$summary\"",
+                                )
+                            }
+                            val mergedDisplay = resolvedDisplay?.mergeWithFallback(fallbackDisplay)
+                                ?: run {
+                                    if (BuildConfig.DEBUG) {
+                                        Log.w(
+                                            LOCATION_AUTOCOMPLETE_TAG,
+                                            "Falling back to merged display name=${fallbackDisplay.name}, address=${fallbackDisplay.address}",
+                                        )
+                                    }
+                                    fallbackDisplay
+                                }
                             LocationSuggestion(
                                 text = summary,
-                                display = resolvedDisplay,
+                                display = mergedDisplay,
+                                isFallback = resolvedDisplay == null,
                             )
                         }
                         ?.distinctBy { it.text }
@@ -161,6 +198,12 @@ fun LocationAutocompleteField(
                         val formattedSelection = suggestion.display
                             .toQueryString()
                             .ifBlank { suggestion.text }
+                        if (BuildConfig.DEBUG) {
+                            Log.d(
+                                LOCATION_AUTOCOMPLETE_TAG,
+                                "Dropdown selection formatted=\"$formattedSelection\", display=${suggestion.display}, fromFallback=${suggestion.isFallback}",
+                            )
+                        }
                         onValueChange(formattedSelection)
                         expanded = false
                         suggestions = emptyList()
