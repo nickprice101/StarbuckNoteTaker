@@ -197,11 +197,6 @@ private fun ChecklistEditorScreen(
                         onFocusHandled = { pendingFocusId = null },
                         onTextChange = { text ->
                             items[index] = item.copy(text = text)
-                            if (index == items.lastIndex && text.isNotBlank()) {
-                                val newItem = EditableChecklistItem(id = nextId(), text = "", isChecked = false)
-                                items.add(newItem)
-                                pendingFocusId = newItem.id
-                            }
                         },
                         onAddBelow = { initialText ->
                             val newItem = EditableChecklistItem(
