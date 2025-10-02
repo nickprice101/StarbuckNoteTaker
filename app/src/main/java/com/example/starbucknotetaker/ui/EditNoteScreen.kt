@@ -944,8 +944,7 @@ fun EditNoteScreen(
                                         val prev = blocks[prevIndex]
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                            val merged = prev.value.text + "\n" + next.value.text
-                                            blocks[prevIndex] = prev.copy(value = RichTextValue.fromPlainText(merged))
+                                            blocks[prevIndex] = mergeTextBlocks(prev, next)
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -974,8 +973,7 @@ fun EditNoteScreen(
                                         val prev = blocks[prevIndex]
                                         val next = blocks.getOrNull(prevIndex + 1)
                                         if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                            val merged = prev.value.text + "\n" + next.value.text
-                                            blocks[prevIndex] = prev.copy(value = RichTextValue.fromPlainText(merged))
+                                            blocks[prevIndex] = mergeTextBlocks(prev, next)
                                             blocks.removeAt(prevIndex + 1)
                                         }
                                     }
@@ -1028,8 +1026,7 @@ fun EditNoteScreen(
                                     val prev = blocks[prevIndex]
                                     val next = blocks.getOrNull(prevIndex + 1)
                                     if (prev is EditBlock.Text && next is EditBlock.Text) {
-                                        val merged = prev.value.text + "\n" + next.value.text
-                                        blocks[prevIndex] = prev.copy(value = RichTextValue.fromPlainText(merged))
+                                        blocks[prevIndex] = mergeTextBlocks(prev, next)
                                         blocks.removeAt(prevIndex + 1)
                                     }
                                 }
@@ -1182,6 +1179,35 @@ private fun AttachmentAction(
         }
         Text(label, style = MaterialTheme.typography.caption)
     }
+}
+
+private fun mergeTextBlocks(first: EditBlock.Text, second: EditBlock.Text): EditBlock.Text {
+    val firstDocument = first.value.toDocument()
+    val secondDocument = second.value.toDocument()
+    val builder = RichTextDocumentBuilder()
+    val firstText = firstDocument.text
+    val secondText = secondDocument.text
+
+    if (firstText.isNotEmpty()) {
+        builder.append(firstDocument)
+    }
+
+    if (firstText.isNotEmpty() && secondText.isNotEmpty()) {
+        builder.appendPlain("\n\n")
+    }
+
+    if (secondText.isNotEmpty()) {
+        builder.append(secondDocument)
+    }
+
+    val mergedDocument = builder.build()
+    val mergedValue = if (mergedDocument.text.isEmpty()) {
+        RichTextValue.fromPlainText("")
+    } else {
+        RichTextValue.fromDocument(mergedDocument)
+    }
+
+    return first.copy(value = mergedValue)
 }
 
 private sealed class EditBlock {
