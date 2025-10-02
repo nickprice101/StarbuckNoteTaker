@@ -17,7 +17,31 @@ data class Note(
     val summary: String = "",
     val event: NoteEvent? = null,
     val isLocked: Boolean = false,
+    val checklistItems: List<ChecklistItem>? = null,
 )
+
+val Note.isChecklist: Boolean
+    get() = checklistItems != null
+
+data class ChecklistItem(
+    val text: String,
+    val isChecked: Boolean = false,
+)
+
+fun List<ChecklistItem>.asChecklistContent(): String {
+    if (isEmpty()) return ""
+    val builder = StringBuilder()
+    for (index in indices) {
+        val item = this[index]
+        if (index > 0) builder.append('\n')
+        builder.append(if (item.isChecked) "[x]" else "[ ]")
+        if (item.text.isNotBlank()) {
+            builder.append(' ')
+            builder.append(item.text)
+        }
+    }
+    return builder.toString().trimEnd()
+}
 
 /**
  * Represents an arbitrary file embedded within a note. The file is stored as

@@ -33,7 +33,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.starbucknotetaker.ChecklistItem
+import com.example.starbucknotetaker.asChecklistContent
+import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.ui.AddChecklistScreen
 import com.example.starbucknotetaker.ui.AddNoteScreen
+import com.example.starbucknotetaker.ui.EditChecklistScreen
 import com.example.starbucknotetaker.ui.EditNoteScreen
 import com.example.starbucknotetaker.ui.NoteDetailScreen
 import com.example.starbucknotetaker.ui.NoteEntryMode
@@ -378,6 +383,7 @@ fun AppContent(
             NoteListScreen(
                 notes = noteViewModel.notes,
                 onAddNote = { navController.navigate("add") },
+                onAddChecklist = { navController.navigate("add_checklist") },
                 onAddEvent = { navController.navigate("add_event") },
                 onOpenNote = { note ->
                     val isTemporarilyUnlocked = noteViewModel.isNoteTemporarilyUnlocked(note.id)
@@ -421,6 +427,27 @@ fun AppContent(
                 prefill = pendingShare,
             )
         }
+        composable("add_checklist") {
+            AddChecklistScreen(
+                onSave = { title, items ->
+                    val content = items.asChecklistContent()
+                    val styled = RichTextDocument.fromPlainText(content)
+                    noteViewModel.addNote(
+                        title = title,
+                        content = content,
+                        styledContent = styled,
+                        images = emptyList(),
+                        files = emptyList(),
+                        linkPreviews = emptyList(),
+                        event = null,
+                        checklistItems = items,
+                    )
+                    navController.popBackStack()
+                },
+                onBack = { navController.popBackStack() },
+                summarizerState = summarizerState,
+            )
+        }
         composable("add_event") {
             AddNoteScreen(
                 onSave = { title, content, styledContent, images, files, linkPreviews, event ->
@@ -452,13 +479,22 @@ fun AppContent(
                 NoteDetailScreen(
                     note = note,
                     onBack = { navController.popBackStack() },
-                    onEdit = { navController.navigate("edit/$noteId") },
+                    onEdit = {
+                        if (note.checklistItems != null) {
+                            navController.navigate("edit_checklist/$noteId")
+                        } else {
+                            navController.navigate("edit/$noteId")
+                        }
+                    },
                     onLockRequest = {
                         noteViewModel.setNoteLock(note.id, true)
                         noteViewModel.markNoteTemporarilyUnlocked(note.id)
                     },
                     onUnlockRequest = { pendingUnlockNoteId = note.id },
-                    openAttachment = { id -> noteViewModel.openAttachment(id) }
+                    openAttachment = { id -> noteViewModel.openAttachment(id) },
+                    onChecklistChange = { items: List<ChecklistItem> ->
+                        noteViewModel.updateChecklistItems(noteId, items)
+                    }
                 )
             } else {
                 Log.w(BIOMETRIC_LOG_TAG, "*** DETAIL_SCREEN: Note not found, navigating back ***")
@@ -480,6 +516,35 @@ fun AppContent(
                     onEnablePinCheck = {},
                     summarizerState = summarizerState,
                     openAttachment = { id -> noteViewModel.openAttachment(id) }
+                )
+            } else {
+                navController.popBackStack()
+            }
+        }
+        composable("edit_checklist/{noteId}") { backStackEntry ->
+            val noteId = backStackEntry.arguments?.getString("noteId")?.toLongOrNull()
+            val note = noteId?.let { noteViewModel.getNoteById(it) }
+            if (noteId != null && note != null && note.checklistItems != null) {
+                EditChecklistScreen(
+                    note = note,
+                    onSave = { title, items ->
+                        val content = items.asChecklistContent()
+                        val styled = RichTextDocument.fromPlainText(content)
+                        noteViewModel.updateNote(
+                            id = noteId,
+                            title = title,
+                            content = content,
+                            styledContent = styled,
+                            images = note.images,
+                            files = note.files,
+                            linkPreviews = note.linkPreviews,
+                            event = note.event,
+                            checklistItems = items,
+                        )
+                        navController.popBackStack()
+                    },
+                    onCancel = { navController.popBackStack() },
+                    summarizerState = summarizerState,
                 )
             } else {
                 navController.popBackStack()
