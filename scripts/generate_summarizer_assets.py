@@ -76,7 +76,7 @@ def _generate_with_tensorflow() -> None:
                 f"Failed to install dependency for '{module_name}'"
             ) from exc
 
-    notebook = Path("build_tensor.ipynb")
+    notebook = _repo_root() / "build_tensor.ipynb"
     if not notebook.exists():
         raise FileNotFoundError("build_tensor.ipynb not found")
 
