@@ -44,7 +44,7 @@ class SummarizerTest {
     }
 
     @Test
-    fun fallbackSummaryReturnsFirstTwoLines() {
+    fun fallbackSummaryReturnsFirstTwoLines() = runBlocking {
         val summarizer = Summarizer(context, nativeLoader = { false }, debugSink = { })
         val text = """
             Security updates require MFA for all accounts.

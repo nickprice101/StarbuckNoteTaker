@@ -214,11 +214,7 @@ class NoteViewModel(
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
         val summarizerSource = buildSummarizerSource(finalTitle, finalContent, event)
-        val initialSummary = if (summarizerSource.isBlank()) {
-            ""
-        } else {
-            summarizer?.let { it.fallbackSummary(summarizerSource, event) } ?: summarizerSource.take(200)
-        }
+        val initialSummary = synchronousSummaryPlaceholder(summarizerSource)
         val note = Note(
             title = finalTitle,
             content = finalContent.trim(),
@@ -237,22 +233,7 @@ class NoteViewModel(
         reminderScheduler?.scheduleIfNeeded(note)
         tryEmitPendingReminder()
         val noteId = note.id
-        if (summarizerSource.isNotBlank()) {
-            summarizer?.let { sum ->
-                viewModelScope.launch {
-                    val summary = sum.summarize(summarizerSource)
-                    val trace = sum.consumeDebugTrace()
-                    val index = _notes.indexOfFirst { it.id == noteId }
-                    if (index != -1) {
-                        _notes[index] = _notes[index].copy(summary = summary)
-                        pin?.let { store?.saveNotes(_notes, it) }
-                    }
-                    if (shouldCreateDebugNote(trace)) {
-                        createSummarizerDebugNote(finalTitle, summarizerSource, trace)
-                    }
-                }
-            }
-        }
+        launchSummaryUpdates(noteId, finalTitle, summarizerSource, event)
     }
 
     fun deleteNote(id: Long) {
@@ -296,11 +277,7 @@ class NoteViewModel(
                     styledContent
                 }
             val summarizerSource = buildSummarizerSource(finalTitle, contentForUpdate, finalEvent)
-            val initialSummary = if (summarizerSource.isBlank()) {
-                ""
-            } else {
-                summarizer?.let { it.fallbackSummary(summarizerSource, finalEvent) } ?: summarizerSource.take(200)
-            }
+            val initialSummary = synchronousSummaryPlaceholder(summarizerSource)
             val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
             val preparedImages = prepareImagesForStorage(images)
             val preparedFiles = prepareFilesForStorage(files)
@@ -327,22 +304,7 @@ class NoteViewModel(
             reminderScheduler?.scheduleIfNeeded(updated)
             tryEmitPendingReminder()
             val noteId = updated.id
-            if (summarizerSource.isNotBlank()) {
-                summarizer?.let { sum ->
-                    viewModelScope.launch {
-                        val summary = sum.summarize(summarizerSource)
-                        val trace = sum.consumeDebugTrace()
-                        val newIndex = _notes.indexOfFirst { it.id == noteId }
-                        if (newIndex != -1) {
-                            _notes[newIndex] = _notes[newIndex].copy(summary = summary)
-                            pin?.let { store?.saveNotes(_notes, it) }
-                        }
-                        if (shouldCreateDebugNote(trace)) {
-                            createSummarizerDebugNote(finalTitle, summarizerSource, trace)
-                        }
-                    }
-                }
-            }
+            launchSummaryUpdates(noteId, finalTitle, summarizerSource, finalEvent)
         }
     }
 
@@ -674,6 +636,58 @@ class NoteViewModel(
             }
             append(trimmedContent)
         }.trim()
+    }
+
+    private fun synchronousSummaryPlaceholder(source: String): String {
+        if (source.isBlank()) return ""
+        val sum = summarizer
+        return if (sum != null) {
+            sum.quickFallbackSummary(source)
+        } else {
+            Summarizer.lightweightPreview(source)
+        }
+    }
+
+    private fun launchSummaryUpdates(
+        noteId: Long,
+        noteTitle: String,
+        source: String,
+        event: NoteEvent?,
+    ) {
+        if (source.isBlank()) return
+        val sum = summarizer ?: return
+        viewModelScope.launch {
+            runCatching {
+                sum.fallbackSummary(source, event)
+            }.onSuccess { fallback ->
+                updateNoteSummary(noteId, fallback)
+            }.onFailure {
+                Log.e("NoteViewModel", "fallback summary failed", it)
+            }
+
+            runCatching {
+                sum.summarize(source)
+            }.onSuccess { summary ->
+                val trace = sum.consumeDebugTrace()
+                val updated = updateNoteSummary(noteId, summary)
+                if (updated && shouldCreateDebugNote(trace)) {
+                    createSummarizerDebugNote(noteTitle, source, trace)
+                }
+            }.onFailure {
+                Log.e("NoteViewModel", "summarizer inference failed", it)
+            }
+        }
+    }
+
+    private fun updateNoteSummary(noteId: Long, summary: String): Boolean {
+        val index = _notes.indexOfFirst { it.id == noteId }
+        if (index == -1) return false
+        if (_notes[index].summary == summary) {
+            return true
+        }
+        _notes[index] = _notes[index].copy(summary = summary)
+        pin?.let { store?.saveNotes(_notes, it) }
+        return true
     }
 
     private data class ProcessedNoteContent(
