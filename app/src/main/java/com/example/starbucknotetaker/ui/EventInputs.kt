@@ -138,6 +138,7 @@ fun LocationAutocompleteField(
                                 )
                             }
                             val mergedDisplay = resolvedDisplay?.mergeWithFallback(fallbackDisplay)
+                                ?: createVenueAwareFallbackDisplay(query, fallbackDisplay)
                                 ?: run {
                                     if (isDebuggable) {
                                         Log.w(
@@ -409,3 +410,26 @@ private fun formatZoneLabel(zoneId: ZoneId, locale: Locale): String {
 }
 
  
+
+internal fun createVenueAwareFallbackDisplay(
+    originalQuery: String,
+    fallbackDisplay: EventLocationDisplay,
+): EventLocationDisplay? {
+    val formattedVenue = extractAndFormatVenueName(originalQuery)
+        ?: originalQuery.takeIf { isVenueName(it) }?.let { formatVenueName(it) }
+        ?: return null
+
+    val addressParts = mutableListOf<String>()
+    fallbackDisplay.name
+        .takeIf { it.isNotBlank() && !it.equals(formattedVenue, ignoreCase = true) }
+        ?.let { addressParts.add(it) }
+    fallbackDisplay.address
+        ?.takeIf { it.isNotBlank() && !it.equals(formattedVenue, ignoreCase = true) }
+        ?.let { addressParts.add(it) }
+    val combinedAddress = addressParts.joinToString(", ").takeIf { it.isNotBlank() }
+
+    return EventLocationDisplay(
+        name = formattedVenue,
+        address = combinedAddress,
+    )
+}
