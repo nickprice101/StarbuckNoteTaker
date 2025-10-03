@@ -28,10 +28,13 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
         val result = withContext(Dispatchers.IO) {
             // Step 1: Always check if user input is a venue name first
             val userVenueName = extractAndFormatVenueName(query)
-            
+
             if (userVenueName != null) {
-                Log.d("EventLocationLookup", "User entered venue name: '$userVenueName'")
-                
+                Log.d(
+                    "EventLocationLookup",
+                    "Detected venue name '$userVenueName' from query '$query'"
+                )
+
                 // Step 2: Get address information via geocoding
                 val addresses = runCatching {
                     geocoder.getFromLocationName(query, 5) ?: emptyList()
@@ -43,28 +46,54 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
                     // Step 3: Look for a more complete venue name in the geocoding results
                     val enhancedVenueName = findEnhancedVenueName(userVenueName, addresses)
                     val finalVenueName = enhancedVenueName ?: userVenueName
-                    
+
                     // Step 4: Build the address string
                     val addressString = buildFullAddress(addresses.first())
-                    
+
                     Log.d("EventLocationLookup", "Final venue name: '$finalVenueName'")
                     Log.d("EventLocationLookup", "Address: '$addressString'")
-                    
-                    EventLocationDisplay(
+
+                    val venueDisplay = EventLocationDisplay(
                         name = finalVenueName,
                         address = addressString.takeIf { it.isNotEmpty() }
                     )
+                    Log.d("EventLocationLookup", "Venue branch display result: $venueDisplay")
+                    venueDisplay
                 } else {
                     // No geocoding results, but we still have the venue name
-                    EventLocationDisplay(name = userVenueName, address = null)
+                    val venueDisplay = EventLocationDisplay(name = userVenueName, address = null)
+                    Log.d("EventLocationLookup", "Venue branch display result: $venueDisplay")
+                    venueDisplay
                 }
             } else {
                 // User input doesn't look like a venue name, use standard processing
-                Log.d("EventLocationLookup", "User input doesn't look like venue name, using standard processing")
+                if (query.contains("melkweg", ignoreCase = true)) {
+                    Log.d(
+                        "EventLocationLookup",
+                        "No venue detected for query '$query'; contains 'melkweg', treating as address"
+                    )
+                } else {
+                    Log.d(
+                        "EventLocationLookup",
+                        "No venue detected for query '$query'; treating as address"
+                    )
+                }
                 val venueResult = runCatching {
                     lookupVenueAtAddress(geocoder, query)
                 }.getOrNull()
-                
+
+                if (venueResult != null) {
+                    Log.d(
+                        "EventLocationLookup",
+                        "lookupVenueAtAddress returned venue display: $venueResult"
+                    )
+                } else {
+                    Log.d(
+                        "EventLocationLookup",
+                        "lookupVenueAtAddress returned null; falling back to name='${fallback.name}', address='${fallback.address}'"
+                    )
+                }
+
                 venueResult ?: fallback
             }
         }
