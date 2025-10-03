@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
+import com.example.starbucknotetaker.BuildConfig
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
@@ -74,7 +75,8 @@ fun LocationAutocompleteField(
     val coroutineScope = rememberCoroutineScope()
     val geocoderAvailable = remember { Geocoder.isPresent() }
     val isDebuggable = remember(context) {
-        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        BuildConfig.DEBUG ||
+            (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
     if (!geocoderAvailable) {
         Column(modifier = modifier) {
