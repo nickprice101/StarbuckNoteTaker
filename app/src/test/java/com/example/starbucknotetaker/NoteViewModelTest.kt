@@ -16,6 +16,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.verify
 import org.junit.Assert.assertEquals
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -35,6 +36,7 @@ class NoteViewModelTest {
     @Test
     fun addNoteUpdatesSummaryFromSummarizer() = runTest(dispatcher.scheduler) {
         val summarizer = mock<Summarizer>()
+        whenever(summarizer.quickFallbackSummary(any())).thenReturn("Quick placeholder")
         whenever(summarizer.fallbackSummary(any(), anyOrNull())).thenReturn(NoteNatureType.GENERAL_NOTE.humanReadable)
         whenever(summarizer.summarize(any())).thenReturn("mocked summary")
         whenever(summarizer.consumeDebugTrace()).thenReturn(emptyList())
@@ -51,11 +53,13 @@ class NoteViewModelTest {
             emptyList(),
         )
 
-        assertEquals(NoteNatureType.GENERAL_NOTE.humanReadable, viewModel.notes[0].summary)
+        assertEquals("Quick placeholder", viewModel.notes[0].summary)
+        verify(summarizer).quickFallbackSummary(any())
 
         advanceUntilIdle()
 
         assertEquals("mocked summary", viewModel.notes[0].summary)
+        verify(summarizer).fallbackSummary(any(), anyOrNull())
     }
 
     @Test

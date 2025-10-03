@@ -5,7 +5,6 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -469,16 +468,25 @@ class Summarizer(
         }
     }
 
-    fun fallbackSummary(text: String): String = fallbackSummary(text, null)
-
-    fun fallbackSummary(text: String, event: NoteEvent?): String {
+    fun quickFallbackSummary(text: String): String {
         val extractive = extractFallbackSummary(text)
         if (extractive.isNotBlank()) {
             return extractive
         }
-        val label = runBlocking { classifyFallbackLabel(text, event) }
-        return trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+        return lightweightPreview(text)
     }
+
+    suspend fun fallbackSummary(text: String): String = fallbackSummary(text, null)
+
+    suspend fun fallbackSummary(text: String, event: NoteEvent?): String =
+        withContext(Dispatchers.Default) {
+            val extractive = extractFallbackSummary(text)
+            if (extractive.isNotBlank()) {
+                return@withContext extractive
+            }
+            val label = classifyFallbackLabel(text, event)
+            trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+        }
 
     private fun extractFallbackSummary(text: String): String {
         if (text.isBlank()) return ""
@@ -503,21 +511,22 @@ class Summarizer(
         return limited.trim()
     }
 
-    private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel {
-        val classifier = ensureClassifier()
-        val label = if (classifier != null) {
-            classifier.classify(text, event)
-        } else {
-            emitDebug("fallback classifier unavailable; defaulting to general note label")
-            NoteNatureLabel(
-                NoteNatureType.GENERAL_NOTE,
-                NoteNatureType.GENERAL_NOTE.humanReadable,
-                0.0
-            )
+    private suspend fun classifyFallbackLabel(text: String, event: NoteEvent?): NoteNatureLabel =
+        withContext(Dispatchers.Default) {
+            val classifier = ensureClassifier()
+            val label = if (classifier != null) {
+                classifier.classify(text, event)
+            } else {
+                emitDebug("fallback classifier unavailable; defaulting to general note label")
+                NoteNatureLabel(
+                    NoteNatureType.GENERAL_NOTE,
+                    NoteNatureType.GENERAL_NOTE.humanReadable,
+                    0.0
+                )
+            }
+            emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
+            label
         }
-        emitDebug("fallback classifier label: ${label.type} -> ${label.humanReadable}")
-        return label
-    }
 
     private fun selectNextToken(
         logits: FloatArray,
@@ -1081,6 +1090,33 @@ class Summarizer(
         internal fun wordCount(text: String): Int {
             if (text.isBlank()) return 0
             return WORD_SPLIT_REGEX.split(text.trim()).count { it.isNotEmpty() }
+        }
+        internal fun lightweightPreview(text: String): String {
+            if (text.isBlank()) return ""
+            val lines = mutableListOf<String>()
+            for (line in text.lineSequence()) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith("Title:", ignoreCase = true)) {
+                    continue
+                }
+                if (trimmed.isNotEmpty()) {
+                    lines.add(trimmed)
+                    if (lines.size >= FALLBACK_LINE_LIMIT) {
+                        break
+                    }
+                }
+            }
+            val candidate = if (lines.isNotEmpty()) {
+                lines.joinToString(separator = " ")
+            } else {
+                text.trim()
+            }
+            val limited = if (candidate.length > FALLBACK_CHARACTER_LIMIT) {
+                candidate.take(FALLBACK_CHARACTER_LIMIT)
+            } else {
+                candidate
+            }
+            return limited.trim()
         }
         private const val MAX_REPEAT_WORD_RUN = 2
         private const val MIN_WORDS_FOR_UNIQUENESS = 6
