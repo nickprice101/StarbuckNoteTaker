@@ -15,7 +15,7 @@ PROJECT_DIR="$(pwd)"  # assumes you're in the project root
 # Export paths
 export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$GRADLE_INSTALL_DIR/bin:$PATH"
 
-echo "📦 Starting Android SDK + Gradle + Python dependency setup..."
+echo "📦 Starting Android SDK + Gradle + asset setup..."
 
 # ----------------------------
 # ANDROID SDK INSTALLATION
@@ -41,11 +41,7 @@ echo "📦 Installing required SDK packages..."
 sdkmanager --install \
   "platform-tools" \
   "platforms;android-35" \
-  "build-tools;35.0.0" \
-  "ndk;26.1.10909125" > /dev/null
-
-ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
-export ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+  "build-tools;35.0.0" > /dev/null
 
 echo "📄 Writing local.properties with SDK path..."
 cat <<EOF > "$PROJECT_DIR/local.properties"
@@ -53,26 +49,25 @@ sdk.dir=$ANDROID_SDK_ROOT
 EOF
 
 # ----------------------------
-# PYTHON DEPENDENCIES
+# ASSET GENERATION (ON-DEMAND)
 # ----------------------------
-PYTHON_BIN="$(command -v python3 || true)"
-if [ -z "$PYTHON_BIN" ]; then
-  echo "❌ Python 3 is required but was not found on PATH."
-  exit 1
-fi
+ASSETS_DIR="$PROJECT_DIR/app/src/main/assets"
+REQUIRED_ASSETS=("encoder_int8_dynamic.tflite" "decoder_step_int8_dynamic.tflite" "tokenizer.json")
+MISSING_ASSETS=0
 
-echo "🐍 Ensuring required Python packages are installed..."
-"$PYTHON_BIN" -m pip install --upgrade pip > /dev/null
-"$PYTHON_BIN" -m pip install \
-  "tensorflow==2.19.0" \
-  "tf-keras==2.19.0" \
-  "transformers==4.44.2" \
-  "huggingface_hub>=0.24.0" \
-  "numpy==2.0.2" \
-  "protobuf==5.29.1" \
-  "ml-dtypes>=0.5.0" \
-  "datasets==3.1.0" \
-  "sentencepiece>=0.2.0" > /dev/null
+for asset in "${REQUIRED_ASSETS[@]}"; do
+  if [ ! -f "$ASSETS_DIR/$asset" ]; then
+    MISSING_ASSETS=1
+    break
+  fi
+done
+
+if [ "$MISSING_ASSETS" -eq 1 ]; then
+  echo "🧩 Required ML assets missing. Generating assets via Python script..."
+  python3 scripts/generate_summarizer_assets.py
+else
+  echo "✅ All ML assets present in $ASSETS_DIR. Skipping asset generation and heavy Python dependency installation."
+fi
 
 # ----------------------------
 # GRADLE INSTALLATION
@@ -91,6 +86,56 @@ else
 fi
 
 # ----------------------------
+# NDK: COPY libc++_shared.so FROM EXISTING INSTALL
+# ----------------------------
+JNILIBS_DIR="$PROJECT_DIR/app/src/main/jniLibs"
+SUPPORTED_ABIS=("arm64-v8a" "armeabi-v7a" "x86" "x86_64")
+
+echo "🔎 Searching for existing NDK installation with libc++_shared.so..."
+
+NDK_LOCATIONS=(
+  "$ANDROID_SDK_ROOT/ndk"
+  "$ANDROID_NDK_ROOT"
+  "/usr/local/android-ndk"
+  "/opt/android-ndk"
+  "$HOME/Library/Android/sdk/ndk"
+)
+
+LIBCXX_FOUND=""
+
+for ndk_base in "${NDK_LOCATIONS[@]}"; do
+  if [ -d "$ndk_base" ]; then
+    # Find latest-version folder
+    latest_ndk=$(ls -1 "$ndk_base" | sort -V | tail -n 1)
+    ndk_path="$ndk_base/$latest_ndk"
+    if [ -d "$ndk_path" ]; then
+      LIBCXX_FOUND="$ndk_path"
+      break
+    fi
+  fi
+done
+
+if [ -n "$LIBCXX_FOUND" ]; then
+  echo "✅ Found NDK at $LIBCXX_FOUND. Copying libc++_shared.so for each ABI..."
+  for abi in "${SUPPORTED_ABIS[@]}"; do
+    mkdir -p "$JNILIBS_DIR/$abi"
+    LIBCXX_SRC="$LIBCXX_FOUND/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/$abi/libc++_shared.so"
+    if [ ! -f "$LIBCXX_SRC" ]; then
+      # Fallback: Try another common location
+      LIBCXX_SRC="$LIBCXX_FOUND/sources/cxx-stl/llvm-libc++/libs/$abi/libc++_shared.so"
+    fi
+    if [ -f "$LIBCXX_SRC" ]; then
+      cp "$LIBCXX_SRC" "$JNILIBS_DIR/$abi/"
+      echo "  - Copied for ABI: $abi"
+    else
+      echo "  ⚠️  WARNING: libc++_shared.so not found for ABI $abi in $LIBCXX_FOUND"
+    fi
+  done
+else
+  echo "⚠️  No existing NDK installation found. Please ensure libc++_shared.so is present for all ABIs in $JNILIBS_DIR."
+fi
+
+# ----------------------------
 # CONDITIONAL GRADLE BUILD
 # ----------------------------
 cd "$PROJECT_DIR"
@@ -102,8 +147,8 @@ if [ -f "./gradlew" ]; then
   if [ -d "$PROJECT_DIR/app/build/outputs/apk/debug" ]; then
     echo "✅ Build output already exists. Skipping Gradle build."
   else
-    echo "🚀 Running ./gradlew build..."
-    ./gradlew build --no-daemon
+    echo "🚀 Running ./gradlew assembleDebug..."
+    ./gradlew assembleDebug --no-daemon
   fi
 else
   echo "⚠️  No ./gradlew found in project directory. Skipping build."
