@@ -144,11 +144,21 @@ if [ -f "./gradlew" ]; then
   echo "🛠️  Found ./gradlew, ensuring it's executable..."
   chmod +x ./gradlew
 
-  if [ -d "$PROJECT_DIR/app/build/outputs/apk/debug" ]; then
-    echo "✅ Build output already exists. Skipping Gradle build."
-  else
-    echo "🚀 Running ./gradlew assembleDebug..."
-    ./gradlew assembleDebug --no-daemon
+  echo ""
+  echo "ℹ️  Gradle build will NOT run automatically as part of setup."
+  echo "    To run the build manually, use:"
+  echo "      ./gradlew assembleDebug"
+  echo "    Or to opt-in during setup, run:"
+  echo "      RUN_GRADLE_BUILD=1 ./setup_persist.sh"
+  echo ""
+
+  if [ "${RUN_GRADLE_BUILD:-0}" = "1" ]; then
+    if [ -d "$PROJECT_DIR/app/build/outputs/apk/debug" ]; then
+      echo "✅ Build output already exists. Skipping Gradle build."
+    else
+      echo "🚀 RUN_GRADLE_BUILD=1 detected: Running ./gradlew assembleDebug..."
+      ./gradlew assembleDebug --no-daemon
+    fi
   fi
 else
   echo "⚠️  No ./gradlew found in project directory. Skipping build."
@@ -158,6 +168,6 @@ fi
 # DONE
 # ----------------------------
 echo ""
-echo "🎉 Setup and build complete!"
+echo "🎉 Setup complete!"
 echo "📍 Android SDK: $ANDROID_SDK_ROOT"
 echo "📍 Gradle: $(gradle --version | grep Gradle)"
