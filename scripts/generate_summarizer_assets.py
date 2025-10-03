@@ -80,6 +80,9 @@ def _generate_with_tensorflow() -> None:
     if not notebook.exists():
         raise FileNotFoundError("build_tensor.ipynb not found")
 
+    # Ensure working directory is repo root before generating assets
+    os.chdir(_repo_root())
+
     filtered_lines: list[str] = []
     skip_continuation = False
     for line in notebook.read_text().splitlines():
