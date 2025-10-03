@@ -10,7 +10,7 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-class AttachmentStore(private val context: Context) {
+class AttachmentStore(private val context: Context) : PinAttachmentStore {
     private val directory: File = File(context.filesDir, "attachments")
     private val secureRandom = SecureRandom()
 
@@ -60,7 +60,7 @@ class AttachmentStore(private val context: Context) {
         runCatching { attachmentFile(id).takeIf(File::exists)?.delete() }
     }
 
-    fun reencryptAttachment(oldPin: String, newPin: String, id: String): Boolean {
+    override fun reencryptAttachment(oldPin: String, newPin: String, id: String): Boolean {
         val plain = openAttachment(oldPin, id) ?: return false
         saveAttachment(newPin, plain, id)
         return true

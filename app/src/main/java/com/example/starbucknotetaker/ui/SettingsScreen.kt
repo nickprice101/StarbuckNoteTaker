@@ -437,13 +437,19 @@ fun SettingsScreen(
                                     pinChangeMessage = null
                                 }
                                 pinManager.updatePin(currentPin, newPin) -> {
-                                    onPinChanged(newPin)
-                                    pinChangeError = null
-                                    pinChangeMessage = "PIN updated successfully."
-                                    currentPin = ""
-                                    newPin = ""
-                                    confirmPin = ""
-                                    currentPinVerified = false
+                                    val stored = pinManager.getStoredPin()
+                                    if (stored != null) {
+                                        onPinChanged(stored)
+                                        pinChangeError = null
+                                        pinChangeMessage = "PIN updated successfully."
+                                        currentPin = ""
+                                        newPin = ""
+                                        confirmPin = ""
+                                        currentPinVerified = false
+                                    } else {
+                                        pinChangeError = "Unable to read updated PIN."
+                                        pinChangeMessage = null
+                                    }
                                 }
                                 else -> {
                                     pinChangeError = "Unable to update PIN. Please verify your current PIN."
