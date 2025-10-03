@@ -64,7 +64,7 @@ done
 
 if [ "$MISSING_ASSETS" -eq 1 ]; then
   echo "🧩 Required ML assets missing. Generating assets via Python script..."
-  python3 scripts/generate_summarizer_assets.py
+  python3 "$PROJECT_DIR/scripts/generate_summarizer_assets.py"
 else
   echo "✅ All ML assets present in $ASSETS_DIR. Skipping asset generation and heavy Python dependency installation."
 fi
