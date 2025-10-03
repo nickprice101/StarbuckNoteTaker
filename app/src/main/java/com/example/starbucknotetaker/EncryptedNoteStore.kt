@@ -21,13 +21,13 @@ import java.util.Locale
 class EncryptedNoteStore(
     private val context: Context,
     private val attachmentStore: AttachmentStore = AttachmentStore(context),
-) {
+) : PinNoteStore {
     private val file = File(context.filesDir, "notes.enc")
     companion object {
         private const val VERSION = 1
     }
 
-    fun loadNotes(pin: String): List<Note> {
+    override fun loadNotes(pin: String): List<Note> {
         if (!file.exists()) return emptyList()
         val bytes = file.readBytes()
         return loadNotesFromBytes(bytes, pin)
@@ -168,7 +168,7 @@ class EncryptedNoteStore(
         return notes
     }
 
-    fun saveNotes(notes: List<Note>, pin: String) {
+    override fun saveNotes(notes: List<Note>, pin: String) {
         val arr = JSONArray()
         notes.forEach { note ->
             val obj = JSONObject()

@@ -119,7 +119,10 @@ fun PinSetupScreen(pinManager: PinManager, onDone: (String) -> Unit) {
                         hideKeyboard()
                         focusManager.clearFocus(force = true)
                         pinManager.setPin(pin)
-                        onDone(pin)
+                        val stored = pinManager.getStoredPin()
+                        if (stored != null) {
+                            onDone(stored)
+                        }
                     } else {
                         error = "PINs did not match"
                         firstPin = null
@@ -179,7 +182,10 @@ fun PinEnterScreen(pinManager: PinManager, onSuccess: (String) -> Unit) {
                             if (pinManager.checkPin(input)) {
                                 hideKeyboard()
                                 focusManager.clearFocus(force = true)
-                                onSuccess(input)
+                                val stored = pinManager.getStoredPin()
+                                if (stored != null) {
+                                    onSuccess(stored)
+                                }
                             } else {
                                 error = true
                             }
