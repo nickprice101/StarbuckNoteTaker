@@ -252,9 +252,9 @@ class Summarizer(
                 return@withContext fallback("models unavailable")
             }
 
-            val (_, classifierPrompt) = ensureClassifierDetails()
-            val promptPrefix = if (classifierPrompt.isNotBlank()) {
-                "summarize the note type and structure: $classifierPrompt\n\nNote: "
+            val (_, classifierSummary) = ensureClassifierDetails()
+            val promptPrefix = if (classifierSummary.isNotBlank()) {
+                "summarize the note type and structure: $classifierSummary\n\nNote: "
             } else {
                 "summarize the note type and structure.\n\nNote: "
             }
@@ -713,7 +713,7 @@ class Summarizer(
     private fun sanitizeHighlightCandidate(value: String?): String {
         if (value.isNullOrBlank()) return ""
         val firstLine = value.lineSequence().firstOrNull { it.trim().isNotEmpty() }?.trim() ?: return ""
-        val normalized = firstLine.replace("\s+".toRegex(), " ")
+        val normalized = firstLine.replace("""\s+""".toRegex(), " ")
         return trimToWordLimit(normalized.trimEnd('.', ';', ':'), 16)
     }
 
@@ -785,7 +785,7 @@ class Summarizer(
 
     private fun enforceTwoLineLimit(text: String): String {
         if (text.isBlank()) return text.trim()
-        return text.replace("\s+".toRegex(), " ").trim()
+        return text.replace("""\s+""".toRegex(), " ").trim()
     }
 
     private fun pluralize(noun: String, count: Int): String {
