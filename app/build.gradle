@@ -258,9 +258,9 @@ tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }
 
 tasks.withType(MergeNativeLibsTask).configureEach { task ->
     task.notCompatibleWithConfigurationCache('Aligns native libraries using an external script')
-    doLast {
+    def gradleProject = task.project
+    task.doLast {
         def outputDir = task.outputDir.get().asFile
-        def gradleProject = project
         def alignedLibraries = gradleProject.fileTree(dir: outputDir, include: ['**/*.so']).files
         alignNativeLibrariesAction(gradleProject, alignedLibraries)
     }
