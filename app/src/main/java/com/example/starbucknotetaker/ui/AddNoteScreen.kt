@@ -45,6 +45,7 @@ import com.example.starbucknotetaker.NoteAlarmScheduler
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.REMINDER_MINUTE_OPTIONS
 import com.example.starbucknotetaker.NoteLinkPreview
+import com.example.starbucknotetaker.normalizeUrl
 import com.example.starbucknotetaker.Summarizer
 import com.example.starbucknotetaker.UrlDetection
 import com.example.starbucknotetaker.extractUrls
@@ -225,7 +226,7 @@ fun AddNoteScreen(
         while (cursor < blocks.size) {
             val block = blocks[cursor]
             if (block is NoteBlock.LinkPreview && block.sourceId == textBlock.id) {
-                existingBlocks[block.preview.url] = block
+                existingBlocks[normalizeUrl(block.preview.url)] = block
                 blocks.removeAt(cursor)
             } else {
                 break
@@ -244,19 +245,24 @@ fun AddNoteScreen(
                 val existing = existingBlocks[normalized]
                 val block = if (existing != null) {
                     if (detection.isComplete) {
+                        val hasFetched = existing.lastFetchedUrl == normalized
                         existing.copy(
-                            preview = existing.preview.copy(url = normalized),
+                            preview = if (hasFetched) existing.preview else NoteLinkPreview(url = normalized),
                             awaitingCompletion = false,
-                            isLoading = if (existing.hasAttempted) false else true,
-                            errorMessage = if (existing.hasAttempted) existing.errorMessage else null,
+                            isLoading = if (hasFetched) false else true,
+                            errorMessage = if (hasFetched) existing.errorMessage else null,
+                            hasAttempted = if (hasFetched) existing.hasAttempted else false,
+                            lastFetchedUrl = existing.lastFetchedUrl.takeIf { it == normalized },
                         )
                     } else {
+                        val hasFetched = existing.lastFetchedUrl == normalized
                         existing.copy(
-                            preview = NoteLinkPreview(url = normalized),
+                            preview = if (hasFetched) existing.preview else NoteLinkPreview(url = normalized),
                             awaitingCompletion = true,
                             isLoading = false,
-                            errorMessage = null,
-                            hasAttempted = false,
+                            errorMessage = if (hasFetched) existing.errorMessage else null,
+                            hasAttempted = if (hasFetched) existing.hasAttempted else false,
+                            lastFetchedUrl = existing.lastFetchedUrl.takeIf { it == normalized },
                         )
                     }
                 } else {
@@ -267,6 +273,7 @@ fun AddNoteScreen(
                             isLoading = true,
                             errorMessage = null,
                             awaitingCompletion = false,
+                            lastFetchedUrl = null,
                         )
                     } else {
                         NoteBlock.LinkPreview(
@@ -276,6 +283,7 @@ fun AddNoteScreen(
                             errorMessage = null,
                             hasAttempted = false,
                             awaitingCompletion = true,
+                            lastFetchedUrl = null,
                         )
                     }
                 }
@@ -840,6 +848,7 @@ fun AddNoteScreen(
                                             isLoading = false,
                                             errorMessage = null,
                                             hasAttempted = true,
+                                            lastFetchedUrl = result.preview.url,
                                         )
                                     }
                                     is LinkPreviewResult.Failure -> {
@@ -847,6 +856,7 @@ fun AddNoteScreen(
                                             isLoading = false,
                                             errorMessage = result.message ?: "Unable to load preview",
                                             hasAttempted = true,
+                                            lastFetchedUrl = previewBlock.preview.url,
                                         )
                                     }
                                 }
@@ -957,6 +967,7 @@ private sealed class NoteBlock {
         val errorMessage: String? = null,
         val hasAttempted: Boolean = false,
         val awaitingCompletion: Boolean = false,
+        val lastFetchedUrl: String? = null,
         override val id: Long = nextNoteBlockId(),
     ) : NoteBlock()
 }
