@@ -3,6 +3,7 @@ package com.example.starbucknotetaker
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.graphics.drawable.ColorDrawable
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -27,9 +28,13 @@ class BiometricUnlockActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         Log.d(BIOMETRIC_LOG_TAG, "*** BiometricUnlockActivity: onCreate called ***")
-        
+
+        val brandColor = ContextCompat.getColor(this, R.color.fab_color)
+        window.setBackgroundDrawable(ColorDrawable(brandColor))
+        window.statusBarColor = brandColor
+
         val noteId = intent.getLongExtra(EXTRA_NOTE_ID, -1L)
         val noteTitle = intent.getStringExtra(EXTRA_NOTE_TITLE) ?: "Note"
         
