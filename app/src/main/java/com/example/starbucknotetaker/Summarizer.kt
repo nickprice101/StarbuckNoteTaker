@@ -176,7 +176,7 @@ class Summarizer(
         try {
             emitDebug("summarizing text of length ${text.length}")
             var classifierLabel: NoteNatureLabel? = null
-            var classifierSummary: String? = null
+            var classifierSummaryHint: String? = null
             var fallbackLabelLogged = false
             val classifierInstance = ensureClassifier()
             if (classifierInstance != null) {
@@ -188,7 +188,7 @@ class Summarizer(
                     )
                     if (label.humanReadable.isNotBlank()) {
                         val trimmed = trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
-                        classifierSummary = trimmed
+                        classifierSummaryHint = trimmed
                         emitDebug("classifier summary output: $trimmed")
                         if (label.confidence > 0.0) {
                             _state.emit(SummarizerState.Ready)
@@ -214,8 +214,9 @@ class Summarizer(
                     classifierLabel = it
                     fallbackLabelLogged = true
                 }
-                val summary = classifierSummary ?: trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
-                    .also { classifierSummary = it }
+                val summary = classifierSummaryHint
+                    ?: trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+                        .also { classifierSummaryHint = it }
                 return label to summary
             }
 
@@ -252,9 +253,9 @@ class Summarizer(
                 return@withContext fallback("models unavailable")
             }
 
-            val (_, classifierSummary) = ensureClassifierDetails()
-            val promptPrefix = if (classifierSummary.isNotBlank()) {
-                "summarize the note type and structure: $classifierSummary\n\nNote: "
+            val (_, classifierSummaryHintValue) = ensureClassifierDetails()
+            val promptPrefix = if (classifierSummaryHintValue.isNotBlank()) {
+                "summarize the note type and structure: $classifierSummaryHintValue\n\nNote: "
             } else {
                 "summarize the note type and structure.\n\nNote: "
             }
