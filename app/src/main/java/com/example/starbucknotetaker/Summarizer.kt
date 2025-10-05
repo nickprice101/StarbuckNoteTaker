@@ -53,6 +53,13 @@ class Summarizer(
     private val debugTrace = ThreadLocal<MutableList<String>?>()
     private val lastDebugTrace = AtomicReference<List<String>>(emptyList())
 
+    private enum class SummaryMode {
+        Generative,
+        FallbackExtractive,
+        FallbackClassifier,
+        QuickFallback,
+    }
+
     private fun emitDebug(message: String) {
         debugTrace.get()?.add(message)
         debugSink(message)
@@ -222,10 +229,23 @@ class Summarizer(
                 logger(reason, throwable ?: IllegalStateException(reason))
                 _state.emit(SummarizerState.Fallback)
                 val extractiveFallback = extractFallbackSummary(text)
-                if (extractiveFallback.isNotBlank()) {
-                    return extractiveFallback
+                val summaryText = if (extractiveFallback.isNotBlank()) {
+                    extractiveFallback
+                } else {
+                    classifierFallbackSummary
                 }
-                return classifierFallbackSummary
+                return finalizeSummary(
+                    originalText = text,
+                    label = label,
+                    highlightCandidate = summaryText,
+                    contextHint = classifierFallbackSummary,
+                    keywords = null,
+                    mode = if (extractiveFallback.isNotBlank()) {
+                        SummaryMode.FallbackExtractive
+                    } else {
+                        SummaryMode.FallbackClassifier
+                    }
+                )
             }
 
             if (enc == null || dec == null || tok == null) {
@@ -461,7 +481,15 @@ class Summarizer(
                 }
             }
             emitDebug("summarizer inference complete")
-            return@withContext cleaned
+            val (label, classifierPrompt) = ensureClassifierDetails()
+            return@withContext finalizeSummary(
+                originalText = text,
+                label = label,
+                highlightCandidate = cleaned,
+                contextHint = classifierPrompt,
+                keywords = sourceKeywords,
+                mode = SummaryMode.Generative
+            )
         } finally {
             debugTrace.set(null)
             lastDebugTrace.set(trace.toList())
@@ -471,9 +499,24 @@ class Summarizer(
     fun quickFallbackSummary(text: String): String {
         val extractive = extractFallbackSummary(text)
         if (extractive.isNotBlank()) {
-            return extractive
+            return finalizeSummary(
+                originalText = text,
+                label = NoteNatureLabel(NoteNatureType.GENERAL_NOTE, "", 0.0),
+                highlightCandidate = extractive,
+                contextHint = "",
+                keywords = null,
+                mode = SummaryMode.QuickFallback
+            )
         }
-        return lightweightPreview(text)
+        val preview = lightweightPreview(text)
+        return finalizeSummary(
+            originalText = text,
+            label = NoteNatureLabel(NoteNatureType.GENERAL_NOTE, "", 0.0),
+            highlightCandidate = preview,
+            contextHint = "",
+            keywords = null,
+            mode = SummaryMode.QuickFallback
+        )
     }
 
     suspend fun fallbackSummary(text: String): String = fallbackSummary(text, null)
@@ -481,12 +524,279 @@ class Summarizer(
     suspend fun fallbackSummary(text: String, event: NoteEvent?): String =
         withContext(Dispatchers.Default) {
             val extractive = extractFallbackSummary(text)
-            if (extractive.isNotBlank()) {
-                return@withContext extractive
-            }
             val label = classifyFallbackLabel(text, event)
-            trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+            val summaryText = if (extractive.isNotBlank()) {
+                extractive
+            } else {
+                trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT)
+            }
+            finalizeSummary(
+                originalText = text,
+                label = label,
+                highlightCandidate = summaryText,
+                contextHint = trimToWordLimit(label.humanReadable, CLASSIFIER_WORD_LIMIT),
+                keywords = null,
+                mode = if (extractive.isNotBlank()) {
+                    SummaryMode.FallbackExtractive
+                } else {
+                    SummaryMode.FallbackClassifier
+                }
+            )
         }
+
+    private fun finalizeSummary(
+        originalText: String,
+        label: NoteNatureLabel,
+        highlightCandidate: String?,
+        contextHint: String?,
+        keywords: KeywordStats?,
+        mode: SummaryMode,
+    ): String {
+        val trimmedOriginal = originalText.trim()
+        if (trimmedOriginal.isEmpty()) {
+            emitDebug("note summary output (${mode.name.lowercase(Locale.US)}): <empty>")
+            return ""
+        }
+        if (label.type == NoteNatureType.GENERAL_NOTE) {
+            val preview = ensureTwoLinePreview(originalText)
+            emitDebug("note summary fallback (${mode.name.lowercase(Locale.US)}): $preview")
+            return preview
+        }
+        val contentType = contentTypeLabel(label.type)
+        if (contentType.isNullOrBlank()) {
+            val preview = ensureTwoLinePreview(originalText)
+            emitDebug("note summary fallback (${mode.name.lowercase(Locale.US)}): $preview")
+            return preview
+        }
+
+        val title = extractNoteTitle(originalText)
+        val keywordStats = keywords ?: buildKeywordStats(originalText)
+        val listCount = countListEntries(originalText)
+        val sentenceCount = estimateSentenceCount(originalText)
+        val paragraphCount = countParagraphs(originalText)
+        val context = deriveContextPhrase(
+            contextHint = contextHint,
+            contentType = contentType,
+            listCount = listCount,
+            sentenceCount = sentenceCount,
+            paragraphCount = paragraphCount,
+            title = title
+        )
+        val highlight = deriveHighlightPhrase(
+            highlightCandidate = highlightCandidate,
+            keywords = keywordStats,
+            title = title,
+            originalText = originalText
+        )
+
+        val parts = mutableListOf<String>()
+        parts += contentType
+        if (context.isNotBlank()) parts += context
+        if (highlight.isNotBlank()) parts += highlight
+
+        val combined = parts.joinToString(separator = " ")
+        val normalized = enforceTwoLineLimit(combined)
+
+        if (highlight.isBlank()) {
+            val simplified = enforceTwoLineLimit("$contentType ${if (context.isNotBlank()) context else "overview"}")
+            emitDebug("note summary output (${mode.name.lowercase(Locale.US)}): $simplified")
+            return simplified
+        }
+
+        emitDebug("note summary output (${mode.name.lowercase(Locale.US)}): $normalized")
+        return normalized
+    }
+
+    private fun ensureTwoLinePreview(text: String): String {
+        val extractive = extractFallbackSummary(text)
+        if (extractive.isNotBlank()) {
+            return enforceTwoLineLimit(extractive)
+        }
+        val preview = lightweightPreview(text)
+        return enforceTwoLineLimit(preview)
+    }
+
+    private fun contentTypeLabel(type: NoteNatureType): String? {
+        return when (type) {
+            NoteNatureType.PERSONAL_DAILY_LIFE -> "Personal note"
+            NoteNatureType.FINANCE_LEGAL -> "Finance note"
+            NoteNatureType.SELF_IMPROVEMENT -> "Self-improvement tracker"
+            NoteNatureType.HEALTH_WELLNESS -> "Health log"
+            NoteNatureType.EDUCATION_LEARNING -> "Education notes"
+            NoteNatureType.HOME_FAMILY -> "Home & family plan"
+            NoteNatureType.MEETING_RECAP -> "Meeting recap"
+            NoteNatureType.SHOPPING_LIST -> "Checklist"
+            NoteNatureType.REMINDER -> "Reminder"
+            NoteNatureType.JOURNAL_ENTRY -> "Journal entry"
+            NoteNatureType.TRAVEL_PLAN -> "Travel plan"
+            NoteNatureType.PROJECT_MANAGEMENT -> "Project plan"
+            NoteNatureType.EVENT_PLANNING -> "Event plan"
+            NoteNatureType.FOOD_RECIPE -> "Recipe"
+            NoteNatureType.CREATIVE_WRITING -> "Creative writing"
+            NoteNatureType.TECHNICAL_REFERENCE -> "Technical reference"
+            NoteNatureType.COUNTRY_LIST -> "Country list"
+            NoteNatureType.NEWS_REPORT -> "News report"
+            NoteNatureType.GENERAL_NOTE -> null
+        }
+    }
+
+    private fun deriveContextPhrase(
+        contextHint: String?,
+        contentType: String,
+        listCount: Int,
+        sentenceCount: Int,
+        paragraphCount: Int,
+        title: String?,
+    ): String {
+        val hint = sanitizeContextHint(contextHint, contentType)
+        if (hint.isNotBlank()) {
+            return hint
+        }
+        if (listCount > 0) {
+            return "listing $listCount ${pluralize("entry", listCount)}"
+        }
+        if (paragraphCount > 1) {
+            return "covering $paragraphCount ${pluralize("section", paragraphCount)}"
+        }
+        if (sentenceCount > 1) {
+            return "covering $sentenceCount ${pluralize("point", sentenceCount)}"
+        }
+        if (!title.isNullOrBlank()) {
+            return "focused on ${title.trim()}"
+        }
+        return "overview"
+    }
+
+    private fun sanitizeContextHint(hint: String?, contentType: String): String {
+        if (hint.isNullOrBlank()) return ""
+        var candidate = hint.trim()
+        if (candidate.isEmpty()) return ""
+        val lowerType = contentType.lowercase(Locale.US)
+        val lowerCandidate = candidate.lowercase(Locale.US)
+        if (lowerCandidate.startsWith(lowerType)) {
+            candidate = candidate.substring(contentType.length).trimStart { it == ':' || it == '-' || it.isWhitespace() }
+        }
+        candidate = candidate.trimEnd('.', ';')
+        candidate = trimToWordLimit(candidate, 16)
+        return candidate
+    }
+
+    private fun deriveHighlightPhrase(
+        highlightCandidate: String?,
+        keywords: KeywordStats,
+        title: String?,
+        originalText: String,
+    ): String {
+        val candidate = sanitizeHighlightCandidate(highlightCandidate)
+        if (candidate.isNotBlank()) {
+            return formatHighlightFromText(candidate)
+        }
+        val titleCandidate = sanitizeHighlightCandidate(title)
+        if (titleCandidate.isNotBlank()) {
+            return formatHighlightFromText(titleCandidate)
+        }
+        val keywordExamples = keywords.topKeywords(3)
+        if (keywordExamples.isNotEmpty()) {
+            val formatted = formatExampleList(keywordExamples)
+            if (formatted.isNotBlank()) {
+                return formatted
+            }
+        }
+        val firstLine = originalText.lineSequence().firstOrNull { it.trim().isNotEmpty() }
+        val fallback = sanitizeHighlightCandidate(firstLine)
+        if (fallback.isNotBlank()) {
+            return formatHighlightFromText(fallback)
+        }
+        return ""
+    }
+
+    private fun sanitizeHighlightCandidate(value: String?): String {
+        if (value.isNullOrBlank()) return ""
+        val firstLine = value.lineSequence().firstOrNull { it.trim().isNotEmpty() }?.trim() ?: return ""
+        val normalized = firstLine.replace("\s+".toRegex(), " ")
+        return trimToWordLimit(normalized.trimEnd('.', ';', ':'), 16)
+    }
+
+    private fun formatHighlightFromText(text: String): String {
+        if (text.isBlank()) return ""
+        val normalized = text.trim()
+        return "including ${normalized}"
+    }
+
+    private fun formatExampleList(words: List<String>): String {
+        val cleaned = words.map { it.trim() }.filter { it.isNotEmpty() }
+        if (cleaned.isEmpty()) return ""
+        val normalized = cleaned.map { it.lowercase(Locale.US) }
+        val phrase = when (normalized.size) {
+            1 -> normalized[0]
+            2 -> "${normalized[0]} and ${normalized[1]}"
+            else -> "${normalized[0]}, ${normalized[1]}, and ${normalized[2]}"
+        }
+        return "including $phrase"
+    }
+
+    private fun countListEntries(text: String): Int {
+        var count = 0
+        for (line in text.lineSequence()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+            if (LIST_MARKERS.any { trimmed.startsWith(it) }) {
+                count++
+            } else if (NUMBERED_LIST_REGEX.matches(trimmed)) {
+                count++
+            } else if (CHECKBOX_REGEX.matches(trimmed)) {
+                count++
+            }
+        }
+        return count
+    }
+
+    private fun estimateSentenceCount(text: String): Int {
+        val sentences = text.split(SENTENCE_SPLIT_REGEX)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        return sentences.size
+    }
+
+    private fun countParagraphs(text: String): Int {
+        val paragraphs = PARAGRAPH_SPLIT_REGEX.split(text)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        return paragraphs.size
+    }
+
+    private fun extractNoteTitle(text: String): String? {
+        for (line in text.lineSequence()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+            if (trimmed.startsWith("Title:", ignoreCase = true)) {
+                val title = trimmed.substringAfter(':').trim()
+                if (title.isNotEmpty()) return title
+                continue
+            }
+            if (!NUMBERED_LIST_REGEX.matches(trimmed) && !CHECKBOX_REGEX.matches(trimmed) &&
+                LIST_MARKERS.none { trimmed.startsWith(it) }
+            ) {
+                return trimmed
+            }
+        }
+        return null
+    }
+
+    private fun enforceTwoLineLimit(text: String): String {
+        if (text.isBlank()) return text.trim()
+        return text.replace("\s+".toRegex(), " ").trim()
+    }
+
+    private fun pluralize(noun: String, count: Int): String {
+        return if (count == 1) noun else noun + "s"
+    }
+
+    private val LIST_MARKERS = listOf("- ", "* ", "• ", "· ")
+    private val NUMBERED_LIST_REGEX = Regex("^\\d+[).]\\s+.*")
+    private val CHECKBOX_REGEX = Regex("^\\[\\s*[xX]?]\\s+.*")
+    private val SENTENCE_SPLIT_REGEX = Regex("[.!?]+\\s+")
+    private val PARAGRAPH_SPLIT_REGEX = Regex("(\\r?\\n){2,}")
 
     private fun extractFallbackSummary(text: String): String {
         if (text.isBlank()) return ""
@@ -977,6 +1287,20 @@ class Summarizer(
         fun isEmpty(): Boolean = counts.isEmpty()
 
         fun uniqueCount(): Int = counts.size
+
+        fun topKeywords(limit: Int, minLength: Int = 3): List<String> {
+            if (limit <= 0 || counts.isEmpty()) return emptyList()
+            return counts.entries
+                .asSequence()
+                .filter { it.value > 0 && it.key.length >= minLength }
+                .sortedWith(
+                    compareByDescending<Map.Entry<String, Int>> { it.value }
+                        .thenBy { it.key }
+                )
+                .map { it.key }
+                .take(limit)
+                .toList()
+        }
 
         companion object {
             val EMPTY = KeywordStats(emptyMap())
