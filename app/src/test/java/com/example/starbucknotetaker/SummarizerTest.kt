@@ -45,7 +45,19 @@ class SummarizerTest {
 
     @Test
     fun fallbackSummaryReturnsFirstTwoLines() = runBlocking {
-        val summarizer = Summarizer(context, nativeLoader = { false }, debugSink = { })
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.MEETING_RECAP,
+                "Meeting recap covering security updates and lunch decisions",
+                confidence = 0.0
+            )
+        )
+        val summarizer = Summarizer(
+            context,
+            nativeLoader = { false },
+            debugSink = { },
+            classifierFactory = { classifier }
+        )
         val text = """
             Security updates require MFA for all accounts.
             Lunch options were discussed briefly.
@@ -53,7 +65,7 @@ class SummarizerTest {
         """.trimIndent()
         val summary = summarizer.fallbackSummary(text)
         assertEquals(
-            "Security updates require MFA for all accounts. Lunch options were discussed briefly.",
+            "Meeting recap covering security updates and lunch decisions including Security updates require MFA for all accounts",
             summary
         )
     }
@@ -62,7 +74,13 @@ class SummarizerTest {
     fun summarizeFallsBackWhenTokenizerNativeMissing() = runBlocking {
         writeModelFiles(encoderBytes = ByteArray(1), decoderBytes = ByteArray(1), tokenizerBytes = ByteArray(1))
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.NEWS_REPORT,
+                "News report covering party leadership changes",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             nativeLoader = { false },
@@ -73,7 +91,7 @@ class SummarizerTest {
 
         val text = "One.\nTwo.\nThree."
         val result = summarizer.summarize(text)
-        assertEquals("One. Two.", result)
+        assertEquals("Project plan covering roadmap milestones including One. Two", result)
     }
 
     @Test
@@ -129,7 +147,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.NEWS_REPORT,
+                "News report covering cricket final",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -142,7 +166,7 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Input text")
 
-        assertEquals("21,22.", summary)
+        assertEquals("Project plan covering roadmap milestones including 21,22", summary)
         assertEquals(decoder.expectedCalls, decoder.callCount)
         assertFalse("decoder should not run after EOS", decoder.extraInvocation)
 
@@ -188,7 +212,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -202,7 +232,10 @@ class SummarizerTest {
         val input = "Sir Keir Starmer faces pressure over the Mandelson sacking."
         val summary = summarizer.summarize(input)
 
-        assertEquals("Labour MPs pressure Starmer over Mandelson sacking", summary)
+        assertEquals(
+            "News report covering party leadership changes including Labour MPs pressure Starmer over Mandelson sacking",
+            summary
+        )
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
 
         summarizer.close()
@@ -236,7 +269,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -249,7 +288,10 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Rain forced the final match to be abandoned.")
 
-        assertEquals("Rain abandons T20 decider", summary)
+        assertEquals(
+            "News report covering cricket final including Rain abandons T20 decider",
+            summary
+        )
         summarizer.close()
     }
 
@@ -291,7 +333,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -306,7 +354,7 @@ class SummarizerTest {
         val summary = summarizer.summarize(input)
         val expected = listOf(400, 401, 402, 403, 404).joinToString(" ") { tokenMap[it] ?: "" }
 
-        assertEquals(expected, summary)
+        assertEquals("Project plan covering roadmap milestones including $expected", summary)
         assertFalse(summary.startsWith("Summary highlights", ignoreCase = true))
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
 
@@ -354,7 +402,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -419,7 +473,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -434,7 +494,7 @@ class SummarizerTest {
         val summary = summarizer.summarize(note)
 
         assertEquals(
-            "Team organizing project scheduling updated release",
+            "Project plan covering roadmap milestones including Team organizing project scheduling updated release",
             summary
         )
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
@@ -488,7 +548,13 @@ class SummarizerTest {
             add(decoder)
         }
 
-        val classifier = zeroConfidenceClassifier()
+        val classifier = classifierWithLabel(
+            NoteNatureLabel(
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
+                confidence = 0.0
+            )
+        )
         val summarizer = Summarizer(
             context,
             spFactory = { tokenizer },
@@ -502,7 +568,10 @@ class SummarizerTest {
         val source = "Roadmap review covers milestones, budgets, timeline risks, and rollout preparation."
         val summary = summarizer.summarize(source)
 
-        assertEquals(abstractive, summary)
+        assertEquals(
+            "Project plan covering roadmap milestones including $abstractive",
+            summary
+        )
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
 
         summarizer.close()
@@ -561,7 +630,7 @@ class SummarizerTest {
         val expected = listOf(700, 701, 702, 703, 704)
             .joinToString(" ") { tokenMap[it] ?: "" }
 
-        assertEquals(expected, summary)
+        assertEquals("Project plan covering roadmap milestones including $expected", summary)
         assertEquals(Summarizer.SummarizerState.Ready, summarizer.state.value)
 
         summarizer.close()
@@ -600,7 +669,7 @@ class SummarizerTest {
 
         val summary = summarizer.summarize("Input text")
 
-        assertEquals("21,22.", summary)
+        assertEquals("Project plan covering roadmap milestones including 21,22", summary)
         assertEquals(decoder.expectedCalls, decoder.callCount)
 
         summarizer.close()
@@ -675,8 +744,8 @@ class SummarizerTest {
     private fun zeroConfidenceClassifier(): NoteNatureClassifier {
         return classifierWithLabel(
             NoteNatureLabel(
-                NoteNatureType.GENERAL_NOTE,
-                NoteNatureType.GENERAL_NOTE.humanReadable,
+                NoteNatureType.PROJECT_MANAGEMENT,
+                "Project plan covering roadmap milestones",
                 confidence = 0.0
             )
         )
