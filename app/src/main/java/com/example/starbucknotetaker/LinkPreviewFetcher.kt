@@ -1,6 +1,7 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import android.net.Uri
 import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -261,7 +262,7 @@ fun extractUrls(text: String, treatUnterminatedAsComplete: Boolean = false): Lis
             val nextChar = text.getOrNull(nextIndex)
             val isComplete = when {
                 trimmedTrailing -> true
-                nextChar == null -> treatUnterminatedAsComplete
+                nextChar == null -> treatUnterminatedAsComplete || looksCompleteUrl(trimmed)
                 nextChar.isWhitespace() -> true
                 else -> false
             }
@@ -301,4 +302,22 @@ private fun trimTrailingSentencePunctuation(url: String): String {
 
 private fun String.cleanWhitespace(): String {
     return trim().replace(Regex("\\s+"), " ")
+}
+
+private fun looksCompleteUrl(url: String): Boolean {
+    val normalized = normalizeUrl(url)
+    val uri = runCatching { Uri.parse(normalized) }.getOrNull() ?: return false
+    val host = uri.host ?: return false
+    if (host.isBlank()) return false
+    if (host.equals("localhost", ignoreCase = true)) return true
+    if (host.contains('.')) return true
+    if (android.util.Patterns.IP_ADDRESS.matcher(host).matches()) return true
+    if (uri.port != -1) return true
+    val path = uri.path
+    if (!path.isNullOrBlank() && path != "/") return true
+    val query = uri.query
+    if (!query.isNullOrBlank()) return true
+    val fragment = uri.fragment
+    if (!fragment.isNullOrBlank()) return true
+    return false
 }
