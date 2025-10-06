@@ -36,11 +36,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.Stroke
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawPath
-import androidx.compose.ui.input.pointer.awaitEachGesture
-import androidx.compose.ui.input.pointer.awaitFirstDown
-import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -82,29 +80,35 @@ fun SketchPadDialog(
                             .fillMaxWidth()
                             .height(300.dp)
                             .pointerInput(Unit) {
-                                awaitEachGesture {
-                                    val stroke = mutableListOf<Offset>()
-                                    val down = awaitFirstDown()
-                                    stroke.add(down.position)
-                                    activeStroke = stroke.toList()
-                                    down.consume()
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull() ?: break
-                                        if (change.pressed) {
-                                            stroke.add(change.position)
-                                            activeStroke = stroke.toList()
-                                            change.consume()
-                                        } else {
-                                            change.consume()
-                                            break
+                                var currentStroke: MutableList<Offset>? = null
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        val stroke = mutableListOf(offset)
+                                        activeStroke = stroke.toList()
+                                        currentStroke = stroke
+                                    },
+                                    onDragEnd = {
+                                        currentStroke?.let { stroke ->
+                                            if (stroke.isNotEmpty()) {
+                                                strokes.add(stroke.toList())
+                                            }
                                         }
+                                        currentStroke = null
+                                        activeStroke = emptyList()
+                                    },
+                                    onDragCancel = {
+                                        currentStroke = null
+                                        activeStroke = emptyList()
+                                    },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        val stroke = currentStroke ?: mutableListOf<Offset>().also {
+                                            currentStroke = it
+                                        }
+                                        stroke.add(change.position)
+                                        activeStroke = stroke.toList()
                                     }
-                                    if (stroke.isNotEmpty()) {
-                                        strokes.add(stroke.toList())
-                                    }
-                                    activeStroke = emptyList()
-                                }
+                                )
                             }
                     ) {
                         canvasSize = IntSize(size.width.roundToInt(), size.height.roundToInt())
