@@ -569,8 +569,8 @@ private fun buildShareIntent(
         }
         type = when {
             attachments.isEmpty() -> "text/plain"
-            multiple -> "*/*"
-            else -> attachments.first().mimeType
+            multiple -> resolveShareMimeType(attachments)
+            else -> attachments.first().mimeType.ifBlank { "*/*" }
         }
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
@@ -592,6 +592,29 @@ private fun buildShareIntent(
         intent.clipData = clipData
     }
     return intent
+}
+
+private fun resolveShareMimeType(attachments: List<PreparedAttachment>): String {
+    if (attachments.isEmpty()) {
+        return "text/plain"
+    }
+    val mimeTypes = attachments.map { attachment ->
+        attachment.mimeType.takeIf { it.isNotBlank() } ?: "*/*"
+    }
+    if (mimeTypes.all { it == "*/*" }) {
+        return "*/*"
+    }
+    if (mimeTypes.toSet().size == 1) {
+        return mimeTypes.first()
+    }
+    val primaryTypes = mimeTypes.mapNotNull { type ->
+        type.substringBefore('/', missingDelimiterValue = "").takeIf { it.isNotBlank() }
+    }.toSet()
+    return if (primaryTypes.size == 1) {
+        "${primaryTypes.first()}/*"
+    } else {
+        "*/*"
+    }
 }
 
 private fun buildShareText(
