@@ -36,7 +36,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -98,7 +97,6 @@ fun SketchPadDialog(
                                         activeStroke = emptyList()
                                     },
                                     onDrag = { change, _ ->
-                                        change.consume()
                                         val stroke = currentStroke ?: mutableListOf<Offset>().also {
                                             currentStroke = it
                                         }
