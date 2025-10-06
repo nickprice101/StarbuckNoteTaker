@@ -431,12 +431,11 @@ private fun formatEventRange(event: NoteEvent): String {
     val zoneCode = formatZoneCode(zoneId, Locale.getDefault(), start.toInstant())
     return if (event.allDay) {
         val startDate = start.toLocalDate()
-        val endDateExclusive = end.toLocalDate()
-        val lastDate = endDateExclusive.minusDays(1)
-        if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
+        val endDateInclusive = end.toLocalDate()
+        if (endDateInclusive.isBefore(startDate) || endDateInclusive.isEqual(startDate)) {
             "All-day • $zoneCode"
         } else {
-            "All-day • Ends ${eventDayFormatter.format(lastDate)} • $zoneCode"
+            "All-day • Ends ${eventDayFormatter.format(endDateInclusive)} • $zoneCode"
         }
     } else {
         val sameDay = start.toLocalDate() == end.toLocalDate()

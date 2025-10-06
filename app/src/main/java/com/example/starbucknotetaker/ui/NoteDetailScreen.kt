@@ -664,13 +664,12 @@ private fun buildEventSummary(
         appendLine("Event details:")
         if (event.allDay) {
             val startDate = start.toLocalDate()
-            val endDateExclusive = end.toLocalDate()
-            val lastDate = endDateExclusive.minusDays(1)
-            if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
+            val endDateInclusive = end.toLocalDate()
+            if (endDateInclusive.isBefore(startDate) || endDateInclusive.isEqual(startDate)) {
                 appendLine("All-day on ${detailDateFormatter.format(start)} ($zoneCode)")
             } else {
                 appendLine(
-                    "All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(lastDate)} ($zoneCode)"
+                    "All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(endDateInclusive)} ($zoneCode)"
                 )
             }
         } else {
@@ -769,13 +768,12 @@ private fun EventDetailsCard(
             Spacer(modifier = Modifier.height(8.dp))
             if (event.allDay) {
                 val startDate = start.toLocalDate()
-                val endDateExclusive = end.toLocalDate()
-                val lastDate = endDateExclusive.minusDays(1)
-                if (lastDate.isBefore(startDate) || lastDate.isEqual(startDate)) {
+                val endDateInclusive = end.toLocalDate()
+                if (endDateInclusive.isBefore(startDate) || endDateInclusive.isEqual(startDate)) {
                     Text("All-day on ${detailDateFormatter.format(start)} ($zoneCode)")
                 } else {
                     Text(
-                        "All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(lastDate)} ($zoneCode)"
+                        "All-day from ${detailDateFormatter.format(start)} to ${detailDateFormatter.format(endDateInclusive)} ($zoneCode)"
                     )
                 }
             } else {
