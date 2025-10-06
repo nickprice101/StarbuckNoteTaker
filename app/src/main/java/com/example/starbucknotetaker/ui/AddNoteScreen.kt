@@ -5,6 +5,7 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
@@ -25,12 +26,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +41,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import android.util.Base64
 import coil.compose.rememberAsyncImagePainter
 import com.example.starbucknotetaker.LinkPreviewFetcher
 import com.example.starbucknotetaker.LinkPreviewResult
@@ -52,6 +56,7 @@ import com.example.starbucknotetaker.extractUrls
 import com.example.starbucknotetaker.PendingShare
 import com.example.starbucknotetaker.R
 import androidx.core.content.ContextCompat
+import com.example.starbucknotetaker.NewNoteImage
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextDocumentBuilder
 import java.time.Instant
@@ -63,7 +68,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 fun AddNoteScreen(
-    onSave: (String?, String, RichTextDocument, List<Pair<Uri, Int>>, List<Uri>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
+    onSave: (String?, String, RichTextDocument, List<NewNoteImage>, List<Uri>, List<NoteLinkPreview>, NoteEvent?) -> Unit,
     onBack: () -> Unit,
     onDisablePinCheck: () -> Unit,
     onEnablePinCheck: () -> Unit,
@@ -79,7 +84,7 @@ fun AddNoteScreen(
             initialBlocks.add(NoteBlock.Text(RichTextValue.fromPlainText(text)))
         }
         prefill?.images.orEmpty().forEach { uri ->
-            initialBlocks.add(NoteBlock.Image(uri, 0))
+            initialBlocks.add(NoteBlock.Image(uri = uri, rotation = 0))
         }
         prefill?.files.orEmpty().forEach { uri ->
             initialBlocks.add(NoteBlock.File(uri))
@@ -311,10 +316,10 @@ fun AddNoteScreen(
             }
             val last = blocks.lastOrNull()
             if (last is NoteBlock.Text && last.value.text.isBlank()) {
-                blocks[blocks.size - 1] = NoteBlock.Image(it, 0)
+                blocks[blocks.size - 1] = NoteBlock.Image(uri = it, rotation = 0)
                 blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             } else {
-                blocks.add(NoteBlock.Image(it, 0))
+                blocks.add(NoteBlock.Image(uri = it, rotation = 0))
                 blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             }
         }
@@ -359,6 +364,7 @@ fun AddNoteScreen(
     }
 
     var showTranscriptionDialog by remember { mutableStateOf(false) }
+    var showSketchPad by remember { mutableStateOf(false) }
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -411,7 +417,7 @@ fun AddNoteScreen(
                             }
                             idx++
                         }
-                        val imageList = mutableListOf<Pair<Uri, Int>>()
+                        val imageList = mutableListOf<NewNoteImage>()
                         val fileList = mutableListOf<Uri>()
                         val linkPreviewList = mutableListOf<NoteLinkPreview>()
                         val contentBuilder = StringBuilder()
@@ -430,7 +436,13 @@ fun AddNoteScreen(
                                     contentBuilder.append("[[image:")
                                     contentBuilder.append(imageList.size)
                                     contentBuilder.append("]]\n")
-                                    imageList.add(block.uri to block.rotation)
+                                    imageList.add(
+                                        NewNoteImage(
+                                            uri = block.uri,
+                                            rotation = block.rotation,
+                                            data = block.data?.takeIf { it.isNotBlank() },
+                                        )
+                                    )
                                 }
                                 is NoteBlock.File -> {
                                     styledBuilder.appendPlain("[[file:${fileList.size}]]\n")
@@ -786,19 +798,40 @@ fun AddNoteScreen(
                         }
                     }
                     is NoteBlock.Image -> {
+                        val imageBitmap = remember(block.data) {
+                            block.data?.takeIf { it.isNotBlank() }?.let { data ->
+                                runCatching {
+                                    val bytes = Base64.decode(data, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                }.getOrNull()
+                            }
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(200.dp)
                                 .padding(vertical = 8.dp)
                         ) {
-                            Image(
-                                painter = rememberAsyncImagePainter(block.uri),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer(rotationZ = block.rotation.toFloat())
-                            )
+                            when {
+                                imageBitmap != null -> {
+                                    Image(
+                                        bitmap = imageBitmap,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .graphicsLayer(rotationZ = block.rotation.toFloat())
+                                    )
+                                }
+                                block.uri != null -> {
+                                    Image(
+                                        painter = rememberAsyncImagePainter(block.uri),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .graphicsLayer(rotationZ = block.rotation.toFloat())
+                                    )
+                                }
+                            }
                             IconButton(
                                 onClick = {
                                     blocks[index] = block.copy(rotation = (block.rotation + 270) % 360)
@@ -912,6 +945,13 @@ fun AddNoteScreen(
                         )
                     }
                     AttachmentAction(
+                        icon = Icons.Default.Edit,
+                        label = "Sketch",
+                    ) {
+                        onDisablePinCheck()
+                        showSketchPad = true
+                    }
+                    AttachmentAction(
                         icon = Icons.Default.Mic,
                         label = "Transcribe",
                     ) {
@@ -940,6 +980,28 @@ fun AddNoteScreen(
         }
     }
 
+    if (showSketchPad) {
+        SketchPadDialog(
+            onDismiss = {
+                showSketchPad = false
+                onEnablePinCheck()
+            },
+            onSave = { bytes ->
+                val encoded = Base64.encodeToString(bytes, Base64.DEFAULT)
+                val last = blocks.lastOrNull()
+                if (last is NoteBlock.Text && last.value.text.isBlank()) {
+                    blocks[blocks.size - 1] = NoteBlock.Image(data = encoded)
+                    blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
+                } else {
+                    blocks.add(NoteBlock.Image(data = encoded))
+                    blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
+                }
+                showSketchPad = false
+                onEnablePinCheck()
+            }
+        )
+    }
+
     if (showTranscriptionDialog) {
         AudioTranscriptionDialog(
             onDismiss = {
@@ -958,7 +1020,12 @@ private sealed class NoteBlock {
     abstract val id: Long
 
     data class Text(val value: RichTextValue, override val id: Long = nextNoteBlockId()) : NoteBlock()
-    data class Image(val uri: Uri, val rotation: Int, override val id: Long = nextNoteBlockId()) : NoteBlock()
+    data class Image(
+        val uri: Uri? = null,
+        val rotation: Int = 0,
+        val data: String? = null,
+        override val id: Long = nextNoteBlockId(),
+    ) : NoteBlock()
     data class File(val uri: Uri, override val id: Long = nextNoteBlockId()) : NoteBlock()
     data class LinkPreview(
         val sourceId: Long,

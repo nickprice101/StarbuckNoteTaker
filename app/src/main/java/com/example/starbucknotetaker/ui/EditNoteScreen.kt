@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
@@ -465,6 +466,7 @@ fun EditNoteScreen(
     }
 
     var showTranscriptionDialog by remember { mutableStateOf(false) }
+    var showSketchPad by remember { mutableStateOf(false) }
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -1109,6 +1111,13 @@ fun EditNoteScreen(
                         )
                     }
                     AttachmentAction(
+                        icon = Icons.Default.Edit,
+                        label = "Sketch",
+                    ) {
+                        onDisablePinCheck()
+                        showSketchPad = true
+                    }
+                    AttachmentAction(
                         icon = Icons.Default.Mic,
                         label = "Transcribe",
                     ) {
@@ -1135,6 +1144,28 @@ fun EditNoteScreen(
                 }
             }
         }
+    }
+
+    if (showSketchPad) {
+        SketchPadDialog(
+            onDismiss = {
+                showSketchPad = false
+                onEnablePinCheck()
+            },
+            onSave = { bytes ->
+                val encoded = Base64.encodeToString(bytes, Base64.DEFAULT)
+                val last = blocks.lastOrNull()
+                if (last is EditBlock.Text && last.value.text.isBlank()) {
+                    blocks[blocks.size - 1] = EditBlock.Image(null, encoded)
+                    blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
+                } else {
+                    blocks.add(EditBlock.Image(null, encoded))
+                    blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
+                }
+                showSketchPad = false
+                onEnablePinCheck()
+            }
+        )
     }
 
     if (showTranscriptionDialog) {
