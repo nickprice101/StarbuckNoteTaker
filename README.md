@@ -1,44 +1,49 @@
 # Starbuck Note Taker
 
-A simple Android note taking application built with Kotlin and Jetpack Compose. The app lets you create notes with optional images and browse them in a searchable list.
+Starbuck Note Taker is an offline-first Android app for capturing rich, encrypted notes with AI assistance. It is built with Kotlin and Jetpack Compose, stores content locally, and runs its summarisation and classification models entirely on-device.
 
-## Features
+## Core features
 
-- Create notes with titles, text content and image attachments
-- Build interactive checklist notes with tappable completion states that stay in sync across the list and detail views
-- Search and browse notes from a list
-- View note details with clickable links and inline images
-- Built entirely with Jetpack Compose and Navigation
+- **Compose-first editing experience.** Create notes with rich text formatting, inline checklists, event metadata, and optional reminders while staying inside a single Compose-powered workflow.
+- **Attachments and link previews.** Add images, upload arbitrary files, and generate cached link previews that stay available offline after the first fetch.
+- **AI summaries and note classification.** Each note can be condensed through an on-device pipeline that classifies the note type and then runs an int8 FLAN-T5 decoder with graceful fallbacks when models are unavailable.
+- **End-to-end encryption.** Notes, attachments, and exported archives are encrypted with a user PIN, with optional biometric unlock for convenience.
+- **Import/export without the cloud.** Users can back up or restore their encrypted notes via `.snarchive` files that continue to require the original PIN when imported.
 
-## Development
+Link previews fetch metadata over HTTPS; all other functionality continues to operate without a network connection.
 
-This repository uses the included Gradle wrapper. Typical commands:
+## Project structure
 
-```bash
-./gradlew build    # compile the application
-./gradlew test     # run unit tests
+```
+app/                  # Android application module (Compose UI, ViewModel, services)
+app/src/main/assets/  # Bundled ML models (not checked into VCS)
+scripts/              # Helper scripts for ML asset validation
+build_tensor.py       # Training and conversion workflow for the summariser
+training_data.py      # Curated training set for note categories and summaries
 ```
 
-## On-device summarization models
+## Getting started
 
-The TensorFlow Lite encoder/decoder models and tokenizer JSON now ship with the
-app under `app/src/main/assets/`. The notebook `build_tensor.ipynb` fine-tunes
-the FLAN-T5 model, converts it to `encoder_int8_dynamic.tflite` and
-`decoder_step_int8_dynamic.tflite`, and copies those files plus `tokenizer.json`
-into the assets directory. At runtime the app copies the bundled assets into
-`context.filesDir/models` before loading them. If the interpreter or tokenizer
-cannot be prepared, the summariser gracefully falls back to the extractive
-strategy.
+1. Install Android Studio Giraffe (or newer) and ensure JDK 17 is available.
+2. Clone the repository and accept Android SDK licenses.
+3. Use the Gradle wrapper for builds and tests:
+   ```bash
+   ./gradlew build    # compile the application
+   ./gradlew test     # run unit tests
+   ```
 
-The large binaries remain untracked by Git. After regenerating the models, run
-the notebook and keep only the metadata/documentation changes in version
-control.
+For a repeatable developer workstation, `setup_persist.sh` can install the Android SDK, Gradle, and verify that required native libraries and assets are present.
 
-## Requirements
+## On-device ML assets
 
-- Android Studio Giraffe (or newer)
-- JDK 17
+The summariser service expects three TensorFlow Lite files (`encoder_int8_dynamic.tflite`, `decoder_step_int8_dynamic.tflite`, `tokenizer.json`) plus `note_classifier.tflite` to be present under `app/src/main/assets/`. Large binaries remain untracked; run `scripts/generate_summarizer_assets.py` to check for missing files during setup.
+
+To regenerate the models:
+
+1. Update or extend the labelled examples in `training_data.py`.
+2. Execute `build_tensor.py` to fine-tune FLAN-T5, convert the models to TensorFlow Lite, and write the assets into the project structure.
+3. Copy the resulting `.tflite` files and `tokenizer.json` into `app/src/main/assets/` before building the app.
 
 ## Contributing
 
-Contributions are welcome. Feel free to open issues or submit pull requests.
+Pull requests and bug reports are welcome. Please open an issue to discuss substantial changes before submitting a PR.
