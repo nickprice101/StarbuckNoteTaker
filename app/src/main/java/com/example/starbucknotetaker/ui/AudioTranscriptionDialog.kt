@@ -47,10 +47,12 @@ import com.example.starbucknotetaker.NotificationInterruptionManager
 fun AudioTranscriptionDialog(
     onDismiss: () -> Unit,
     onResult: (String) -> Unit,
+    onRequireAudioPermission: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val currentOnResult by rememberUpdatedState(onResult)
     val currentOnDismiss by rememberUpdatedState(onDismiss)
+    val currentOnRequireAudioPermission by rememberUpdatedState(onRequireAudioPermission)
 
     val speechRecognizer = remember {
         SpeechRecognizer.createSpeechRecognizer(context)
@@ -61,6 +63,7 @@ fun AudioTranscriptionDialog(
     var rms by remember { mutableStateOf(0f) }
     var partialText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showPermissionAction by remember { mutableStateOf(false) }
     var recognitionCandidates by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedCandidate by remember { mutableStateOf<String?>(null) }
 
@@ -94,6 +97,7 @@ fun AudioTranscriptionDialog(
                 partialText = ""
                 recognitionCandidates = emptyList()
                 selectedCandidate = null
+                showPermissionAction = false
             }
 
             override fun onBeginningOfSpeech() {
@@ -115,6 +119,13 @@ fun AudioTranscriptionDialog(
                 awaitingResult = false
                 recognitionCandidates = emptyList()
                 selectedCandidate = null
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    speechRecognizer.cancel()
+                    showPermissionAction = true
+                    currentOnRequireAudioPermission()
+                } else {
+                    showPermissionAction = false
+                }
                 errorMessage = when (error) {
                     SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                     SpeechRecognizer.ERROR_CLIENT -> "Speech recognition client error"
@@ -132,6 +143,7 @@ fun AudioTranscriptionDialog(
             override fun onResults(results: Bundle) {
                 isRecording = false
                 awaitingResult = false
+                showPermissionAction = false
                 val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val candidates = matches
                     ?.mapNotNull { it?.trim() }
@@ -176,6 +188,7 @@ fun AudioTranscriptionDialog(
             isRecording = false
             awaitingResult = false
             errorMessage = null
+            showPermissionAction = false
             recognitionCandidates = emptyList()
             selectedCandidate = null
             currentOnDismiss()
@@ -209,6 +222,7 @@ fun AudioTranscriptionDialog(
                             isRecording = false
                             awaitingResult = false
                             errorMessage = null
+                            showPermissionAction = false
                             recognitionCandidates = emptyList()
                             selectedCandidate = null
                             currentOnDismiss()
@@ -237,11 +251,22 @@ fun AudioTranscriptionDialog(
 
                 errorMessage?.let { message ->
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.body2,
-                        color = MaterialTheme.colors.error
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.error,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (showPermissionAction) {
+                            TextButton(onClick = { currentOnRequireAudioPermission() }) {
+                                Text("Grant access")
+                            }
+                        }
+                    }
                 }
 
                 if (recognitionCandidates.isNotEmpty()) {
@@ -286,6 +311,7 @@ fun AudioTranscriptionDialog(
                                 selectedCandidate = null
                                 partialText = ""
                                 errorMessage = null
+                                showPermissionAction = false
                             }
                         ) {
                             Text("Try again")
@@ -340,10 +366,12 @@ fun AudioTranscriptionDialog(
                                 }
                                 runCatching {
                                     awaitingResult = true
+                                    showPermissionAction = false
                                     speechRecognizer.startListening(intent)
                                 }.onFailure { throwable ->
                                     awaitingResult = false
                                     errorMessage = throwable.message ?: "Unable to start recording"
+                                    showPermissionAction = false
                                 }
                             }
                         },

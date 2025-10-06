@@ -1010,6 +1010,11 @@ fun AddNoteScreen(
             },
             onResult = { result ->
                 appendTranscribedText(result)
+            },
+            onRequireAudioPermission = {
+                showTranscriptionDialog = false
+                onEnablePinCheck()
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         )
     }
