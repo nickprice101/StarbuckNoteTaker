@@ -53,20 +53,23 @@ EOF
 # ----------------------------
 ASSETS_DIR="$PROJECT_DIR/app/src/main/assets"
 REQUIRED_ASSETS=("encoder_int8_dynamic.tflite" "decoder_step_int8_dynamic.tflite" "tokenizer.json")
-MISSING_ASSETS=0
 
+MISSING_ASSETS=()
 for asset in "${REQUIRED_ASSETS[@]}"; do
   if [ ! -f "$ASSETS_DIR/$asset" ]; then
-    MISSING_ASSETS=1
-    break
+    MISSING_ASSETS+=("$asset")
   fi
 done
 
-if [ "$MISSING_ASSETS" -eq 1 ]; then
-  echo "🧩 Required ML assets missing. Generating assets via Python script..."
-  python3 "$PROJECT_DIR/scripts/generate_summarizer_assets.py"
+if [ "${#MISSING_ASSETS[@]}" -gt 0 ]; then
+  echo "⚠️  Missing summarizer assets detected in $ASSETS_DIR:"
+  for asset in "${MISSING_ASSETS[@]}"; do
+    echo "   - $asset"
+  done
+  echo "   The summariser models are generated offline and must be uploaded manually."
+  echo "   Please copy the required files into the assets directory before running ML-dependent features."
 else
-  echo "✅ All ML assets present in $ASSETS_DIR. Skipping asset generation and heavy Python dependency installation."
+  echo "✅ All ML assets present in $ASSETS_DIR."
 fi
 
 # ----------------------------
