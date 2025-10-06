@@ -7,7 +7,6 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -72,8 +70,6 @@ fun AudioTranscriptionDialog(
     var partialText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showPermissionAction by remember { mutableStateOf(false) }
-    var recognitionCandidates by remember { mutableStateOf<List<RecognitionCandidate>>(emptyList()) }
-    var selectedCandidate by remember { mutableStateOf<RecognitionCandidate?>(null) }
 
     val isTranscribing = isRecording || awaitingResult
     if (isTranscribing) {
@@ -103,8 +99,6 @@ fun AudioTranscriptionDialog(
             override fun onReadyForSpeech(params: Bundle?) {
                 errorMessage = null
                 partialText = ""
-                recognitionCandidates = emptyList()
-                selectedCandidate = null
                 showPermissionAction = false
             }
 
@@ -125,8 +119,6 @@ fun AudioTranscriptionDialog(
             override fun onError(error: Int) {
                 isRecording = false
                 awaitingResult = false
-                recognitionCandidates = emptyList()
-                selectedCandidate = null
                 if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                     speechRecognizer.cancel()
                     showPermissionAction = true
@@ -164,14 +156,17 @@ fun AudioTranscriptionDialog(
                         )
                     }
                     .orEmpty()
-                if (candidates.isNotEmpty()) {
-                    recognitionCandidates = candidates
-                    selectedCandidate = candidates.firstOrNull()
+                val bestCandidate = when {
+                    candidates.isEmpty() -> null
+                    candidates.all { it.confidence == null } -> candidates.first()
+                    else -> candidates.maxByOrNull { it.confidence ?: Float.MIN_VALUE }
+                }
+                if (bestCandidate != null) {
                     partialText = ""
                     errorMessage = null
+                    currentOnResult(bestCandidate.text)
+                    currentOnDismiss()
                 } else {
-                    recognitionCandidates = emptyList()
-                    selectedCandidate = null
                     errorMessage = "No speech detected"
                 }
             }
@@ -204,8 +199,6 @@ fun AudioTranscriptionDialog(
             awaitingResult = false
             errorMessage = null
             showPermissionAction = false
-            recognitionCandidates = emptyList()
-            selectedCandidate = null
             currentOnDismiss()
         }
     ) {
@@ -238,8 +231,6 @@ fun AudioTranscriptionDialog(
                             awaitingResult = false
                             errorMessage = null
                             showPermissionAction = false
-                            recognitionCandidates = emptyList()
-                            selectedCandidate = null
                             currentOnDismiss()
                         }
                     ) {
@@ -250,7 +241,6 @@ fun AudioTranscriptionDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 val statusMessage = when {
-                    recognitionCandidates.isNotEmpty() -> "Review the transcription below."
                     partialText.isNotBlank() -> partialText
                     awaitingResult && !isRecording -> "Processing transcription..."
                     isRecording -> "Listening..."
@@ -284,76 +274,6 @@ fun AudioTranscriptionDialog(
                     }
                 }
 
-                if (recognitionCandidates.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Recognized text",
-                        style = MaterialTheme.typography.subtitle1
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val candidateScrollState = rememberScrollState()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 160.dp)
-                            .verticalScroll(candidateScrollState)
-                    ) {
-                        recognitionCandidates.forEach { candidate ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = candidate == selectedCandidate,
-                                    onClick = { selectedCandidate = candidate }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = candidate.text,
-                                        style = MaterialTheme.typography.body1
-                                    )
-                                }
-                                candidate.confidence?.let { confidence ->
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    ConfidenceBadge(confidence = confidence)
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                recognitionCandidates = emptyList()
-                                selectedCandidate = null
-                                partialText = ""
-                                errorMessage = null
-                                showPermissionAction = false
-                            }
-                        ) {
-                            Text("Try again")
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Button(
-                            onClick = {
-                                selectedCandidate?.let { selectedText ->
-                                    currentOnResult(selectedText.text)
-                                    currentOnDismiss()
-                                }
-                            },
-                            enabled = selectedCandidate != null
-                        ) {
-                            Text("Use transcription")
-                        }
-                    }
-                }
-
                 Spacer(modifier = Modifier.weight(1f, fill = true))
 
                 val normalizedLevel = ((rms + 2f) / 10f).coerceIn(0f, 1f)
@@ -369,7 +289,7 @@ fun AudioTranscriptionDialog(
                         modifier = Modifier.width(220.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
-                    val buttonEnabled = isRecording || (!awaitingResult && recognitionCandidates.isEmpty())
+                    val buttonEnabled = isRecording || !awaitingResult
                     IconButton(
                         onClick = {
                             if (isRecording) {
@@ -377,8 +297,6 @@ fun AudioTranscriptionDialog(
                             } else if (!awaitingResult) {
                                 errorMessage = null
                                 partialText = ""
-                                recognitionCandidates = emptyList()
-                                selectedCandidate = null
                                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                                     putExtra(
                                         RecognizerIntent.EXTRA_LANGUAGE_MODEL,
@@ -449,26 +367,6 @@ private fun AudioLevelMeter(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ConfidenceBadge(
-    confidence: Float,
-    modifier: Modifier = Modifier
-) {
-    val clampedPercentage = (confidence.coerceIn(0f, 1f) * 100f).roundToInt()
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colors.primary.copy(alpha = 0.12f),
-        contentColor = MaterialTheme.colors.primary
-    ) {
-        Text(
-            text = "$clampedPercentage%",
-            style = MaterialTheme.typography.caption,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
     }
 }
 
