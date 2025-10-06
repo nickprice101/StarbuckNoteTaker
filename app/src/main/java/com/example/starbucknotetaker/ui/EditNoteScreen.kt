@@ -200,6 +200,17 @@ fun EditNoteScreen(
     var reminderEnabled by remember(note.event) {
         mutableStateOf(note.event?.notificationMinutesBeforeStart != null)
     }
+    var floatingToolbarOwnerId by remember { mutableStateOf<Long?>(null) }
+    var floatingToolbarState by remember { mutableStateOf<FloatingFormattingToolbarState?>(null) }
+    val updateFloatingToolbar: (Long, FloatingFormattingToolbarState?) -> Unit = { ownerId, state ->
+        if (state != null) {
+            floatingToolbarOwnerId = ownerId
+            floatingToolbarState = state
+        } else if (floatingToolbarOwnerId == ownerId) {
+            floatingToolbarOwnerId = null
+            floatingToolbarState = null
+        }
+    }
     var reminderMinutes by remember(note.event) {
         mutableStateOf(note.event?.notificationMinutesBeforeStart ?: REMINDER_MINUTE_OPTIONS.getOrElse(4) { 30 })
     }
@@ -478,127 +489,140 @@ fun EditNoteScreen(
     Scaffold(
         scaffoldState = scaffoldState,
         topBar = {
-            TopAppBar(
-                title = { Text("Edit Note") },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        hideKeyboard()
-                        focusManager.clearFocus(force = true)
-                        onCancel()
-                        scope.launch {
-                            scaffoldState.snackbarHostState.showSnackbar(
-                                "Changes discarded",
-                                duration = SnackbarDuration.Short
-                            )
-                        }
-                    }) {
-                        Icon(Icons.Default.Close, contentDescription = "Discard")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        var idx = 0
-                        while (idx < blocks.size) {
-                            val block = blocks.getOrNull(idx)
-                            if (block is EditBlock.Text) {
-                                syncLinkPreviews(idx, block, finalizePending = true)
-                            }
-                            idx++
-                        }
-                        val images = mutableListOf<NoteImage>()
-                        val files = mutableListOf<NoteFile>()
-                        val linkPreviews = mutableListOf<NoteLinkPreview>()
-                        val contentBuilder = StringBuilder()
-                        val styledBuilder = RichTextDocumentBuilder()
-                        var linkIndex = 0
-                        blocks.forEach { block ->
-                            when (block) {
-                                is EditBlock.Text -> {
-                                    styledBuilder.append(block.value.toDocument())
-                                    styledBuilder.appendPlain("\n")
-                                    contentBuilder.append(block.value.text)
-                                    contentBuilder.append('\n')
-                                }
-                                is EditBlock.Image -> {
-                                    styledBuilder.appendPlain("[[image:${images.size}]]\n")
-                                    contentBuilder.append("[[image:")
-                                    contentBuilder.append(images.size)
-                                    contentBuilder.append("]]\n")
-                                    images.add(
-                                        NoteImage(
-                                            attachmentId = block.attachmentId,
-                                            data = block.data.takeIf { it.isNotBlank() }
-                                        )
-                                    )
-                                }
-                                is EditBlock.File -> {
-                                    styledBuilder.appendPlain("[[file:${files.size}]]\n")
-                                    contentBuilder.append("[[file:")
-                                    contentBuilder.append(files.size)
-                                    contentBuilder.append("]]\n")
-                                    files.add(block.file)
-                                }
-                                is EditBlock.LinkPreview -> {
-                                    styledBuilder.appendPlain("[[link:$linkIndex]]\n")
-                                    contentBuilder.append("[[link:")
-                                    contentBuilder.append(linkIndex)
-                                    contentBuilder.append("]]\n")
-                                    linkPreviews.add(block.preview)
-                                    linkIndex++
-                                }
-                            }
-                        }
-                        val content = contentBuilder.toString().trim()
-                        val styledContent = styledBuilder.build().trimmed()
-                        scope.launch {
+            Column {
+                TopAppBar(
+                    title = { Text("Edit Note") },
+                    navigationIcon = {
+                        IconButton(onClick = {
                             hideKeyboard()
                             focusManager.clearFocus(force = true)
-                            val eventForSave = if (isEvent) {
-                                val normalizedStart = if (eventAllDay) {
-                                    eventStart.withHour(0).withMinute(0)
-                                } else {
-                                    eventStart
-                                }
-                                val normalizedEnd = if (eventAllDay) {
-                                    val candidate = eventEnd.withHour(0).withMinute(0)
-                                    if (candidate.toLocalDate().isBefore(normalizedStart.toLocalDate())) {
-                                        normalizedStart.plusDays(1)
-                                    } else {
-                                        candidate
-                                    }
-                                } else {
-                                    if (eventEnd.isBefore(normalizedStart)) {
-                                        normalizedStart.plusHours(1)
-                                    } else {
-                                        eventEnd
-                                    }
-                                }
-                                eventStart = normalizedStart
-                                eventEnd = normalizedEnd
-                                NoteEvent(
-                                    start = normalizedStart.toInstant().toEpochMilli(),
-                                    end = normalizedEnd.toInstant().toEpochMilli(),
-                                    allDay = eventAllDay,
-                                    timeZone = zoneId.id,
-                                    location = eventLocation.takeIf { it.isNotBlank() },
-                                    alarmMinutesBeforeStart = if (alarmEnabled) alarmMinutes else null,
-                                    notificationMinutesBeforeStart = if (reminderEnabled) reminderMinutes else null,
-                                )
-                            } else {
-                                note.event
-                            }
-                            onSave(title, content, styledContent, images, files, linkPreviews, eventForSave)
-                            scaffoldState.snackbarHostState.showSnackbar(
-                                "Changes saved",
-                                duration = SnackbarDuration.Short
-                            )
                             onCancel()
+                            scope.launch {
+                                scaffoldState.snackbarHostState.showSnackbar(
+                                    "Changes discarded",
+                                    duration = SnackbarDuration.Short
+                                )
+                            }
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Discard")
                         }
-                    }) {
-                        Icon(Icons.Default.Check, contentDescription = "Save")
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            var idx = 0
+                            while (idx < blocks.size) {
+                                val block = blocks.getOrNull(idx)
+                                if (block is EditBlock.Text) {
+                                    syncLinkPreviews(idx, block, finalizePending = true)
+                                }
+                                idx++
+                            }
+                            val images = mutableListOf<NoteImage>()
+                            val files = mutableListOf<NoteFile>()
+                            val linkPreviews = mutableListOf<NoteLinkPreview>()
+                            val contentBuilder = StringBuilder()
+                            val styledBuilder = RichTextDocumentBuilder()
+                            var linkIndex = 0
+                            blocks.forEach { block ->
+                                when (block) {
+                                    is EditBlock.Text -> {
+                                        styledBuilder.append(block.value.toDocument())
+                                        styledBuilder.appendPlain("\n")
+                                        contentBuilder.append(block.value.text)
+                                        contentBuilder.append('\n')
+                                    }
+                                    is EditBlock.Image -> {
+                                        styledBuilder.appendPlain("[[image:${images.size}]]\n")
+                                        contentBuilder.append("[[image:")
+                                        contentBuilder.append(images.size)
+                                        contentBuilder.append("]]\n")
+                                        images.add(
+                                            NoteImage(
+                                                attachmentId = block.attachmentId,
+                                                data = block.data.takeIf { it.isNotBlank() }
+                                            )
+                                        )
+                                    }
+                                    is EditBlock.File -> {
+                                        styledBuilder.appendPlain("[[file:${files.size}]]\n")
+                                        contentBuilder.append("[[file:")
+                                        contentBuilder.append(files.size)
+                                        contentBuilder.append("]]\n")
+                                        files.add(block.file)
+                                    }
+                                    is EditBlock.LinkPreview -> {
+                                        styledBuilder.appendPlain("[[link:$linkIndex]]\n")
+                                        contentBuilder.append("[[link:")
+                                        contentBuilder.append(linkIndex)
+                                        contentBuilder.append("]]\n")
+                                        linkPreviews.add(block.preview)
+                                        linkIndex++
+                                    }
+                                }
+                            }
+                            val content = contentBuilder.toString().trim()
+                            val styledContent = styledBuilder.build().trimmed()
+                            scope.launch {
+                                hideKeyboard()
+                                focusManager.clearFocus(force = true)
+                                val eventForSave = if (isEvent) {
+                                    val normalizedStart = if (eventAllDay) {
+                                        eventStart.withHour(0).withMinute(0)
+                                    } else {
+                                        eventStart
+                                    }
+                                    val normalizedEnd = if (eventAllDay) {
+                                        val candidate = eventEnd.withHour(0).withMinute(0)
+                                        if (candidate.toLocalDate().isBefore(normalizedStart.toLocalDate())) {
+                                            normalizedStart.plusDays(1)
+                                        } else {
+                                            candidate
+                                        }
+                                    } else {
+                                        if (eventEnd.isBefore(normalizedStart)) {
+                                            normalizedStart.plusHours(1)
+                                        } else {
+                                            eventEnd
+                                        }
+                                    }
+                                    eventStart = normalizedStart
+                                    eventEnd = normalizedEnd
+                                    NoteEvent(
+                                        start = normalizedStart.toInstant().toEpochMilli(),
+                                        end = normalizedEnd.toInstant().toEpochMilli(),
+                                        allDay = eventAllDay,
+                                        timeZone = zoneId.id,
+                                        location = eventLocation.takeIf { it.isNotBlank() },
+                                        alarmMinutesBeforeStart = if (alarmEnabled) alarmMinutes else null,
+                                        notificationMinutesBeforeStart = if (reminderEnabled) reminderMinutes else null,
+                                    )
+                                } else {
+                                    note.event
+                                }
+                                onSave(title, content, styledContent, images, files, linkPreviews, eventForSave)
+                                scaffoldState.snackbarHostState.showSnackbar(
+                                    "Changes saved",
+                                    duration = SnackbarDuration.Short
+                                )
+                                onCancel()
+                            }
+                        }) {
+                            Icon(Icons.Default.Check, contentDescription = "Save")
+                        }
                     }
+                )
+                floatingToolbarState?.let { toolbar ->
+                    FormattingToolbar(
+                        visible = true,
+                        activeStyles = toolbar.activeStyles,
+                        onToggleStyle = toolbar.onToggleStyle,
+                        onToggleHighlight = toolbar.onToggleHighlight,
+                        onSelectTextColor = toolbar.onSelectTextColor,
+                        onAction = toolbar.onAction,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
-            )
+            }
         }
     ) { padding ->
         val imeSpacer = (
@@ -886,6 +910,9 @@ fun EditNoteScreen(
                                     { Text("Content") }
                                 } else null,
                                 modifier = Modifier.fillMaxWidth(),
+                                showInlineToolbar = false,
+                                floatingToolbarKey = block.id,
+                                onFloatingToolbarChange = updateFloatingToolbar,
                             )
                         }
                     }

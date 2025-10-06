@@ -14,10 +14,13 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.TextFieldDefaults.OutlinedTextFieldDecorationBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -37,15 +40,68 @@ fun RichTextEditor(
     label: (@Composable () -> Unit)? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
+    showInlineToolbar: Boolean = true,
+    floatingToolbarKey: Long? = null,
+    onFloatingToolbarChange: (Long, FloatingFormattingToolbarState?) -> Unit = { _, _ -> },
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     val colors = TextFieldDefaults.outlinedTextFieldColors()
     val state = remember { RichTextState(value) }
+    val notifyExternalIfChanged = rememberUpdatedState(newValue = onValueChange)
 
     LaunchedEffect(value) {
         if (value != state.value) {
             state.setExternalValue(value)
+        }
+    }
+
+    val floatingToolbarState = if (!showInlineToolbar && floatingToolbarKey != null && isFocused) {
+        FloatingFormattingToolbarState(
+            ownerId = floatingToolbarKey,
+            activeStyles = state.activeStyles,
+            onToggleStyle = { style ->
+                state.toggleInlineStyle(style)
+                if (state.value != value) {
+                    notifyExternalIfChanged.value(state.value)
+                }
+            },
+            onToggleHighlight = { color ->
+                state.toggleHighlight(color)
+                if (state.value != value) {
+                    notifyExternalIfChanged.value(state.value)
+                }
+            },
+            onSelectTextColor = { color ->
+                if (color == null) {
+                    state.clearTextColor()
+                } else {
+                    state.applyTextColor(color)
+                }
+                if (state.value != value) {
+                    notifyExternalIfChanged.value(state.value)
+                }
+            },
+            onAction = { action ->
+                state.applyFormattingAction(action)
+                notifyExternalIfChanged.value(state.value)
+            },
+        )
+    } else {
+        null
+    }
+
+    LaunchedEffect(floatingToolbarKey, floatingToolbarState) {
+        if (floatingToolbarKey != null) {
+            onFloatingToolbarChange(floatingToolbarKey, floatingToolbarState)
+        }
+    }
+
+    DisposableEffect(floatingToolbarKey) {
+        onDispose {
+            if (floatingToolbarKey != null) {
+                onFloatingToolbarChange(floatingToolbarKey, null)
+            }
         }
     }
 
@@ -82,7 +138,7 @@ fun RichTextEditor(
                 innerTextField = {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         FormattingToolbar(
-                            visible = isFocused,
+                            visible = showInlineToolbar && isFocused,
                             activeStyles = state.activeStyles,
                             onToggleStyle = { style: RichTextStyle ->
                                 state.toggleInlineStyle(style)
@@ -127,10 +183,19 @@ fun RichTextEditor(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = if (isFocused) 0.dp else 16.dp,
+                    top = if (showInlineToolbar && isFocused) 0.dp else 16.dp,
                     bottom = 16.dp,
                 ),
             )
         },
     )
 }
+
+data class FloatingFormattingToolbarState(
+    val ownerId: Long,
+    val activeStyles: Set<RichTextStyle>,
+    val onToggleStyle: (RichTextStyle) -> Unit,
+    val onToggleHighlight: (Color) -> Unit,
+    val onSelectTextColor: (Color?) -> Unit,
+    val onAction: (FormattingAction) -> Unit,
+)
