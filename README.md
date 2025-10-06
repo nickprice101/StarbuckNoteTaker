@@ -36,13 +36,13 @@ For a repeatable developer workstation, `setup_persist.sh` can install the Andro
 
 ## On-device ML assets
 
-The summariser service expects three TensorFlow Lite files (`encoder_int8_dynamic.tflite`, `decoder_step_int8_dynamic.tflite`, `tokenizer.json`) plus `note_classifier.tflite` to be present under `app/src/main/assets/`. Large binaries remain untracked; run `scripts/generate_summarizer_assets.py` to check for missing files during setup.
+The summariser service expects `note_classifier.tflite` to be present under `app/src/main/assets/`. Large binaries remain untracked; run `scripts/generate_summarizer_assets.py` to check for missing files during setup.
 
 To regenerate the models:
 
 1. Update or extend the labelled examples in `training_data.py`.
 2. Execute `build_tensor.py` to fine-tune FLAN-T5, convert the models to TensorFlow Lite, and write the assets into the project structure.
-3. Copy the resulting `.tflite` files and `tokenizer.json` into `app/src/main/assets/` before building the app.
+3. Copy the resulting files into `app/src/main/assets/` before building the app.
 
 ## Contributing
 
