@@ -45,6 +45,11 @@ import kotlin.math.roundToInt
 
 import com.example.starbucknotetaker.NotificationInterruptionManager
 
+private data class RecognitionCandidate(
+    val text: String,
+    val confidence: Float?
+)
+
 @Composable
 fun AudioTranscriptionDialog(
     onDismiss: () -> Unit,
@@ -66,8 +71,8 @@ fun AudioTranscriptionDialog(
     var partialText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showPermissionAction by remember { mutableStateOf(false) }
-    var recognitionCandidates by remember { mutableStateOf<List<String>>(emptyList()) }
-    var selectedCandidate by remember { mutableStateOf<String?>(null) }
+    var recognitionCandidates by remember { mutableStateOf<List<RecognitionCandidate>>(emptyList()) }
+    var selectedCandidate by remember { mutableStateOf<RecognitionCandidate?>(null) }
 
     val isTranscribing = isRecording || awaitingResult
     if (isTranscribing) {
@@ -147,9 +152,16 @@ fun AudioTranscriptionDialog(
                 awaitingResult = false
                 showPermissionAction = false
                 val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val scores = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
                 val candidates = matches
-                    ?.mapNotNull { it?.trim() }
-                    ?.filter { it.isNotEmpty() }
+                    ?.mapIndexedNotNull { index, text ->
+                        val cleanedText = text?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapIndexedNotNull null
+                        val confidenceScore = scores?.getOrNull(index)?.takeIf { !it.isNaN() }
+                        RecognitionCandidate(
+                            text = cleanedText,
+                            confidence = confidenceScore
+                        )
+                    }
                     .orEmpty()
                 if (candidates.isNotEmpty()) {
                     recognitionCandidates = candidates
@@ -297,10 +309,16 @@ fun AudioTranscriptionDialog(
                                     onClick = { selectedCandidate = candidate }
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = candidate,
-                                    style = MaterialTheme.typography.body1
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = candidate.text,
+                                        style = MaterialTheme.typography.body1
+                                    )
+                                }
+                                candidate.confidence?.let { confidence ->
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    ConfidenceBadge(confidence = confidence)
+                                }
                             }
                         }
                     }
@@ -324,7 +342,7 @@ fun AudioTranscriptionDialog(
                         Button(
                             onClick = {
                                 selectedCandidate?.let { selectedText ->
-                                    currentOnResult(selectedText)
+                                    currentOnResult(selectedText.text)
                                     currentOnDismiss()
                                 }
                             },
@@ -434,6 +452,26 @@ private fun AudioLevelMeter(
 }
 
 @Composable
+private fun ConfidenceBadge(
+    confidence: Float,
+    modifier: Modifier = Modifier
+) {
+    val clampedPercentage = (confidence.coerceIn(0f, 1f) * 100f).roundToInt()
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colors.primary.copy(alpha = 0.12f),
+        contentColor = MaterialTheme.colors.primary
+    ) {
+        Text(
+            text = "$clampedPercentage%",
+            style = MaterialTheme.typography.caption,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
 private fun StartRecordingIcon(modifier: Modifier = Modifier) {
     val outlineColor = Color(0xFFFF69B4)
     val fillColor = Color(0xFFE53935)
@@ -475,3 +513,5 @@ private fun StopRecordingIcon(modifier: Modifier = Modifier) {
         )
     }
 }
+
+private fun FloatArray.getOrNull(index: Int): Float? = if (index in indices) this[index] else null
