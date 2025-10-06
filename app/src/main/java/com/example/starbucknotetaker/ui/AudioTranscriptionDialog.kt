@@ -61,6 +61,8 @@ fun AudioTranscriptionDialog(
     var rms by remember { mutableStateOf(0f) }
     var partialText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var recognitionCandidates by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedCandidate by remember { mutableStateOf<String?>(null) }
 
     val isTranscribing = isRecording || awaitingResult
     if (isTranscribing) {
@@ -90,6 +92,8 @@ fun AudioTranscriptionDialog(
             override fun onReadyForSpeech(params: Bundle?) {
                 errorMessage = null
                 partialText = ""
+                recognitionCandidates = emptyList()
+                selectedCandidate = null
             }
 
             override fun onBeginningOfSpeech() {
@@ -109,6 +113,8 @@ fun AudioTranscriptionDialog(
             override fun onError(error: Int) {
                 isRecording = false
                 awaitingResult = false
+                recognitionCandidates = emptyList()
+                selectedCandidate = null
                 errorMessage = when (error) {
                     SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                     SpeechRecognizer.ERROR_CLIENT -> "Speech recognition client error"
@@ -127,11 +133,18 @@ fun AudioTranscriptionDialog(
                 isRecording = false
                 awaitingResult = false
                 val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull()?.trim()
-                if (!text.isNullOrEmpty()) {
-                    currentOnResult(text)
-                    currentOnDismiss()
+                val candidates = matches
+                    ?.mapNotNull { it?.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    .orEmpty()
+                if (candidates.isNotEmpty()) {
+                    recognitionCandidates = candidates
+                    selectedCandidate = candidates.firstOrNull()
+                    partialText = ""
+                    errorMessage = null
                 } else {
+                    recognitionCandidates = emptyList()
+                    selectedCandidate = null
                     errorMessage = "No speech detected"
                 }
             }
@@ -163,6 +176,8 @@ fun AudioTranscriptionDialog(
             isRecording = false
             awaitingResult = false
             errorMessage = null
+            recognitionCandidates = emptyList()
+            selectedCandidate = null
             currentOnDismiss()
         }
     ) {
@@ -194,6 +209,8 @@ fun AudioTranscriptionDialog(
                             isRecording = false
                             awaitingResult = false
                             errorMessage = null
+                            recognitionCandidates = emptyList()
+                            selectedCandidate = null
                             currentOnDismiss()
                         }
                     ) {
@@ -204,6 +221,7 @@ fun AudioTranscriptionDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 val statusMessage = when {
+                    recognitionCandidates.isNotEmpty() -> "Review the transcription below."
                     partialText.isNotBlank() -> partialText
                     awaitingResult && !isRecording -> "Processing transcription..."
                     isRecording -> "Listening..."
@@ -226,6 +244,67 @@ fun AudioTranscriptionDialog(
                     )
                 }
 
+                if (recognitionCandidates.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Recognized text",
+                        style = MaterialTheme.typography.subtitle1
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 160.dp)
+                    ) {
+                        recognitionCandidates.forEach { candidate ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = candidate == selectedCandidate,
+                                    onClick = { selectedCandidate = candidate }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = candidate,
+                                    style = MaterialTheme.typography.body1
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                recognitionCandidates = emptyList()
+                                selectedCandidate = null
+                                partialText = ""
+                                errorMessage = null
+                            }
+                        ) {
+                            Text("Try again")
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Button(
+                            onClick = {
+                                selectedCandidate?.let { selectedText ->
+                                    currentOnResult(selectedText)
+                                    currentOnDismiss()
+                                }
+                            },
+                            enabled = selectedCandidate != null
+                        ) {
+                            Text("Use transcription")
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.weight(1f, fill = true))
 
                 val normalizedLevel = ((rms + 2f) / 10f).coerceIn(0f, 1f)
@@ -241,7 +320,7 @@ fun AudioTranscriptionDialog(
                         modifier = Modifier.width(220.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
-                    val buttonEnabled = isRecording || !awaitingResult
+                    val buttonEnabled = isRecording || (!awaitingResult && recognitionCandidates.isEmpty())
                     IconButton(
                         onClick = {
                             if (isRecording) {
@@ -249,6 +328,8 @@ fun AudioTranscriptionDialog(
                             } else if (!awaitingResult) {
                                 errorMessage = null
                                 partialText = ""
+                                recognitionCandidates = emptyList()
+                                selectedCandidate = null
                                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                                     putExtra(
                                         RecognizerIntent.EXTRA_LANGUAGE_MODEL,
