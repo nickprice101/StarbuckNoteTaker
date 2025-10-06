@@ -357,7 +357,7 @@ fun AudioTranscriptionDialog(
                 Spacer(modifier = Modifier.weight(1f, fill = true))
 
                 val normalizedLevel = ((rms + 2f) / 10f).coerceIn(0f, 1f)
-                val recordButtonSize = 96.dp * 1.5f
+                val recordButtonSize = 50.dp
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
