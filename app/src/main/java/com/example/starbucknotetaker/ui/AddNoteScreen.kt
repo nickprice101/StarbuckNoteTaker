@@ -515,7 +515,8 @@ fun AddNoteScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .imePadding(),
+                .imePadding()
+                .imeNestedScroll(),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
