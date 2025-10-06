@@ -166,12 +166,13 @@ fun NoteListScreen(
                     .fillMaxWidth()
                     .padding(8.dp)
             )
+            val fabVerticalSpace = 56.dp + 16.dp
             val contentModifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 8.dp)
             if (filtered.isEmpty()) {
                 Column(
-                    modifier = contentModifier,
+                    modifier = contentModifier.padding(bottom = fabVerticalSpace),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -207,7 +208,10 @@ fun NoteListScreen(
                     }
                 }
             } else {
-                LazyColumn(modifier = contentModifier) {
+                LazyColumn(
+                    modifier = contentModifier,
+                    contentPadding = PaddingValues(bottom = fabVerticalSpace)
+                ) {
                     itemsIndexed(filtered, key = { _, note -> note.id }) { index, note ->
                         val showDate = index == 0 || !isSameDay(filtered[index - 1].date, note.date)
                         if (showDate) {
