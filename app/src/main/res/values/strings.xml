@@ -22,6 +22,11 @@
     <string name="reminder_exact_alarm_permission_denied">Exact alarms are still disabled. Alarm reminders will arrive as notifications.</string>
     <string name="reminder_exact_alarm_permission_needed">Allow exact alarms to enable full-screen alarms.</string>
     <string name="reminder_exact_alarm_permission_action">Open alarm settings</string>
+    <string name="microphone_permission_required_title">Microphone access required</string>
+    <string name="microphone_permission_required_message">Starbuck Notes needs microphone access to transcribe audio. Enable the permission in Settings &gt; Apps &gt; Starbuck Notes &gt; Permissions.</string>
+    <string name="microphone_permission_settings_action">Open app settings</string>
+    <string name="microphone_permission_settings_dismiss">Not now</string>
+    <string name="microphone_permission_toast">Microphone access is required to transcribe audio. Please allow it in app settings.</string>
     <string name="event_alarm_toggle_label">Alarm</string>
     <string name="event_reminder_toggle_label">Reminder</string>
     <string name="event_alarm_lead_time_label">Alarm lead time</string>

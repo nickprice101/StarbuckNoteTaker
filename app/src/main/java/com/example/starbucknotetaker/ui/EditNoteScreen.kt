@@ -1,10 +1,13 @@
 package com.example.starbucknotetaker.ui
 
 import android.Manifest
+import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -65,6 +68,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
 import java.util.concurrent.atomic.AtomicLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -467,17 +471,29 @@ fun EditNoteScreen(
 
     var showTranscriptionDialog by remember { mutableStateOf(false) }
     var showSketchPad by remember { mutableStateOf(false) }
+    var showAudioPermissionSettingsDialog by remember { mutableStateOf(false) }
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             showTranscriptionDialog = true
         } else {
-            Toast.makeText(
-                context,
-                "Microphone permission is required to transcribe audio",
-                Toast.LENGTH_LONG
-            ).show()
+            val activity = context.findActivity()
+            val shouldShowRationale = activity?.let {
+                ActivityCompat.shouldShowRequestPermissionRationale(
+                    it,
+                    Manifest.permission.RECORD_AUDIO
+                )
+            } ?: true
+            if (!shouldShowRationale) {
+                showAudioPermissionSettingsDialog = true
+            } else {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.microphone_permission_toast),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
             onEnablePinCheck()
         }
     }
@@ -1181,7 +1197,34 @@ fun EditNoteScreen(
             onRequireAudioPermission = {
                 showTranscriptionDialog = false
                 onEnablePinCheck()
-                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                showAudioPermissionSettingsDialog = true
+            }
+        )
+    }
+
+    if (showAudioPermissionSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showAudioPermissionSettingsDialog = false },
+            title = { Text(stringResource(R.string.microphone_permission_required_title)) },
+            text = { Text(stringResource(R.string.microphone_permission_required_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAudioPermissionSettingsDialog = false
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Text(stringResource(R.string.microphone_permission_settings_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAudioPermissionSettingsDialog = false }) {
+                    Text(stringResource(R.string.microphone_permission_settings_dismiss))
+                }
             }
         )
     }
@@ -1240,6 +1283,12 @@ private fun EventDateTimePickerEditable(
             }
         }
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
