@@ -34,11 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.drawPath
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -113,11 +110,6 @@ fun SketchPadDialog(
                     ) {
                         canvasSize = IntSize(size.width.roundToInt(), size.height.roundToInt())
                         drawRect(Color.White)
-                        val strokeStyle = Stroke(
-                            width = strokeWidthPx,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round,
-                        )
                         val allStrokes = strokes + activeStroke.let { if (it.isEmpty()) emptyList() else listOf(it) }
                         allStrokes.forEach { points ->
                             if (points.size == 1) {
@@ -127,16 +119,24 @@ fun SketchPadDialog(
                                     center = points.first(),
                                 )
                             } else if (points.size > 1) {
-                                val path = androidx.compose.ui.graphics.Path().apply {
-                                    moveTo(points.first().x, points.first().y)
-                                    points.drop(1).forEach { point ->
-                                        lineTo(point.x, point.y)
-                                    }
-                                }
-                                drawPath(
-                                    path = path,
+                                drawCircle(
                                     color = Color.Black,
-                                    style = strokeStyle,
+                                    radius = strokeWidthPx / 2f,
+                                    center = points.first(),
+                                )
+                                points.zipWithNext().forEach { (start, end) ->
+                                    drawLine(
+                                        color = Color.Black,
+                                        start = start,
+                                        end = end,
+                                        strokeWidth = strokeWidthPx,
+                                        cap = StrokeCap.Round,
+                                    )
+                                }
+                                drawCircle(
+                                    color = Color.Black,
+                                    radius = strokeWidthPx / 2f,
+                                    center = points.last(),
                                 )
                             }
                         }
