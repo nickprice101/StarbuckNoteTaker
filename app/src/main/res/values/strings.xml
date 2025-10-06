@@ -31,4 +31,6 @@
     <string name="event_reminder_toggle_label">Reminder</string>
     <string name="event_alarm_lead_time_label">Alarm lead time</string>
     <string name="event_reminder_lead_time_label">Reminder lead time</string>
+    <string name="remove_image_content_description">Remove image</string>
+    <string name="remove_file_content_description">Remove file attachment</string>
 </resources>
