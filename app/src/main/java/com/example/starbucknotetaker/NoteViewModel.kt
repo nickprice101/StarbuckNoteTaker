@@ -58,6 +58,7 @@ class NoteViewModel(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val reminderNavigation: SharedFlow<Long> = reminderNavigationEvents.asSharedFlow()
+    private val attachmentTagRegex = Regex("\\[\\[(?:image|file):\\d+]]")
     private val _biometricUnlockEvents = MutableSharedFlow<BiometricUnlockRequest>(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -735,12 +736,18 @@ class NoteViewModel(
     private fun updateNoteSummary(noteId: Long, summary: String): Boolean {
         val index = _notes.indexOfFirst { it.id == noteId }
         if (index == -1) return false
-        if (_notes[index].summary == summary) {
+        val cleanedSummary = sanitizeSummary(summary)
+        if (_notes[index].summary == cleanedSummary) {
             return true
         }
-        _notes[index] = _notes[index].copy(summary = summary)
+        _notes[index] = _notes[index].copy(summary = cleanedSummary)
         pin?.let { store?.saveNotes(_notes, it) }
         return true
+    }
+
+    private fun sanitizeSummary(summary: String): String {
+        val stripped = attachmentTagRegex.replace(summary, " ")
+        return stripped.replace(Regex("\\s+"), " ").trim()
     }
 
     private data class ProcessedNoteContent(
