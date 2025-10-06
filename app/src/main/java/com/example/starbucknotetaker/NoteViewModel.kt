@@ -188,7 +188,7 @@ class NoteViewModel(
         title: String?,
         content: String,
         styledContent: RichTextDocument,
-        images: List<Pair<Uri, Int>>,
+        images: List<NewNoteImage>,
         files: List<Uri>,
         linkPreviews: List<NoteLinkPreview>,
         event: NoteEvent? = null,
@@ -438,7 +438,7 @@ class NoteViewModel(
     private fun processNewNoteContent(
         content: String,
         styledContent: RichTextDocument,
-        images: List<Pair<Uri, Int>>,
+        images: List<NewNoteImage>,
         files: List<Uri>,
     ): ProcessedNoteContent {
         val embeddedImages = mutableListOf<NoteImage>()
@@ -458,63 +458,105 @@ class NoteViewModel(
             }
             styledText = styledText.replaceRange(start, start + originalLength, replacement)
         }
-        context?.let { ctx ->
-            images.forEach { (uri, rotation) ->
-                try {
-                    ctx.contentResolver.openInputStream(uri)?.use { input ->
-                        val bytes = input.readBytes()
-                        val exif = ExifInterface(ByteArrayInputStream(bytes))
-                        val orientation = exif.getAttributeInt(
-                            ExifInterface.TAG_ORIENTATION,
-                            ExifInterface.ORIENTATION_NORMAL
-                        )
-                        val exifRotation = when (orientation) {
-                            ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                            ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                            ExifInterface.ORIENTATION_ROTATE_270 -> 270
-                            else -> 0
-                        }
-                        val totalRotation = (exifRotation + rotation) % 360
-                        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        if (totalRotation != 0) {
-                            val matrix = Matrix().apply { postRotate(totalRotation.toFloat()) }
-                            bitmap = Bitmap.createBitmap(
-                                bitmap,
-                                0,
-                                0,
-                                bitmap.width,
-                                bitmap.height,
-                                matrix,
-                                true
-                            )
-                        }
-                        val baos = ByteArrayOutputStream()
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                        val pngBytes = baos.toByteArray()
-                        val id = if (store != null && currentPin != null) {
-                            runCatching { store.saveAttachment(currentPin, pngBytes) }.getOrNull()
-                        } else {
+        val ctx = context
+        images.forEach { image ->
+            val pngBytes = when {
+                image.data?.isNotBlank() == true -> {
+                    val decoded = runCatching { Base64.decode(image.data, Base64.DEFAULT) }.getOrNull()
+                    if (decoded != null) {
+                        try {
+                            var bitmap = BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                            if (bitmap != null) {
+                                val normalizedRotation = ((image.rotation % 360) + 360) % 360
+                                if (normalizedRotation != 0) {
+                                    val matrix = Matrix().apply { postRotate(normalizedRotation.toFloat()) }
+                                    bitmap = Bitmap.createBitmap(
+                                        bitmap,
+                                        0,
+                                        0,
+                                        bitmap.width,
+                                        bitmap.height,
+                                        matrix,
+                                        true
+                                    )
+                                }
+                                val baos = ByteArrayOutputStream()
+                                bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                                baos.toByteArray()
+                            } else {
+                                null
+                            }
+                        } catch (_: Exception) {
                             null
                         }
-                        embeddedImages.add(
-                            if (id != null) {
-                                NoteImage(attachmentId = id)
-                            } else {
-                                NoteImage(data = Base64.encodeToString(pngBytes, Base64.DEFAULT))
-                            }
-                        )
+                    } else {
+                        null
                     }
-                } catch (_: Exception) {}
+                }
+                image.uri != null && ctx != null -> {
+                    try {
+                        ctx.contentResolver.openInputStream(image.uri)?.use { input ->
+                            val bytes = input.readBytes()
+                            val exif = ExifInterface(ByteArrayInputStream(bytes))
+                            val orientation = exif.getAttributeInt(
+                                ExifInterface.TAG_ORIENTATION,
+                                ExifInterface.ORIENTATION_NORMAL
+                            )
+                            val exifRotation = when (orientation) {
+                                ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                                ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                                ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                                else -> 0
+                            }
+                            val totalRotation = (exifRotation + image.rotation) % 360
+                            var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            if (totalRotation != 0) {
+                                val matrix = Matrix().apply { postRotate(totalRotation.toFloat()) }
+                                bitmap = Bitmap.createBitmap(
+                                    bitmap,
+                                    0,
+                                    0,
+                                    bitmap.width,
+                                    bitmap.height,
+                                    matrix,
+                                    true
+                                )
+                            }
+                            val baos = ByteArrayOutputStream()
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                            baos.toByteArray()
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                else -> null
             }
+            pngBytes?.let { bytes ->
+                val id = if (store != null && currentPin != null) {
+                    runCatching { store.saveAttachment(currentPin, bytes) }.getOrNull()
+                } else {
+                    null
+                }
+                embeddedImages.add(
+                    if (id != null) {
+                        NoteImage(attachmentId = id)
+                    } else {
+                        NoteImage(data = Base64.encodeToString(bytes, Base64.DEFAULT))
+                    }
+                )
+            }
+        }
+        ctx?.let { context ->
             files.forEach { uri ->
                 try {
-                    ctx.contentResolver.openInputStream(uri)?.use { input ->
+                    context.contentResolver.openInputStream(uri)?.use { input ->
                         val bytes = input.readBytes()
-                        val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                        val name = context.contentResolver.query(uri, null, null, null, null)?.use { c ->
                             val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                             if (idx >= 0 && c.moveToFirst()) c.getString(idx) else "file"
                         } ?: "file"
-                        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
                         val id = if (store != null && currentPin != null) {
                             runCatching { store.saveAttachment(currentPin, bytes) }.getOrNull()
                         } else {
