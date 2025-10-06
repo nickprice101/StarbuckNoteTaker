@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
@@ -145,6 +146,22 @@ fun NoteListScreen(
                 value = query,
                 onValueChange = { query = it },
                 label = { Text("Search") },
+                trailingIcon = {
+                    if (query.isNotBlank()) {
+                        IconButton(
+                            onClick = {
+                                query = ""
+                                focusManager.clearFocus(force = true)
+                                hideKeyboard()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear search"
+                            )
+                        }
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(8.dp)
