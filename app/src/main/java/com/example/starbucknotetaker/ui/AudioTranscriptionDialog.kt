@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.times
 import androidx.compose.ui.window.Dialog
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -356,7 +357,7 @@ fun AudioTranscriptionDialog(
                 Spacer(modifier = Modifier.weight(1f, fill = true))
 
                 val normalizedLevel = ((rms + 2f) / 10f).coerceIn(0f, 1f)
-                val meterContentHeight = 96.dp
+                val recordButtonSize = 96.dp * 1.5f
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -364,7 +365,7 @@ fun AudioTranscriptionDialog(
                 ) {
                     AudioLevelMeter(
                         level = if (isRecording) normalizedLevel else 0f,
-                        meterHeight = meterContentHeight,
+                        meterHeight = recordButtonSize,
                         modifier = Modifier.width(220.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
@@ -398,9 +399,9 @@ fun AudioTranscriptionDialog(
                             }
                         },
                         enabled = buttonEnabled,
-                        modifier = Modifier.size(meterContentHeight)
+                        modifier = Modifier.size(recordButtonSize)
                     ) {
-                        val iconModifier = Modifier.size(meterContentHeight * 0.75f)
+                        val iconModifier = Modifier.size(recordButtonSize * 0.75f)
                         if (isRecording) {
                             StopRecordingIcon(modifier = iconModifier)
                         } else {
