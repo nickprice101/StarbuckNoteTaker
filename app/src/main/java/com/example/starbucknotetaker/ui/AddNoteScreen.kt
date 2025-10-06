@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -301,6 +302,13 @@ fun AddNoteScreen(
                 blocks.add(insertionIndex, block)
                 insertionIndex++
             }
+        }
+    }
+
+    fun ensureTrailingTextBlock() {
+        val last = blocks.lastOrNull()
+        if (last !is NoteBlock.Text || last.value.text.isNotBlank()) {
+            blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
         }
     }
 
@@ -862,6 +870,21 @@ fun AddNoteScreen(
                                     contentDescription = "Rotate",
                                 )
                             }
+                            IconButton(
+                                onClick = {
+                                    if (block.data != null) {
+                                        blocks[index] = block.copy(data = null)
+                                    }
+                                    blocks.removeAt(index)
+                                    ensureTrailingTextBlock()
+                                },
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.remove_image_content_description),
+                                )
+                            }
                         }
                     }
                     is NoteBlock.File -> {
@@ -881,7 +904,21 @@ fun AddNoteScreen(
                         ) {
                             Icon(Icons.Default.InsertDriveFile, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(name)
+                            Text(
+                                text = name,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    blocks.removeAt(index)
+                                    ensureTrailingTextBlock()
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.remove_file_content_description),
+                                )
+                            }
                         }
                     }
                     is NoteBlock.LinkPreview -> {
