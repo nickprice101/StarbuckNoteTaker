@@ -7,6 +7,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -276,10 +278,12 @@ fun AudioTranscriptionDialog(
                         style = MaterialTheme.typography.subtitle1
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+                    val candidateScrollState = rememberScrollState()
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 160.dp)
+                            .verticalScroll(candidateScrollState)
                     ) {
                         recognitionCandidates.forEach { candidate ->
                             Row(
