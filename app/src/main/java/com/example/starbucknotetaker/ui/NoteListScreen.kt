@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -148,27 +149,69 @@ fun NoteListScreen(
                     .fillMaxWidth()
                     .padding(8.dp)
             )
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(filtered, key = { _, note -> note.id }) { index, note ->
-                    val showDate = index == 0 || !isSameDay(filtered[index - 1].date, note.date)
-                    if (showDate) {
-                        DateHeader(note.date)
-                    }
-                    SwipeToDeleteNoteItem(
-                        note = note,
-                        isOpen = openNoteId == note.id,
-                        onOpen = { openNoteId = note.id },
-                        onClose = { if (openNoteId == note.id) openNoteId = null },
-                        onClick = {
-                            hideKeyboard()
-                            focusManager.clearFocus(force = true)
-                            onOpenNote(note)
+            val contentModifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp)
+            if (filtered.isEmpty()) {
+                Column(
+                    modifier = contentModifier,
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = if (query.isBlank()) {
+                            "You don't have any notes yet."
+                        } else {
+                            "No notes match your search."
                         },
-                        onDelete = {
-                            onDeleteNote(note.id)
-                            if (openNoteId == note.id) openNoteId = null
-                        }
+                        style = MaterialTheme.typography.body1,
+                        textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    if (query.isNotBlank()) {
+                        OutlinedButton(onClick = { query = "" }) {
+                            Text("Clear search")
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                hideKeyboard()
+                                focusManager.clearFocus(force = true)
+                                onAddNote()
+                            }
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.NoteAdd,
+                                contentDescription = null
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Create your first note")
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(modifier = contentModifier) {
+                    itemsIndexed(filtered, key = { _, note -> note.id }) { index, note ->
+                        val showDate = index == 0 || !isSameDay(filtered[index - 1].date, note.date)
+                        if (showDate) {
+                            DateHeader(note.date)
+                        }
+                        SwipeToDeleteNoteItem(
+                            note = note,
+                            isOpen = openNoteId == note.id,
+                            onOpen = { openNoteId = note.id },
+                            onClose = { if (openNoteId == note.id) openNoteId = null },
+                            onClick = {
+                                hideKeyboard()
+                                focusManager.clearFocus(force = true)
+                                onOpenNote(note)
+                            },
+                            onDelete = {
+                                onDeleteNote(note.id)
+                                if (openNoteId == note.id) openNoteId = null
+                            }
+                        )
+                    }
                 }
             }
         }
