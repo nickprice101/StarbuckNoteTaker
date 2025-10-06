@@ -288,6 +288,7 @@ private fun SwipeToDeleteNoteItem(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .height(IntrinsicSize.Min)
             .background(Color.Transparent)
             .swipeable(
                 state = swipeState,
