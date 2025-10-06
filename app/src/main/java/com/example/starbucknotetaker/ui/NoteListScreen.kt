@@ -52,6 +52,7 @@ fun NoteListScreen(
     onAddEvent: () -> Unit,
     onOpenNote: (Note) -> Unit,
     onDeleteNote: (Long) -> Unit,
+    onRestoreNote: (Note) -> Unit,
     onSettings: () -> Unit,
     summarizerState: Summarizer.SummarizerState
 ) {
@@ -66,7 +67,10 @@ fun NoteListScreen(
     val focusManager = LocalFocusManager.current
     val hideKeyboard = rememberKeyboardHider()
     var creationMenuExpanded by remember { mutableStateOf(false) }
+    val scaffoldState = rememberScaffoldState()
+    val scope = rememberCoroutineScope()
     Scaffold(
+        scaffoldState = scaffoldState,
         floatingActionButton = {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -228,8 +232,19 @@ fun NoteListScreen(
                                 onOpenNote(note)
                             },
                             onDelete = {
-                                onDeleteNote(note.id)
-                                if (openNoteId == note.id) openNoteId = null
+                                val noteToDelete = note
+                                onDeleteNote(noteToDelete.id)
+                                if (openNoteId == noteToDelete.id) openNoteId = null
+                                scope.launch {
+                                    scaffoldState.snackbarHostState.currentSnackbarData?.dismiss()
+                                    val result = scaffoldState.snackbarHostState.showSnackbar(
+                                        message = "Note deleted",
+                                        actionLabel = "Undo"
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        onRestoreNote(noteToDelete)
+                                    }
+                                }
                             }
                         )
                     }

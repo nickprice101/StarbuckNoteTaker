@@ -388,7 +388,7 @@ fun AppContent(
                 onOpenNote = { note ->
                     val isTemporarilyUnlocked = noteViewModel.isNoteTemporarilyUnlocked(note.id)
                     Log.d(BIOMETRIC_LOG_TAG, "*** NOTE_TAP: noteId=${note.id} locked=${note.isLocked} temporarilyUnlocked=$isTemporarilyUnlocked ***")
-                    
+
                     if (note.isLocked && !isTemporarilyUnlocked) {
                         if (canUseBiometric) {
                             Log.d(BIOMETRIC_LOG_TAG, "*** NOTE_TAP: Starting BiometricUnlockActivity for noteId=${note.id} ***")
@@ -405,6 +405,7 @@ fun AppContent(
                     }
                 },
                 onDeleteNote = { noteId -> noteViewModel.deleteNote(noteId) },
+                onRestoreNote = { note -> noteViewModel.restoreNote(note) },
                 onSettings = { navController.navigate("settings") },
                 summarizerState = summarizerState
             )

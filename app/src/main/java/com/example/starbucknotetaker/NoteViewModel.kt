@@ -251,6 +251,17 @@ class NoteViewModel(
         }
     }
 
+    fun restoreNote(note: Note) {
+        if (_notes.any { it.id == note.id }) {
+            return
+        }
+        _notes.add(note)
+        reorderNotes()
+        pin?.let { store?.saveNotes(_notes, it) }
+        reminderScheduler?.scheduleIfNeeded(note)
+        tryEmitPendingReminder()
+    }
+
     fun updateNote(
         id: Long,
         title: String?,
