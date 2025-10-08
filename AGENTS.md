@@ -7,4 +7,4 @@ DEPLOYMENT_README.md contains some useful Android deployment information.
 
 Note that complete_pipeline.py contains validation at the end of the script that outputs an "Enhanced summary". This is the form that the summarised note should take, and the same structure should be implemented in the application.
 
-During Codex development, when running gradlew, run it with "--console=plain" option.
+During Codex development, when running gradlew, run it with "--console=plain" option as Gradle's large output causes the session to close.
