@@ -20,7 +20,7 @@ if [ ! -f "$APP_BUILD_GRADLE" ]; then
   exit 1
 fi
 
-COMPILE_SDK=$(awk 'match($0, /compileSdk[[:space:]]+([0-9]+)/, m) { print m[1]; exit }' "$APP_BUILD_GRADLE")
+COMPILE_SDK=$(grep -E "compileSdk\\s+[0-9]+" "$APP_BUILD_GRADLE" | head -n1 | sed -E 's/.*compileSdk\\s+([0-9]+).*/\1/')
 if [ -z "$COMPILE_SDK" ]; then
   echo "❌ Unable to detect compileSdk value from $APP_BUILD_GRADLE"
   exit 1
