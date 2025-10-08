@@ -1,6 +1,5 @@
 package com.example.starbucknotetaker.ui
 
-import android.net.Uri
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.ui.EventLocationDisplay
@@ -8,7 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.lang.reflect.Method
-import java.io.File
 
 class NoteDetailScreenTest {
 
@@ -83,12 +81,7 @@ class NoteDetailScreenTest {
 
     @Test
     fun `resolve share mime type collapses multiple images`() {
-        val attachments = listOf(
-            createPreparedAttachment("image/png"),
-            createPreparedAttachment("image/jpeg"),
-        )
-
-        val mimeType = invokeResolveShareMimeType(attachments)
+        val mimeType = resolveShareMimeTypeFromMimeTypes(listOf("image/png", "image/jpeg"))
 
         assertEquals("image/*", mimeType)
     }
@@ -107,20 +100,6 @@ class NoteDetailScreenTest {
     ): String {
         val method = buildShareTextMethod
         return method.invoke(null, note, display) as String
-    }
-
-    private fun invokeResolveShareMimeType(attachments: List<Any>): String {
-        val method = resolveShareMimeTypeMethod
-        return method.invoke(null, attachments) as String
-    }
-
-    private fun createPreparedAttachment(mimeType: String): Any {
-        val clazz = preparedAttachmentClass
-        val constructor = clazz.getDeclaredConstructor(File::class.java, Uri::class.java, String::class.java)
-        constructor.isAccessible = true
-        val file = File("/tmp/${mimeType.hashCode()}")
-        val uri = Uri.parse("content://test/${mimeType.hashCode()}")
-        return constructor.newInstance(file, uri, mimeType)
     }
 
     private val buildEventSummaryMethod: Method by lazy {
@@ -145,17 +124,4 @@ class NoteDetailScreenTest {
         }
     }
 
-    private val resolveShareMimeTypeMethod: Method by lazy {
-        val clazz = Class.forName("com.example.starbucknotetaker.ui.NoteDetailScreenKt")
-        clazz.getDeclaredMethod(
-            "resolveShareMimeType",
-            java.util.List::class.java,
-        ).apply {
-            isAccessible = true
-        }
-    }
-
-    private val preparedAttachmentClass: Class<*> by lazy {
-        Class.forName("com.example.starbucknotetaker.ui.NoteDetailScreenKt$PreparedAttachment")
-    }
 }
