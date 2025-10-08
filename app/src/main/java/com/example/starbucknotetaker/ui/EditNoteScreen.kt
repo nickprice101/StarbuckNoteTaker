@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
@@ -697,10 +698,13 @@ fun EditNoteScreen(
             }
         }
     ) { padding ->
+        val density = LocalDensity.current
         val imeSpacer = (
             WindowInsets.ime.asPaddingValues().calculateBottomPadding() -
                 WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             ).coerceAtLeast(0.dp)
+        val imeBottomPx = WindowInsets.ime.getBottom(density)
+        val contextPadding = if (imeBottomPx > 0) 96.dp else 0.dp
         LazyColumn(
             modifier = Modifier
                 .padding(padding)
@@ -711,7 +715,7 @@ fun EditNoteScreen(
                 start = 16.dp,
                 end = 16.dp,
                 top = 16.dp,
-                bottom = 16.dp + imeSpacer,
+                bottom = 16.dp + imeSpacer + contextPadding,
             )
         ) {
             item {
