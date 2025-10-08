@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -50,11 +51,34 @@ class SummarizerTest {
         val mapping = mappingJson("REMINDER")
         val summarizer = createSummarizer(interpreter, mapping)
 
-        val note = "Line one about coffee.
-Line two about pastries.".trimIndent()
+        val note = """Line one about coffee.
+Line two about pastries.""".trimIndent()
         val summary = summarizer.summarize(note)
 
         assertEquals("Line one about coffee. Line two about pastries.", summary)
+        assertTrue(summarizer.state.value is Summarizer.SummarizerState.Fallback)
+    }
+
+    @Test
+    fun fallbackSummaryUsesFirst150CharactersAcrossTwoLines() = runBlocking {
+        val interpreter = FailingInterpreter()
+        val mapping = mappingJson("REMINDER")
+        val summarizer = createSummarizer(interpreter, mapping)
+
+        val body = buildString {
+            append("Weekly planning session covering roadmap adjustments, budget reallocations, vendor contract renewals, and team")
+            append(" health initiatives requiring immediate attention from multiple department leads.")
+        }
+        val source = "Title: Sprint Sync\n\n$body"
+
+        val summary = summarizer.summarize(source)
+        val lines = summary.lines()
+        val normalizedBody = body.trim().replace(Regex("\\s+"), " ")
+        val combined = summary.replace("\n", "")
+
+        assertFalse(summary.contains("Title:"))
+        assertEquals(2, lines.size)
+        assertEquals(normalizedBody.take(150), combined)
         assertTrue(summarizer.state.value is Summarizer.SummarizerState.Fallback)
     }
 

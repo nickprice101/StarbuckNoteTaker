@@ -108,6 +108,7 @@ class Summarizer(
 
     private suspend fun fallbackFromSummarize(reason: String, text: String): String {
         emitDebug("falling back due to $reason")
+        emitDebug("fallback reason: $reason")
         _state.emit(SummarizerState.Fallback)
         return fallbackSummaryInternal(text)
     }
@@ -122,12 +123,52 @@ class Summarizer(
     }
 
     private fun fallbackSummaryInternal(text: String): String {
-        val preview = lightweightPreview(text)
-        if (preview.isNotBlank()) {
-            return smartTruncate(preview, MAX_SUMMARY_LENGTH)
+        val contentOnly = extractContentForFallback(text)
+        val normalized = contentOnly.trim().replace(WHITESPACE_REGEX, " ")
+        if (normalized.isEmpty()) return ""
+
+        val truncated = normalized.take(FALLBACK_CHAR_LIMIT)
+        return formatFallbackAcrossTwoLines(truncated)
+    }
+
+    private fun extractContentForFallback(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return ""
+
+        val separatorIndex = trimmed.indexOf("\n\n")
+        if (separatorIndex >= 0 && separatorIndex + 2 < trimmed.length) {
+            val afterSeparator = trimmed.substring(separatorIndex + 2).trim()
+            if (afterSeparator.isNotEmpty()) {
+                return afterSeparator
+            }
         }
-        val normalized = text.trim().replace(WHITESPACE_REGEX, " ")
-        return smartTruncate(normalized, MAX_SUMMARY_LENGTH)
+
+        if (trimmed.startsWith("Title:", ignoreCase = true)) {
+            return trimmed.removePrefix("Title:").trim()
+        }
+
+        return trimmed
+    }
+
+    private fun formatFallbackAcrossTwoLines(truncated: String): String {
+        if (truncated.isEmpty()) return ""
+        if (truncated.length <= FALLBACK_FIRST_LINE_TARGET) {
+            return truncated
+        }
+
+        val desiredBreak = minOf(truncated.length, FALLBACK_FIRST_LINE_TARGET)
+        val whitespaceBreak = truncated.lastIndexOf(' ', desiredBreak)
+        val breakIndex = when {
+            whitespaceBreak in 0 until truncated.length - 1 -> whitespaceBreak + 1
+            truncated.length > FALLBACK_FIRST_LINE_TARGET -> FALLBACK_FIRST_LINE_TARGET
+            else -> truncated.length
+        }
+
+        if (breakIndex <= 0 || breakIndex >= truncated.length) {
+            return truncated
+        }
+
+        return truncated.substring(0, breakIndex) + "\n" + truncated.substring(breakIndex)
     }
 
     private suspend fun loadModelIfNeeded() {
@@ -405,6 +446,8 @@ class Summarizer(
         internal const val CATEGORY_MAPPING_ASSET_NAME = "category_mapping.json"
         private const val MAX_SUMMARY_LENGTH = 140
         private const val MAX_PREVIEW_LENGTH = 160
+        private const val FALLBACK_CHAR_LIMIT = 150
+        private const val FALLBACK_FIRST_LINE_TARGET = FALLBACK_CHAR_LIMIT / 2
         private val WHITESPACE_REGEX = Regex("\\s+")
         private val SHOPPING_SPLIT_REGEX = Regex(",| and ", RegexOption.IGNORE_CASE)
         private val SUBJECT_REGEX = Regex("\\b[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\\b")
