@@ -2,8 +2,9 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import android.net.Uri
+import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.InputStreamReader
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -14,10 +15,19 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_HTML_CHARS = 200_000
 
-class LinkPreviewFetcher(context: Context) {
+class LinkPreviewFetcher(
+    context: Context,
+    private val httpClient: LinkPreviewHttpClient = LinkPreviewHttpClient.HttpUrlConnection(),
+    cacheDirFactory: (Context) -> File = { ctx ->
+        File(ctx.filesDir, "link_previews").apply { mkdirs() }
+    }
+) {
     private val appContext = context.applicationContext
-    private val cacheDir = File(appContext.filesDir, "link_previews").apply { mkdirs() }
+    private val cacheDir = cacheDirFactory(appContext)
     private val cache = mutableMapOf<String, LinkPreviewResult>()
+    private val defaultHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Android) StarbuckNoteTaker/1.0"
+    )
 
     suspend fun fetch(rawUrl: String): LinkPreviewResult {
         val normalized = normalizeUrl(rawUrl)
@@ -42,48 +52,36 @@ class LinkPreviewFetcher(context: Context) {
 
     private fun loadPreview(urlString: String): LinkPreviewResult {
         val url = URL(urlString)
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            instanceFollowRedirects = true
-            setRequestProperty(
-                "User-Agent",
-                "Mozilla/5.0 (Android) StarbuckNoteTaker/1.0"
-            )
+        val response = httpClient.get(urlString, defaultHeaders, MAX_HTML_CHARS * 4)
+        if (response.statusCode !in 200..299) {
+            return LinkPreviewResult.Failure("Failed to load preview (${response.statusCode})")
         }
-        return try {
-            connection.inputStream.use { input ->
-                val reader = InputStreamReader(input, Charsets.UTF_8)
-                val html = reader.readLimited(MAX_HTML_CHARS)
-                val meta = parseMetadata(html, url)
-                val title = meta.title ?: url.host
-                val description = meta.description
-                val imageCandidates = buildList {
-                    meta.imageUrl?.let { add(it) }
-                    add(buildSnapshotUrl(urlString))
-                }
-                var selectedImageUrl: String? = null
-                var cachedImagePath: String? = null
-                for (candidate in imageCandidates) {
-                    selectedImageUrl = candidate
-                    val cached = cacheImage(urlString, candidate)
-                    if (cached != null) {
-                        cachedImagePath = cached
-                        break
-                    }
-                }
-                val preview = NoteLinkPreview(
-                    url = urlString,
-                    title = title,
-                    description = description,
-                    imageUrl = selectedImageUrl,
-                    cachedImagePath = cachedImagePath,
-                )
-                LinkPreviewResult.Success(preview)
+        val html = response.body.toString(Charsets.UTF_8).take(MAX_HTML_CHARS)
+        val meta = parseMetadata(html, url)
+        val title = meta.title ?: url.host
+        val description = meta.description
+        val imageCandidates = buildList {
+            meta.imageUrl?.let { add(it) }
+            add(buildSnapshotUrl(urlString))
+        }
+        var selectedImageUrl: String? = null
+        var cachedImagePath: String? = null
+        for (candidate in imageCandidates) {
+            selectedImageUrl = candidate
+            val cached = cacheImage(urlString, candidate)
+            if (cached != null) {
+                cachedImagePath = cached
+                break
             }
-        } finally {
-            connection.disconnect()
         }
+        val preview = NoteLinkPreview(
+            url = urlString,
+            title = title,
+            description = description,
+            imageUrl = selectedImageUrl,
+            cachedImagePath = cachedImagePath,
+        )
+        return LinkPreviewResult.Success(preview)
     }
 
     private fun cacheImage(urlKey: String, remoteImageUrl: String): String? {
@@ -92,35 +90,20 @@ class LinkPreviewFetcher(context: Context) {
             return existing.absolutePath
         }
         return runCatching {
-            val connection = (URL(remoteImageUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10_000
-                readTimeout = 10_000
-                instanceFollowRedirects = true
-                setRequestProperty(
-                    "User-Agent",
-                    "Mozilla/5.0 (Android) StarbuckNoteTaker/1.0"
-                )
+            val response = httpClient.get(remoteImageUrl, defaultHeaders)
+            if (response.statusCode !in 200..299 || response.body.isEmpty()) {
+                return@runCatching null
             }
-            try {
-                connection.connect()
-                if (connection.responseCode !in 200..299) {
-                    return@runCatching null
-                }
-                val cacheKey = cacheKeyFor(urlKey)
-                val extension = extensionFromConnection(connection.contentType, remoteImageUrl)
-                cacheDir.listFiles()
-                    ?.filter { it.nameWithoutExtensionSafe() == cacheKey }
-                    ?.forEach { it.delete() }
-                val target = File(cacheDir, cacheKey + extension)
-                connection.inputStream.use { input ->
-                    target.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                target.absolutePath
-            } finally {
-                connection.disconnect()
+            val cacheKey = cacheKeyFor(urlKey)
+            val extension = extensionFromContent(response.contentType, remoteImageUrl)
+            cacheDir.listFiles()
+                ?.filter { it.nameWithoutExtensionSafe() == cacheKey }
+                ?.forEach { it.delete() }
+            val target = File(cacheDir, cacheKey + extension)
+            target.outputStream().use { output ->
+                output.write(response.body)
             }
+            target.absolutePath
         }.getOrElse { null }
     }
 
@@ -135,7 +118,7 @@ class LinkPreviewFetcher(context: Context) {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    private fun extensionFromConnection(contentType: String?, remoteImageUrl: String): String {
+    private fun extensionFromContent(contentType: String?, remoteImageUrl: String): String {
         val normalized = contentType?.lowercase(Locale.ROOT) ?: ""
         return when {
             "png" in normalized -> ".png"
@@ -161,24 +144,63 @@ class LinkPreviewFetcher(context: Context) {
     }
 }
 
+interface LinkPreviewHttpClient {
+    fun get(url: String, headers: Map<String, String> = emptyMap(), maxBytes: Int? = null): LinkPreviewHttpResponse
+
+    class HttpUrlConnection : LinkPreviewHttpClient {
+        override fun get(
+            url: String,
+            headers: Map<String, String>,
+            maxBytes: Int?
+        ): LinkPreviewHttpResponse {
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                instanceFollowRedirects = true
+                headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            }
+            return try {
+                val status = connection.responseCode
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.use { input ->
+                    if (maxBytes != null) input.readBytesLimited(maxBytes) else input.readBytes()
+                } ?: ByteArray(0)
+                LinkPreviewHttpResponse(status, connection.contentType, body)
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+}
+
+data class LinkPreviewHttpResponse(
+    val statusCode: Int,
+    val contentType: String?,
+    val body: ByteArray,
+)
+
+private fun InputStream.readBytesLimited(maxBytes: Int): ByteArray {
+    val buffer = ByteArrayOutputStream()
+    val chunk = ByteArray(8 * 1024)
+    var total = 0
+    while (true) {
+        val read = read(chunk)
+        if (read <= 0) break
+        val remaining = maxBytes - total
+        if (remaining <= 0) break
+        val toWrite = minOf(read, remaining)
+        buffer.write(chunk, 0, toWrite)
+        total += toWrite
+        if (toWrite < read || total >= maxBytes) {
+            break
+        }
+    }
+    return buffer.toByteArray()
+}
+
 private fun buildSnapshotUrl(urlString: String): String {
     val encoded = URLEncoder.encode(urlString, Charsets.UTF_8.name())
     return "https://s.wordpress.com/mshots/v1/$encoded?w=1200"
-}
-
-private fun InputStreamReader.readLimited(maxChars: Int): String {
-    val builder = StringBuilder()
-    val buffer = CharArray(4096)
-    while (true) {
-        val read = read(buffer)
-        if (read <= 0) break
-        val remaining = maxChars - builder.length
-        if (remaining <= 0) break
-        val toAppend = if (read > remaining) remaining else read
-        builder.append(buffer, 0, toAppend)
-        if (builder.length >= maxChars) break
-    }
-    return builder.toString()
 }
 
 data class ParsedLinkMetadata(
@@ -228,6 +250,7 @@ private fun resolveUrl(base: URL, candidate: String): String? {
 }
 
 private val schemeRegex = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://")
+private val fallbackHttpUrlRegex = Regex("(?i)https?://[^\\s]+")
 
 fun normalizeUrl(raw: String): String {
     val trimmed = raw.trim()
@@ -250,33 +273,42 @@ data class UrlDetection(
 )
 
 fun extractUrls(text: String, treatUnterminatedAsComplete: Boolean = false): List<UrlDetection> {
-    val matcher = android.util.Patterns.WEB_URL.matcher(text)
     val detections = linkedMapOf<String, UrlDetection>()
-    while (matcher.find()) {
-        val matchStart = matcher.start()
-        var url = text.substring(matchStart, matcher.end())
-        val trimmed = trimTrailingSentencePunctuation(url)
-        if (trimmed.isNotBlank()) {
-            val trimmedTrailing = trimmed.length != url.length
-            val nextIndex = matchStart + trimmed.length
-            val nextChar = text.getOrNull(nextIndex)
-            val isComplete = when {
-                trimmedTrailing -> true
-                nextChar == null -> treatUnterminatedAsComplete || looksCompleteUrl(trimmed)
-                nextChar.isWhitespace() -> true
-                else -> false
-            }
-            val normalized = normalizeUrl(trimmed)
-            val existing = detections[normalized]
-            if (existing == null || (!existing.isComplete && isComplete)) {
-                detections[normalized] = UrlDetection(
-                    originalUrl = trimmed,
-                    normalizedUrl = normalized,
-                    isComplete = isComplete || (existing?.isComplete == true),
-                )
-            }
+
+    fun registerMatch(raw: String, matchStart: Int) {
+        val trimmed = trimTrailingSentencePunctuation(raw)
+        if (trimmed.isBlank()) return
+        val trimmedTrailing = trimmed.length != raw.length
+        val nextIndex = matchStart + trimmed.length
+        val nextChar = text.getOrNull(nextIndex)
+        val isComplete = when {
+            trimmedTrailing -> true
+            nextChar == null -> treatUnterminatedAsComplete || looksCompleteUrl(trimmed)
+            nextChar.isWhitespace() -> true
+            else -> false
+        }
+        val normalized = normalizeUrl(trimmed)
+        val existing = detections[normalized]
+        if (existing == null || (!existing.isComplete && isComplete)) {
+            detections[normalized] = UrlDetection(
+                originalUrl = trimmed,
+                normalizedUrl = normalized,
+                isComplete = isComplete || (existing?.isComplete == true),
+            )
         }
     }
+
+    val strictMatcher = android.util.Patterns.WEB_URL.matcher(text)
+    while (strictMatcher.find()) {
+        val matchStart = strictMatcher.start()
+        val match = text.substring(matchStart, strictMatcher.end())
+        registerMatch(match, matchStart)
+    }
+
+    fallbackHttpUrlRegex.findAll(text).forEach { result ->
+        registerMatch(result.value, result.range.first)
+    }
+
     return detections.values.toList()
 }
 
