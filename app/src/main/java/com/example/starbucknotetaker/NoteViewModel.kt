@@ -17,6 +17,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.net.URL
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -50,8 +51,12 @@ class NoteViewModel(
     private var context: Context? = null
     private var summarizer: Summarizer? = null
     private var reminderScheduler: NoteAlarmScheduler? = null
+    private var appSettings: AppSettings? = null
+    private val _summarizerEnabled = MutableStateFlow(true)
+    val summarizerEnabled: StateFlow<Boolean> = _summarizerEnabled
     private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
     val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
+    private var summarizerStateJob: Job? = null
     private val unlockedNoteIds = mutableStateListOf<Long>()
     private val reminderNavigationEvents = MutableSharedFlow<Long>(
         extraBufferCapacity = 1,
@@ -83,35 +88,62 @@ class NoteViewModel(
         val s = EncryptedNoteStore(context, attachments)
         store = s
         reminderScheduler = NoteAlarmScheduler(appContext)
+        appSettings = AppSettings(appContext)
         _notes.clear()
         _notes.addAll(s.loadNotes(pin))
         unlockedNoteIds.clear()
         reorderNotes()
         reminderScheduler?.syncNotes(_notes)
         tryEmitPendingReminder()
-        summarizer = Summarizer(context.applicationContext).also { sum ->
-            viewModelScope.launch {
-                sum.state.collect { state ->
-                    _summarizerState.value = state
-                    this@NoteViewModel.context?.let { ctx ->
-                        when (state) {
-                            Summarizer.SummarizerState.Ready -> Unit
-                            Summarizer.SummarizerState.Fallback -> Unit
-                            is Summarizer.SummarizerState.Error ->
-                                NotificationInterruptionManager.runOrQueue {
-                                    Toast.makeText(
-                                        ctx,
-                                        "Summarizer init failed: ${'$'}{state.message}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            else -> {}
-                        }
+        val summarizerEnabled = appSettings?.isSummarizerEnabled() ?: true
+        _summarizerEnabled.value = summarizerEnabled
+        configureSummarizer(summarizerEnabled)
+    }
+
+    fun setSummarizerEnabled(enabled: Boolean) {
+        if (_summarizerEnabled.value == enabled) return
+        _summarizerEnabled.value = enabled
+        appSettings?.setSummarizerEnabled(enabled)
+        configureSummarizer(enabled)
+    }
+
+    private fun configureSummarizer(enabled: Boolean) {
+        summarizerStateJob?.cancel()
+        summarizerStateJob = null
+        summarizer?.close()
+        summarizer = null
+
+        if (!enabled) {
+            _summarizerState.value = Summarizer.SummarizerState.Ready
+            return
+        }
+
+        val ctx = context ?: return
+        val sum = Summarizer(ctx.applicationContext)
+        summarizer = sum
+        summarizerStateJob = viewModelScope.launch {
+            sum.state.collect { state ->
+                _summarizerState.value = state
+                this@NoteViewModel.context?.let { currentContext ->
+                    when (state) {
+                        Summarizer.SummarizerState.Ready -> Unit
+                        Summarizer.SummarizerState.Fallback -> Unit
+                        is Summarizer.SummarizerState.Error ->
+                            NotificationInterruptionManager.runOrQueue {
+                                Toast.makeText(
+                                    currentContext,
+                                    "Summarizer init failed: ${state.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        else -> {}
                     }
                 }
             }
         }
     }
+
+    private fun isSummarizerEnabled(): Boolean = _summarizerEnabled.value
 
     fun setPendingShare(pending: PendingShare?) {
         _pendingShare.value = pending
@@ -215,7 +247,12 @@ class NoteViewModel(
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
         val summarizerSource = buildSummarizerSource(finalTitle, finalContent, event)
-        val initialSummary = synchronousSummaryPlaceholder(summarizerSource)
+        val summarizerEnabled = isSummarizerEnabled()
+        val initialSummary = if (summarizerEnabled) {
+            synchronousSummaryPlaceholder(summarizerSource)
+        } else {
+            manualSummaryFromContent(finalContent)
+        }
         val note = Note(
             title = finalTitle,
             content = finalContent.trim(),
@@ -233,8 +270,10 @@ class NoteViewModel(
         pin?.let { store?.saveNotes(_notes, it) }
         reminderScheduler?.scheduleIfNeeded(note)
         tryEmitPendingReminder()
-        val noteId = note.id
-        launchSummaryUpdates(noteId, finalTitle, summarizerSource, event)
+        if (summarizerEnabled) {
+            val noteId = note.id
+            launchSummaryUpdates(noteId, finalTitle, summarizerSource, event)
+        }
     }
 
     fun deleteNote(id: Long) {
@@ -289,7 +328,12 @@ class NoteViewModel(
                     styledContent
                 }
             val summarizerSource = buildSummarizerSource(finalTitle, contentForUpdate, finalEvent)
-            val initialSummary = synchronousSummaryPlaceholder(summarizerSource)
+            val summarizerEnabled = isSummarizerEnabled()
+            val initialSummary = if (summarizerEnabled) {
+                synchronousSummaryPlaceholder(summarizerSource)
+            } else {
+                manualSummaryFromContent(contentForUpdate)
+            }
             val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
             val preparedImages = prepareImagesForStorage(images)
             val preparedFiles = prepareFilesForStorage(files)
@@ -315,8 +359,10 @@ class NoteViewModel(
             deleteAttachments(removedImageIds + removedFileIds)
             reminderScheduler?.scheduleIfNeeded(updated)
             tryEmitPendingReminder()
-            val noteId = updated.id
-            launchSummaryUpdates(noteId, finalTitle, summarizerSource, finalEvent)
+            if (summarizerEnabled) {
+                val noteId = updated.id
+                launchSummaryUpdates(noteId, finalTitle, summarizerSource, finalEvent)
+            }
         }
     }
 
@@ -709,11 +755,14 @@ class NoteViewModel(
         event: NoteEvent?,
     ) {
         if (source.isBlank()) return
+        if (!isSummarizerEnabled()) return
         val sum = summarizer ?: return
         viewModelScope.launch {
+            if (!isSummarizerEnabled()) return@launch
             runCatching {
                 sum.fallbackSummary(source, event)
             }.onSuccess { fallback ->
+                if (!isSummarizerEnabled()) return@launch
                 updateNoteSummary(noteId, fallback)
             }.onFailure {
                 Log.e("NoteViewModel", "fallback summary failed", it)
@@ -722,6 +771,7 @@ class NoteViewModel(
             runCatching {
                 sum.summarize(source)
             }.onSuccess { summary ->
+                if (!isSummarizerEnabled()) return@launch
                 val trace = sum.consumeDebugTrace()
                 val updated = updateNoteSummary(noteId, summary)
                 if (updated && shouldCreateDebugNote(trace)) {
@@ -743,6 +793,19 @@ class NoteViewModel(
         _notes[index] = _notes[index].copy(summary = cleanedSummary)
         pin?.let { store?.saveNotes(_notes, it) }
         return true
+    }
+
+    private fun manualSummaryFromContent(content: String): String {
+        if (content.isBlank()) return ""
+        val sanitized = sanitizeSummary(content)
+        if (sanitized.isBlank()) return ""
+        return sanitized
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .take(2)
+            .joinToString("\n")
+            .trim()
     }
 
     private fun sanitizeSummary(summary: String): String {
@@ -799,6 +862,8 @@ class NoteViewModel(
     }
 
     override fun onCleared() {
+        summarizerStateJob?.cancel()
+        summarizerStateJob = null
         summarizer?.close()
         super.onCleared()
     }
