@@ -2,6 +2,7 @@ package com.example.starbucknotetaker
 
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.Tensor
+import org.tensorflow.lite.flex.FlexDelegate
 import java.nio.MappedByteBuffer
 
 /** Lightweight abstraction over TensorFlow Lite interpreter APIs used by [Summarizer]. */
@@ -22,7 +23,10 @@ interface LiteTensor {
 }
 
 /** Default factory creating [LiteInterpreter] instances backed by TensorFlow Lite. */
-class TfLiteInterpreter private constructor(private val delegate: Interpreter) : LiteInterpreter {
+class TfLiteInterpreter private constructor(
+    private val delegate: Interpreter,
+    private val flexDelegate: FlexDelegate?
+) : LiteInterpreter {
     override val inputTensorCount: Int
         get() = delegate.inputTensorCount
 
@@ -40,10 +44,23 @@ class TfLiteInterpreter private constructor(private val delegate: Interpreter) :
 
     override fun close() {
         delegate.close()
+        flexDelegate?.close()
     }
 
     companion object {
-        fun create(model: MappedByteBuffer): LiteInterpreter = TfLiteInterpreter(Interpreter(model))
+        fun create(model: MappedByteBuffer): LiteInterpreter {
+            val flexDelegate = try {
+                FlexDelegate()
+            } catch (error: UnsatisfiedLinkError) {
+                null
+            }
+            val options = Interpreter.Options()
+            if (flexDelegate != null) {
+                options.addDelegate(flexDelegate)
+            }
+            val interpreter = Interpreter(model, options)
+            return TfLiteInterpreter(interpreter, flexDelegate)
+        }
     }
 }
 

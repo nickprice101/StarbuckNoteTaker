@@ -176,6 +176,7 @@ dependencies {
         exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
+    implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.17.0'
     implementation 'org.tensorflow:tensorflow-lite-api:2.17.0'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
