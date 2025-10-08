@@ -1,0 +1,22 @@
+{
+  "created": "2025-10-07T09:28:24.288442",
+  "validation_accuracy": "95.92%",
+  "test_accuracy": "42.9%",
+  "categories": [
+    "FOOD_RECIPE",
+    "PERSONAL_DAILY_LIFE",
+    "FINANCE_LEGAL",
+    "SELF_IMPROVEMENT",
+    "HEALTH_WELLNESS",
+    "EDUCATION_LEARNING",
+    "HOME_FAMILY",
+    "WORK_PROJECT",
+    "MEETING_RECAP",
+    "SHOPPING_LIST",
+    "REMINDER",
+    "TRAVEL_LOG",
+    "CREATIVE_WRITING",
+    "TECHNICAL_REFERENCE"
+  ],
+  "model_size_mb": "2.84"
+}
