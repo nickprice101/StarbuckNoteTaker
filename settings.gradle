@@ -15,7 +15,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://storage.googleapis.com/download.tensorflow.org/maven' }
+        maven {
+            name = "TensorFlow"
+            url = uri('https://storage.googleapis.com/download.tensorflow.org/maven')
+        }
     }
 }
 
