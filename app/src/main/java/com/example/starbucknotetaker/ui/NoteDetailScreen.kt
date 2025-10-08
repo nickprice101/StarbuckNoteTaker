@@ -594,20 +594,20 @@ private fun buildShareIntent(
     return intent
 }
 
-private fun resolveShareMimeType(attachments: List<PreparedAttachment>): String {
-    if (attachments.isEmpty()) {
+internal fun resolveShareMimeTypeFromMimeTypes(mimeTypes: List<String>): String {
+    if (mimeTypes.isEmpty()) {
         return "text/plain"
     }
-    val mimeTypes = attachments.map { attachment ->
-        attachment.mimeType.takeIf { it.isNotBlank() } ?: "*/*"
+    val sanitizedTypes = mimeTypes.map { type ->
+        type.takeIf { it.isNotBlank() } ?: "*/*"
     }
-    if (mimeTypes.all { it == "*/*" }) {
+    if (sanitizedTypes.all { it == "*/*" }) {
         return "*/*"
     }
-    if (mimeTypes.toSet().size == 1) {
-        return mimeTypes.first()
+    if (sanitizedTypes.toSet().size == 1) {
+        return sanitizedTypes.first()
     }
-    val primaryTypes = mimeTypes.mapNotNull { type ->
+    val primaryTypes = sanitizedTypes.mapNotNull { type ->
         type.substringBefore('/', missingDelimiterValue = "").takeIf { it.isNotBlank() }
     }.toSet()
     return if (primaryTypes.size == 1) {
@@ -615,6 +615,10 @@ private fun resolveShareMimeType(attachments: List<PreparedAttachment>): String 
     } else {
         "*/*"
     }
+}
+
+private fun resolveShareMimeType(attachments: List<PreparedAttachment>): String {
+    return resolveShareMimeTypeFromMimeTypes(attachments.map { attachment -> attachment.mimeType })
 }
 
 private fun buildShareText(
