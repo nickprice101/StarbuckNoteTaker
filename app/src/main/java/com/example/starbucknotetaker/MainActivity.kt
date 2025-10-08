@@ -301,6 +301,7 @@ fun AppContent(
 ) {
     val context = LocalContext.current
     val summarizerState by noteViewModel.summarizerState.collectAsState()
+    val summarizerEnabled by noteViewModel.summarizerEnabled.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -556,6 +557,8 @@ fun AppContent(
                 pinManager = pinManager,
                 biometricEnabled = biometricsEnabled,
                 onBiometricChanged = { enabled -> biometricsEnabled = enabled },
+                summarizerEnabled = summarizerEnabled,
+                onSummarizerChanged = { enabled -> noteViewModel.setSummarizerEnabled(enabled) },
                 onBack = { navController.popBackStack() },
                 onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
                 onExport = { uri -> noteViewModel.exportNotes(context, uri) },

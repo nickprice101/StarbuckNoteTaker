@@ -33,6 +33,8 @@ fun SettingsScreen(
     pinManager: PinManager,
     biometricEnabled: Boolean,
     onBiometricChanged: (Boolean) -> Unit,
+    summarizerEnabled: Boolean,
+    onSummarizerChanged: (Boolean) -> Unit,
     onBack: () -> Unit,
     onImport: (Uri, String, Boolean) -> Boolean,
     onExport: (Uri) -> Unit,
@@ -281,6 +283,31 @@ fun SettingsScreen(
                 exportLauncher.launch(name)
             }) {
                 Text("Export archived notes file")
+            }
+            Divider()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("AI-assisted summaries", style = MaterialTheme.typography.h6)
+                        Text(
+                            "Use the on-device model to generate note previews.",
+                            style = MaterialTheme.typography.body2
+                        )
+                    }
+                    Switch(
+                        checked = summarizerEnabled,
+                        onCheckedChange = onSummarizerChanged
+                    )
+                }
+                Text(
+                    text = if (summarizerEnabled) {
+                        "New and edited notes receive AI-enhanced summaries."
+                    } else {
+                        "When off, previews show the first two lines of the note instead."
+                    },
+                    style = MaterialTheme.typography.caption,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
             Divider()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
