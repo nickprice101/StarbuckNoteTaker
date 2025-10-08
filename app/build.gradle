@@ -378,10 +378,9 @@ tasks.withType(Test).configureEach { testTask ->
 
 configurations.configureEach { configuration ->
     configuration.resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'org.tensorflow') {
-            if (details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
-                details.useVersion '2.12.0'
-            }
+        if (details.requested.group == 'org.tensorflow' &&
+                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
+            details.useVersion '2.17.0'
         }
     }
 }
