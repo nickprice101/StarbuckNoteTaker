@@ -747,7 +747,10 @@ class NoteViewModel(
 
     private fun sanitizeSummary(summary: String): String {
         val stripped = attachmentTagRegex.replace(summary, " ")
-        return stripped.replace(Regex("\\s+"), " ").trim()
+        val sanitizedLines = stripped
+            .split('\n')
+            .map { line -> line.replace(Regex("\\s+"), " ").trim() }
+        return sanitizedLines.joinToString("\n").trim()
     }
 
     private data class ProcessedNoteContent(
