@@ -2,6 +2,7 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.util.PatternsCompat
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -343,7 +344,7 @@ private fun looksCompleteUrl(url: String): Boolean {
     if (host.isBlank()) return false
     if (host.equals("localhost", ignoreCase = true)) return true
     if (host.contains('.')) return true
-    if (android.util.Patterns.IP_ADDRESS.matcher(host).matches()) return true
+    if (PatternsCompat.IP_ADDRESS.matcher(host).matches()) return true
     if (uri.port != -1) return true
     val path = uri.path
     if (!path.isNullOrBlank() && path != "/") return true

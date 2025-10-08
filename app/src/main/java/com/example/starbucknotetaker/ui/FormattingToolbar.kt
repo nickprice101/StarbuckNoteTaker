@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatColorReset
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.FormatItalic
-import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.Highlight
@@ -108,7 +108,7 @@ fun FormattingToolbar(
                     selectedColor = textColorStyle?.color,
                     onClick = { showColorDialog = true },
                 )
-                ToolbarActionButton(Icons.Filled.FormatListBulleted) {
+                ToolbarActionButton(Icons.AutoMirrored.Filled.FormatListBulleted) {
                     onAction(FormattingAction.BulletList)
                 }
                 ToolbarActionButton(Icons.Filled.FormatListNumbered) {

@@ -118,7 +118,11 @@ internal suspend fun lookupVenueAtAddress(geocoder: Geocoder, originalQuery: Str
         try {
             Log.d("AddressUtils", "Looking up venue for query: $originalQuery")
             
-            val addresses = geocoder.getFromLocationName(originalQuery, 10) ?: return@withContext null
+            val addresses = geocoder.getFromLocationNameCompat(originalQuery, 10)
+            if (addresses.isEmpty()) {
+                Log.d("AddressUtils", "No geocoded results for query: $originalQuery")
+                return@withContext null
+            }
             Log.d("AddressUtils", "Found ${addresses.size} geocoded results")
             
             // Look for actual venue/POI names in the results
@@ -158,10 +162,7 @@ private fun logAddressDetails(address: Address, index: Int) {
     // Log extras bundle
     val extras = address.extras
     if (extras != null) {
-        Log.d("AddressUtils", "  Extras:")
-        for (key in extras.keySet()) {
-            Log.d("AddressUtils", "    $key: ${extras.get(key)}")
-        }
+        Log.d("AddressUtils", "  Extras: $extras")
     }
 }
 

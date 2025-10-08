@@ -1,15 +1,17 @@
 package com.example.starbucknotetaker.ui
 
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
-import androidx.compose.material.FractionalThreshold
-import androidx.compose.material.rememberSwipeableState
-import androidx.compose.material.swipeable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.CheckBox
@@ -18,7 +20,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +42,9 @@ import com.example.starbucknotetaker.Summarizer
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collect
+import androidx.compose.runtime.snapshotFlow
 import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
@@ -123,7 +128,7 @@ fun NoteListScreen(
                             creationMenuExpanded = false
                             onAddChecklist()
                         }) {
-                            Icon(Icons.Default.ViewList, contentDescription = null)
+                            Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("New Checklist")
                         }
@@ -254,7 +259,9 @@ fun NoteListScreen(
     }
 }
 
-@OptIn(ExperimentalMaterialApi::class)
+private enum class SwipeActionState { Closed, Open }
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeToDeleteNoteItem(
     note: Note,
@@ -265,38 +272,56 @@ private fun SwipeToDeleteNoteItem(
     onDelete: () -> Unit
 ) {
     val actionWidth = 80.dp
-    val actionWidthPx = with(LocalDensity.current) { actionWidth.toPx() }
-    val swipeState = rememberSwipeableState(0)
+    val density = LocalDensity.current
+    val actionWidthPx = with(density) { actionWidth.toPx() }
+    val velocityThresholdPx = with(density) { 100.dp.toPx() }
+    val swipeState = remember(density) {
+        AnchoredDraggableState(
+            initialValue = SwipeActionState.Closed,
+            anchors = DraggableAnchors { },
+            positionalThreshold = { distance -> distance * 0.3f },
+            velocityThreshold = { velocityThresholdPx },
+            animationSpec = spring()
+        )
+    }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(isOpen) {
-        if (isOpen) {
-            swipeState.animateTo(1)
-        } else {
-            swipeState.animateTo(0)
+    LaunchedEffect(actionWidthPx) {
+        val anchors = DraggableAnchors {
+            this[SwipeActionState.Closed] = 0f
+            this[SwipeActionState.Open] = -actionWidthPx
+        }
+        swipeState.updateAnchors(anchors)
+    }
+
+    LaunchedEffect(isOpen, swipeState.anchors) {
+        if (swipeState.anchors.size >= 2) {
+            val target = if (isOpen) SwipeActionState.Open else SwipeActionState.Closed
+            swipeState.animateTo(target)
         }
     }
 
-    LaunchedEffect(swipeState.currentValue) {
-        if (swipeState.currentValue == 1) {
-            onOpen()
-        } else {
-            onClose()
-        }
+    LaunchedEffect(swipeState) {
+        snapshotFlow { swipeState.currentValue }
+            .distinctUntilChanged()
+            .collect { value ->
+                if (value == SwipeActionState.Open) {
+                    onOpen()
+                } else {
+                    onClose()
+                }
+            }
     }
+
+    val offset = swipeState.offset.takeIf { it.isFinite() } ?: 0f
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
             .background(Color.Transparent)
-            .swipeable(
+            .anchoredDraggable(
                 state = swipeState,
-                anchors = mapOf(
-                    0f to 0,
-                    -actionWidthPx to 1
-                ),
-                thresholds = { _, _ -> FractionalThreshold(0.3f) },
                 orientation = Orientation.Horizontal
             )
     ) {
@@ -308,7 +333,7 @@ private fun SwipeToDeleteNoteItem(
                 .background(Color.Red)
                 .clickable {
                     onDelete()
-                    scope.launch { swipeState.snapTo(0) }
+                    scope.launch { swipeState.snapTo(SwipeActionState.Closed) }
                 }
         ) {
             Icon(
@@ -321,13 +346,13 @@ private fun SwipeToDeleteNoteItem(
         NoteListItem(
             note = note,
             onClick = {
-                if (swipeState.currentValue == 1) {
-                    scope.launch { swipeState.animateTo(0) }
+                if (swipeState.currentValue == SwipeActionState.Open) {
+                    scope.launch { swipeState.animateTo(SwipeActionState.Closed) }
                 } else {
                     onClick()
                 }
             },
-            modifier = Modifier.offset { IntOffset(swipeState.offset.value.roundToInt(), 0) }
+            modifier = Modifier.offset { IntOffset(offset.roundToInt(), 0) }
         )
     }
 }
