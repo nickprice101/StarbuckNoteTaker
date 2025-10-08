@@ -6,7 +6,7 @@ Starbuck Note Taker is an offline-first Android app for capturing rich, encrypte
 
 - **Compose-first editing experience.** Create notes with rich text formatting, inline checklists, event metadata, and optional reminders while staying inside a single Compose-powered workflow.
 - **Attachments and link previews.** Add images, upload arbitrary files, and generate cached link previews that stay available offline after the first fetch.
-- **AI summaries and note classification.** Each note can be condensed through an on-device pipeline that classifies the note type and then runs an int8 FLAN-T5 decoder with graceful fallbacks when models are unavailable.
+- **AI summaries and note classification.** Each note is condensed on-device by a TensorFlow Lite classifier (`note_classifier.tflite`) that predicts the intent of the note and produces an enhanced, human-readable summary with graceful fallbacks when the model is unavailable.
 - **End-to-end encryption.** Notes, attachments, and exported archives are encrypted with a user PIN, with optional biometric unlock for convenience.
 - **Import/export without the cloud.** Users can back up or restore their encrypted notes via `.snarchive` files that continue to require the original PIN when imported.
 
@@ -15,11 +15,10 @@ Link previews fetch metadata over HTTPS; all other functionality continues to op
 ## Project structure
 
 ```
-app/                  # Android application module (Compose UI, ViewModel, services)
-app/src/main/assets/  # Bundled ML models (not checked into VCS)
-scripts/              # Helper scripts for ML asset validation
-build_tensor.py       # Training and conversion workflow for the summariser
-training_data.py      # Curated training set for note categories and summaries
+app/                             # Android application module (Compose UI, ViewModel, services)
+app/src/main/assets/             # Bundled summariser model, metadata, and category mapping
+app/src/main/assets/scripts/     # Offline training pipeline and enhanced summary examples
+scripts/                         # Helper scripts for validating required assets
 ```
 
 ## Getting started
@@ -36,13 +35,19 @@ For a repeatable developer workstation, `setup_persist.sh` can install the Andro
 
 ## On-device ML assets
 
-The summariser service expects `note_classifier.tflite` to be present under `app/src/main/assets/`. Large binaries remain untracked; run `scripts/generate_summarizer_assets.py` to check for missing files during setup.
+The summariser expects the following files inside `app/src/main/assets/`:
 
-To regenerate the models:
+- `note_classifier.tflite` – the TensorFlow Lite model that predicts note categories.
+- `category_mapping.json` – label index mapping used by the interpreter.
+- `deployment_metadata.json` – build metadata (version, accuracy metrics, model size).
 
-1. Update or extend the labelled examples in `training_data.py`.
-2. Execute `build_tensor.py` to fine-tune FLAN-T5, convert the models to TensorFlow Lite, and write the assets into the project structure.
-3. Copy the resulting files into `app/src/main/assets/` before building the app.
+Large binaries remain untracked; run `scripts/generate_summarizer_assets.py` to verify that required assets are present on your workstation.
+
+To regenerate the classifier:
+
+1. Edit the labelled examples in `app/src/main/assets/scripts/training_data_large.py` if you need additional coverage.
+2. Execute `app/src/main/assets/scripts/complete_pipeline.py` to train the model, export the TFLite file, and print enhanced summary examples for validation.
+3. Copy the generated artifacts (`note_classifier.tflite`, `category_mapping.json`, `deployment_metadata.json`) into `app/src/main/assets/` before building the app.
 
 ## Contributing
 
