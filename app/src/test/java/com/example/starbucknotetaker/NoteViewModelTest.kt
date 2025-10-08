@@ -37,7 +37,7 @@ class NoteViewModelTest {
     fun addNoteUpdatesSummaryFromSummarizer() = runTest(dispatcher.scheduler) {
         val summarizer = mock<Summarizer>()
         whenever(summarizer.quickFallbackSummary(any())).thenReturn("Quick placeholder")
-        whenever(summarizer.fallbackSummary(any(), anyOrNull())).thenReturn(NoteNatureType.GENERAL_NOTE.humanReadable)
+        whenever(summarizer.fallbackSummary(any(), anyOrNull())).thenReturn("Fallback summary")
         whenever(summarizer.summarize(any())).thenReturn("mocked summary")
         whenever(summarizer.consumeDebugTrace()).thenReturn(emptyList())
 
