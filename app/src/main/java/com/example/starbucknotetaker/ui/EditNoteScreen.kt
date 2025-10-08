@@ -35,7 +35,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1020,7 +1020,7 @@ fun EditNoteScreen(
                                 .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(block.file.name)
                             IconButton(
@@ -1115,7 +1115,7 @@ fun EditNoteScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AttachmentAction(
-                        icon = Icons.Default.InsertDriveFile,
+                        icon = Icons.AutoMirrored.Filled.InsertDriveFile,
                         label = "Add File",
                     ) {
                         onDisablePinCheck()

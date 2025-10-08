@@ -39,9 +39,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -418,7 +418,7 @@ fun SketchPadDialog(
                                     }
                                 }
                             },
-                            icon = Icons.Filled.Undo,
+                            icon = Icons.AutoMirrored.Filled.Undo,
                             contentDescription = "Undo",
                             backgroundColor = MaterialTheme.colors.surface,
                             iconTint = MaterialTheme.colors.onSurface,
@@ -453,7 +453,7 @@ fun SketchPadDialog(
                                     }
                                 }
                             },
-                            icon = Icons.Filled.Redo,
+                            icon = Icons.AutoMirrored.Filled.Redo,
                             contentDescription = "Redo",
                             backgroundColor = MaterialTheme.colors.surface,
                             iconTint = MaterialTheme.colors.onSurface,

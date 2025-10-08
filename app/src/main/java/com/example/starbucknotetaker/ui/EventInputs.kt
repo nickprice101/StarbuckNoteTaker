@@ -120,8 +120,8 @@ fun LocationAutocompleteField(
             delay(300)
             val results = withContext(Dispatchers.IO) {
                 runCatching {
-                    geocoder.getFromLocationName(query, 5)
-                        ?.mapNotNull { address ->
+                    geocoder.getFromLocationNameCompat(query, 5)
+                        .mapNotNull { address ->
                             val summary = address.toSuggestion() ?: return@mapNotNull null
                             if (isDebuggable) {
                                 Log.d(
@@ -154,8 +154,7 @@ fun LocationAutocompleteField(
                                 isFallback = resolvedDisplay == null,
                             )
                         }
-                        ?.distinctBy { it.text }
-                        ?: emptyList()
+                        .distinctBy { it.text }
                 }.getOrDefault(emptyList())
             }
             suggestions = results

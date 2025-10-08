@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.*
 import androidx.compose.runtime.mutableStateListOf
@@ -318,7 +318,10 @@ fun NoteDetailScreen(
                                     },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.InsertDriveFile, contentDescription = file.name)
+                                Icon(
+                                    Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    contentDescription = file.name
+                                )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(file.name)
                             }

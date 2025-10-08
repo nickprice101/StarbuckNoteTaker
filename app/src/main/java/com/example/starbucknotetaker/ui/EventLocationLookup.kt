@@ -37,7 +37,7 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
 
                 // Step 2: Get address information via geocoding
                 val addresses = runCatching {
-                    geocoder.getFromLocationName(query, 5) ?: emptyList()
+                    geocoder.getFromLocationNameCompat(query, 5)
                 }.getOrElse { emptyList() }
                 
                 Log.d("EventLocationLookup", "Found ${addresses.size} geocoding results")
