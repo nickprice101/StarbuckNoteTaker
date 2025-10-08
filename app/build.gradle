@@ -239,7 +239,8 @@ dependencies {
         exclude group: "org.tensorflow", module: "tensorflow-lite"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
-    implementation 'org.tensorflow:tensorflow-lite-api:2.17.0'
+    // Provide the Java API stubs without packaging a duplicate manifest namespace.
+    compileOnly 'org.tensorflow:tensorflow-lite-api:2.17.0'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     implementation 'ai.djl.android:tokenizer-native:0.33.0'
