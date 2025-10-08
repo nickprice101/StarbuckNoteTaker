@@ -3,9 +3,8 @@ package com.example.starbucknotetaker.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
@@ -34,13 +33,17 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.richtext.RichTextStyle
 import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
 
-@OptIn(ExperimentalMaterialApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterialApi::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun RichTextEditor(
     value: RichTextValue,
@@ -61,6 +64,8 @@ fun RichTextEditor(
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val coroutineScope = rememberCoroutineScope()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
 
     LaunchedEffect(value) {
         if (value != state.value) {
@@ -119,13 +124,32 @@ fun RichTextEditor(
 
     val bringCursorIntoView: suspend () -> Unit = inner@{
         val layout = textLayoutResult ?: return@inner
+        val annotatedText = layout.layoutInput.text
+        val rawText = annotatedText.text
         val selectionEnd = state.value.selection.end.coerceAtLeast(state.value.selection.start)
-        val clampedSelection = selectionEnd.coerceIn(0, layout.layoutInput.text.length)
+        val clampedSelection = selectionEnd.coerceIn(0, rawText.length)
         val cursorRect = layout.getCursorRect(clampedSelection)
-        bringIntoViewRequester.bringIntoView(cursorRect)
+        val contextStart = findSentenceContextStart(rawText, clampedSelection)
+        val contextLine = layout.getLineForOffset(contextStart)
+        val contextTop = layout.getLineTop(contextLine)
+        val cursorLine = layout.getLineForOffset(clampedSelection)
+        val cursorBottom = layout.getLineBottom(cursorLine)
+        val cursorTop = layout.getLineTop(cursorLine)
+        val lineHeight = cursorBottom - cursorTop
+        val expandedBottom = min(
+            layout.size.height.toFloat(),
+            max(cursorRect.bottom, cursorBottom) + lineHeight,
+        )
+        val rect = Rect(
+            left = 0f,
+            top = min(contextTop, cursorRect.top),
+            right = layout.size.width.toFloat(),
+            bottom = max(expandedBottom, cursorRect.bottom),
+        )
+        bringIntoViewRequester.bringIntoView(rect)
     }
 
-    LaunchedEffect(isFocused, state.value.selection, textLayoutResult) {
+    LaunchedEffect(isFocused, state.value.selection, textLayoutResult, imeBottom) {
         if (isFocused) {
             bringCursorIntoView()
         }
@@ -236,3 +260,62 @@ data class FloatingFormattingToolbarState(
     val onSelectTextColor: (Color?) -> Unit,
     val onAction: (FormattingAction) -> Unit,
 )
+
+private fun findSentenceContextStart(text: String, selection: Int): Int {
+    if (text.isEmpty()) {
+        return 0
+    }
+    val clampedSelection = selection.coerceIn(0, text.length)
+    val currentSentenceStart = findSentenceStart(text, clampedSelection)
+    if (currentSentenceStart <= 0) {
+        return 0
+    }
+    val previousSentenceStart = findSentenceStart(text, currentSentenceStart - 1)
+    return if (previousSentenceStart < currentSentenceStart) {
+        previousSentenceStart.coerceIn(0, text.length)
+    } else {
+        currentSentenceStart
+    }
+}
+
+private fun findSentenceStart(text: String, index: Int): Int {
+    if (text.isEmpty()) {
+        return 0
+    }
+    var searchIndex = index.coerceIn(0, text.length)
+    if (searchIndex == text.length && text.isNotEmpty()) {
+        searchIndex--
+    }
+    while (searchIndex >= 0 && text[searchIndex].isSkippableWhitespace()) {
+        searchIndex--
+    }
+    if (searchIndex < 0) {
+        return 0
+    }
+    if (text[searchIndex].isSentenceTerminator()) {
+        return skipForwardWhitespace(text, searchIndex + 1)
+    }
+    for (i in searchIndex downTo 0) {
+        val ch = text[i]
+        if (ch.isSentenceTerminator()) {
+            return skipForwardWhitespace(text, i + 1)
+        }
+    }
+    return 0
+}
+
+private fun skipForwardWhitespace(text: String, start: Int): Int {
+    var idx = start
+    while (idx < text.length && text[idx].isWhitespace()) {
+        idx++
+    }
+    return idx.coerceIn(0, text.length)
+}
+
+private fun Char.isSentenceTerminator(): Boolean {
+    return this == '.' || this == '!' || this == '?' || this == '\n' || this == '\r'
+}
+
+private fun Char.isSkippableWhitespace(): Boolean {
+    return this != '\n' && this != '\r' && this.isWhitespace()
+}
