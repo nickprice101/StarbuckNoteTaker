@@ -5,6 +5,8 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -17,9 +19,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -27,9 +33,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.starbucknotetaker.richtext.RichTextStyle
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
@@ -49,6 +57,9 @@ fun RichTextEditor(
     val colors = TextFieldDefaults.outlinedTextFieldColors()
     val state = remember { RichTextState(value) }
     val notifyExternalIfChanged = rememberUpdatedState(newValue = onValueChange)
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     LaunchedEffect(value) {
         if (value != state.value) {
@@ -105,6 +116,20 @@ fun RichTextEditor(
         }
     }
 
+    val bringCursorIntoView: suspend () -> Unit = inner@{
+        val layout = textLayoutResult ?: return@inner
+        val selectionEnd = state.value.selection.end.coerceAtLeast(state.value.selection.start)
+        val clampedSelection = selectionEnd.coerceIn(0, layout.layoutInput.text.length)
+        val cursorRect = layout.getCursorRect(clampedSelection)
+        bringIntoViewRequester.bringIntoView(cursorRect)
+    }
+
+    LaunchedEffect(isFocused, state.value.selection, textLayoutResult) {
+        if (isFocused) {
+            bringCursorIntoView()
+        }
+    }
+
     BasicTextField(
         value = state.asTextFieldValue(),
         onValueChange = { newValue ->
@@ -113,6 +138,14 @@ fun RichTextEditor(
         },
         modifier = modifier
             .fillMaxWidth()
+            .bringIntoViewRequester(bringIntoViewRequester)
+            .onFocusChanged { focusState ->
+                if (focusState.isFocused) {
+                    coroutineScope.launch {
+                        bringCursorIntoView()
+                    }
+                }
+            }
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown &&
                     (event.key == Key.Enter || event.key == Key.NumPadEnter)
@@ -131,6 +164,9 @@ fun RichTextEditor(
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         interactionSource = interactionSource,
+        onTextLayout = { layoutResult ->
+            textLayoutResult = layoutResult
+        },
         decorationBox = { innerTextField ->
             OutlinedTextFieldDecorationBox(
                 value = state.value.text,
