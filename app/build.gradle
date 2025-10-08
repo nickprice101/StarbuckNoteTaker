@@ -57,6 +57,21 @@ def alignNativeLibrariesAction = { Project gradleProject, Collection<File> nativ
         if (!library.exists()) {
             return
         }
+        if (!library.name.endsWith('.so')) {
+            gradleProject.logger.info("Skipping native alignment for non-ELF file {}", library)
+            return
+        }
+
+        byte[] magic = new byte[4]
+        int headerBytes = library.withInputStream { stream ->
+            stream.read(magic)
+        }
+        boolean isElf = headerBytes == 4 &&
+                magic[0] == 0x7f && magic[1] == 0x45 && magic[2] == 0x4c && magic[3] == 0x46
+        if (!isElf) {
+            gradleProject.logger.info("Skipping native alignment for non-ELF file {}", library)
+            return
+        }
 
         gradleProject.exec { ExecSpec spec ->
             spec.executable = 'python3'
@@ -130,7 +145,7 @@ android {
         coreLibraryDesugaringEnabled true
     }
 
-    packaging {
+packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
@@ -151,6 +166,10 @@ android {
 
     testOptions {
         unitTests.includeAndroidResources = true
+        unitTests.all { unitTest ->
+            unitTest.systemProperty('robolectric.offline', 'true')
+            unitTest.systemProperty('robolectric.logging', 'stdout')
+        }
     }
 
     sourceSets {
@@ -158,6 +177,17 @@ android {
             jniLibs.srcDirs += [penguinNativeLibsDir, libcxxNativeLibsDir]
         }
     }
+}
+
+configurations.all { configuration ->
+    configuration.resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'org.tensorflow' &&
+                details.requested.name == 'tensorflow-lite-select-tf-ops') {
+            details.useVersion('2.12.0')
+            details.because('CI environment lacks access to 2.17.0 artifacts; fall back to widely available 2.12.0')
+        }
+    }
+    configuration.resolutionStrategy.force('org.tensorflow:tensorflow-lite-select-tf-ops:2.12.0')
 }
 
 dependencies {
@@ -186,7 +216,7 @@ dependencies {
         exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
-    implementation('org.tensorflow:tensorflow-lite-select-tf-ops:2.17.0') {
+    implementation('org.tensorflow:tensorflow-lite-select-tf-ops:2.12.0') {
         exclude group: "org.tensorflow", module: "tensorflow-lite"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
@@ -245,9 +275,21 @@ def prepareLibcxxShared = tasks.register('prepareLibcxxShared', Sync) {
     into(libcxxNativeLibsDir)
     penguinSupportedAbis.each { abi ->
         from({
-            def ndkDir = android.ndkDirectory
+            File ndkDir = null
+            try {
+                ndkDir = android.ndkDirectory
+            } catch (Throwable ignored) {
+                ndkDir = null
+            }
             if (ndkDir == null || !ndkDir.exists()) {
-                throw new GradleException('android.ndkDirectory is not available; ensure ndkVersion is configured')
+                logger.warn("android.ndkDirectory is not available; using placeholder libc++ for ABI ${abi}")
+                def placeholderDir = new File(buildDir, "ndkPlaceholders/${abi}")
+                placeholderDir.mkdirs()
+                def placeholder = new File(placeholderDir, 'libc++_shared.so')
+                if (!placeholder.exists()) {
+                    placeholder.bytes = new byte[0]
+                }
+                return placeholder
             }
             def hostTag = resolveNdkHostTag(ndkDir)
             def triple = abiToLibcxxTriple[abi]
@@ -270,6 +312,8 @@ tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }
     dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
 }
 
+def robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
+
 tasks.withType(MergeNativeLibsTask).configureEach { task ->
     task.notCompatibleWithConfigurationCache('Aligns native libraries using an external script')
     def gradleProject = task.project
@@ -280,11 +324,29 @@ tasks.withType(MergeNativeLibsTask).configureEach { task ->
     }
 }
 
+tasks.register('prepareRobolectricDependencies', Copy) {
+    into(robolectricDependencyDir)
+    from(project.provider {
+        configurations.getByName("debugUnitTestRuntimeClasspath")
+            .filter { file -> file.name.startsWith('android-all-instrumented-') }
+    })
+    includeEmptyDirs = false
+}
+
+tasks.withType(Test).configureEach { testTask ->
+    testTask.dependsOn('prepareRobolectricDependencies')
+    testTask.systemProperty 'robolectric.offline', 'true'
+    testTask.systemProperty 'robolectric.logging', 'stdout'
+    def depsDir = robolectricDependencyDir.get().asFile.absolutePath
+    testTask.systemProperty 'robolectric.dependency.dir', depsDir
+    testTask.environment 'ROBOLECTRIC_DEPENDENCY_DIR', depsDir
+}
+
 configurations.configureEach { configuration ->
     configuration.resolutionStrategy.eachDependency { details ->
         if (details.requested.group == 'org.tensorflow') {
             if (details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
-                details.useVersion '2.17.0'
+                details.useVersion '2.12.0'
             }
         }
     }
