@@ -1,9 +1,10 @@
 package com.example.starbucknotetaker.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.*
@@ -12,9 +13,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -23,6 +26,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.input.pointer.consumeAllChanges
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.Summarizer
@@ -95,6 +102,45 @@ private fun ChecklistEditorScreen(
     val hideKeyboard = rememberKeyboardHider()
     val context = LocalContext.current
     var pendingFocusId by remember { mutableStateOf<Long?>(null) }
+    val itemHeights = remember(initialItems) { mutableStateMapOf<Long, Int>() }
+    var draggingItemId by remember(initialItems) { mutableStateOf<Long?>(null) }
+    var dragOffset by remember(initialItems) { mutableStateOf(0f) }
+
+    fun resetDrag() {
+        draggingItemId = null
+        dragOffset = 0f
+    }
+
+    fun handleDrag(delta: Float) {
+        val id = draggingItemId ?: return
+        var currentIndex = items.indexOfFirst { it.id == id }
+        if (currentIndex == -1) {
+            return
+        }
+        dragOffset += delta
+        while (currentIndex < items.lastIndex) {
+            val nextItem = items[currentIndex + 1]
+            val nextHeight = itemHeights[nextItem.id] ?: break
+            if (dragOffset > nextHeight.toFloat() / 2f) {
+                items.move(currentIndex, currentIndex + 1)
+                dragOffset -= nextHeight.toFloat()
+                currentIndex += 1
+            } else {
+                break
+            }
+        }
+        while (currentIndex > 0) {
+            val previousItem = items[currentIndex - 1]
+            val previousHeight = itemHeights[previousItem.id] ?: break
+            if (dragOffset < -previousHeight.toFloat() / 2f) {
+                items.move(currentIndex, currentIndex - 1)
+                dragOffset += previousHeight.toFloat()
+                currentIndex -= 1
+            } else {
+                break
+            }
+        }
+    }
 
     fun nextId(): Long {
         val id = nextItemId
@@ -190,13 +236,33 @@ private fun ChecklistEditorScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
+                items(items, key = { it.id }) { item ->
                     ChecklistItemRow(
                         item = item,
                         requestFocus = pendingFocusId == item.id,
                         onFocusHandled = { pendingFocusId = null },
+                        modifier = Modifier
+                            .onSizeChanged { size -> itemHeights[item.id] = size.height },
+                        dragHandleModifier = Modifier
+                            .padding(end = 4.dp)
+                            .size(24.dp)
+                            .pointerInput(item.id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        draggingItemId = item.id
+                                        dragOffset = 0f
+                                    },
+                                    onDragEnd = { resetDrag() },
+                                    onDragCancel = { resetDrag() },
+                                    onDrag = { change, dragAmount ->
+                                        @Suppress("DEPRECATION")
+                                        change.consumeAllChanges()
+                                        handleDrag(dragAmount.y)
+                                    }
+                                )
+                            },
                         onTextChange = { text ->
-                            items[index] = item.copy(text = text)
+                            updateItem(items, item.id) { it.copy(text = text) }
                         },
                         onAddBelow = { initialText ->
                             val newItem = EditableChecklistItem(
@@ -204,18 +270,28 @@ private fun ChecklistEditorScreen(
                                 text = initialText,
                                 isChecked = false,
                             )
-                            items.add(index + 1, newItem)
+                            val insertIndex = items.indexOfFirst { it.id == item.id }
+                            if (insertIndex == -1) {
+                                items.add(newItem)
+                            } else {
+                                items.add(insertIndex + 1, newItem)
+                            }
                             pendingFocusId = newItem.id
                         },
                         onCheckedChange = { checked ->
-                            items[index] = item.copy(isChecked = checked)
+                            updateItem(items, item.id) { it.copy(isChecked = checked) }
                         },
                         onRemove = {
+                            val removeIndex = items.indexOfFirst { it.id == item.id }
+                            if (removeIndex == -1) {
+                                return@ChecklistItemRow
+                            }
                             if (items.size == 1) {
                                 items[0] = items[0].copy(text = "", isChecked = false)
                             } else {
-                                items.removeAt(index)
-                                pendingFocusId = items.getOrNull((index - 1).coerceAtLeast(0))?.id
+                                items.removeAt(removeIndex)
+                                val focusIndex = (removeIndex - 1).coerceAtLeast(0)
+                                pendingFocusId = items.getOrNull(focusIndex)?.id
                             }
                             ensureNonEmpty()
                         }
@@ -231,6 +307,8 @@ private fun ChecklistItemRow(
     item: EditableChecklistItem,
     requestFocus: Boolean,
     onFocusHandled: () -> Unit,
+    modifier: Modifier = Modifier,
+    dragHandleModifier: Modifier,
     onTextChange: (String) -> Unit,
     onAddBelow: (String) -> Unit,
     onCheckedChange: (Boolean) -> Unit,
@@ -245,8 +323,17 @@ private fun ChecklistItemRow(
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
+        Box(
+            modifier = dragHandleModifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.DragHandle,
+                contentDescription = "Reorder item"
+            )
+        }
         IconButton(onClick = { onCheckedChange(!item.isChecked) }) {
             if (item.isChecked) {
                 Icon(Icons.Default.TaskAlt, contentDescription = "Mark as incomplete")
@@ -278,6 +365,24 @@ private fun ChecklistItemRow(
         IconButton(onClick = onRemove) {
             Icon(Icons.Default.Close, contentDescription = "Remove item")
         }
+    }
+}
+
+private fun <T> SnapshotStateList<T>.move(fromIndex: Int, toIndex: Int) {
+    if (fromIndex == toIndex) return
+    val item = removeAt(fromIndex)
+    val targetIndex = toIndex.coerceIn(0, size)
+    add(targetIndex, item)
+}
+
+private fun updateItem(
+    list: SnapshotStateList<EditableChecklistItem>,
+    id: Long,
+    transform: (EditableChecklistItem) -> EditableChecklistItem,
+) {
+    val index = list.indexOfFirst { it.id == id }
+    if (index != -1) {
+        list[index] = transform(list[index])
     }
 }
 
