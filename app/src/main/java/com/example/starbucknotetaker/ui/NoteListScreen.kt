@@ -275,10 +275,13 @@ private fun SwipeToDeleteNoteItem(
     val density = LocalDensity.current
     val actionWidthPx = with(density) { actionWidth.toPx() }
     val velocityThresholdPx = with(density) { 100.dp.toPx() }
-    val swipeState = remember(density) {
+    val swipeState = remember(actionWidthPx) {
         AnchoredDraggableState(
             initialValue = SwipeActionState.Closed,
-            anchors = DraggableAnchors { },
+            anchors = DraggableAnchors {
+                anchor(SwipeActionState.Closed, 0f)
+                anchor(SwipeActionState.Open, -actionWidthPx)
+            },
             positionalThreshold = { distance -> distance * 0.3f },
             velocityThreshold = { velocityThresholdPx },
             animationSpec = spring()
@@ -286,19 +289,9 @@ private fun SwipeToDeleteNoteItem(
     }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(actionWidthPx) {
-        val anchors = DraggableAnchors {
-            this[SwipeActionState.Closed] = 0f
-            this[SwipeActionState.Open] = -actionWidthPx
-        }
-        swipeState.updateAnchors(anchors)
-    }
-
-    LaunchedEffect(isOpen, swipeState.anchors) {
-        if (swipeState.anchors.size >= 2) {
-            val target = if (isOpen) SwipeActionState.Open else SwipeActionState.Closed
-            swipeState.animateTo(target)
-        }
+    LaunchedEffect(isOpen) {
+        val target = if (isOpen) SwipeActionState.Open else SwipeActionState.Closed
+        swipeState.animateTo(target)
     }
 
     LaunchedEffect(swipeState) {
