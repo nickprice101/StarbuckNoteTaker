@@ -7,7 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.anchor
 import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.snapTo
@@ -282,8 +281,8 @@ private fun SwipeToDeleteNoteItem(
         AnchoredDraggableState(
             initialValue = SwipeActionState.Closed,
             anchors = DraggableAnchors {
-                anchor(SwipeActionState.Closed, 0f)
-                anchor(SwipeActionState.Open, -actionWidthPx)
+                SwipeActionState.Closed at 0f
+                SwipeActionState.Open at -actionWidthPx
             },
             positionalThreshold = { distance -> distance * 0.3f },
             velocityThreshold = { velocityThresholdPx },
