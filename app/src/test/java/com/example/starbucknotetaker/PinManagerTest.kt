@@ -2,6 +2,7 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import java.io.File
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -13,7 +14,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 class PinManagerTest {
@@ -23,33 +23,39 @@ class PinManagerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        context.getSharedPreferences("pin_prefs_secure", Context.MODE_PRIVATE)
-            .edit()
-            .clear()
-            .commit()
-        context.getSharedPreferences("pin_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .clear()
-            .commit()
-        File(context.filesDir, "notes.enc").delete()
-        val attachmentsDir = File(context.filesDir, "attachments")
-        if (attachmentsDir.exists()) {
-            attachmentsDir.deleteRecursively()
-        }
+        clearState()
     }
 
     @After
     fun tearDown() {
+        clearState()
+    }
+
+    private fun clearState() {
+        context.getSharedPreferences("pin_prefs_secure", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("pin_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         File(context.filesDir, "notes.enc").delete()
-        val attachmentsDir = File(context.filesDir, "attachments")
-        if (attachmentsDir.exists()) {
-            attachmentsDir.deleteRecursively()
-        }
+        File(context.filesDir, "attachments").deleteRecursively()
+    }
+
+    private fun createManager(): PinManager {
+        val prefs = context.getSharedPreferences("pin_prefs_secure", Context.MODE_PRIVATE)
+        val legacy = context.getSharedPreferences("pin_prefs", Context.MODE_PRIVATE)
+        return PinManager(
+            context.applicationContext,
+            prefs,
+            legacy,
+            attachmentStoreFactory = { AttachmentStore(it) },
+            noteStoreFactory = { ctx, attachments ->
+                val concrete = attachments as? AttachmentStore ?: AttachmentStore(ctx)
+                EncryptedNoteStore(ctx, concrete)
+            }
+        )
     }
 
     @Test
     fun setPinStoresHashedValue() {
-        val manager = PinManager(context)
+        val manager = createManager()
 
         manager.setPin("1234")
 
@@ -63,7 +69,7 @@ class PinManagerTest {
 
     @Test
     fun updatePinRehashesValue() {
-        val manager = PinManager(context)
+        val manager = createManager()
         manager.setPin("1234")
         val previous = manager.getStoredPin()
 
@@ -97,7 +103,7 @@ class PinManagerTest {
         )
         noteStore.saveNotes(listOf(note), legacyPin)
 
-        val manager = PinManager(context)
+        val manager = createManager()
 
         assertTrue(manager.checkPin(legacyPin))
         val stored = manager.getStoredPin()

@@ -5,7 +5,6 @@ import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -16,10 +15,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], manifest = Config.NONE)
 class LinkPreviewFetcherTest {
 
     private lateinit var context: Context
@@ -27,8 +24,8 @@ class LinkPreviewFetcherTest {
 
     @Before
     fun setUp() {
-        filesDir = Files.createTempDirectory("link-preview-test").toFile()
         context = ApplicationProvider.getApplicationContext()
+        filesDir = File(context.filesDir, "link-preview-test").apply { mkdirs() }
     }
 
     @After
