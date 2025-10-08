@@ -5,9 +5,9 @@ from pathlib import Path
 
 
 REQUIRED_ASSET_RELATIVE_PATHS = [
-    Path("app/src/main/assets/encoder_int8_dynamic.tflite"),
-    Path("app/src/main/assets/decoder_step_int8_dynamic.tflite"),
-    Path("app/src/main/assets/tokenizer.json"),
+    Path("app/src/main/assets/note_classifier.tflite"),
+    Path("app/src/main/assets/category_mapping.json"),
+    Path("app/src/main/assets/deployment_metadata.json"),
 ]
 
 
