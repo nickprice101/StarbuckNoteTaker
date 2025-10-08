@@ -112,11 +112,25 @@ fun AddNoteScreen(
     val linkPreviewFetcher = remember(context) { LinkPreviewFetcher(context.applicationContext) }
     val hideKeyboard = rememberKeyboardHider()
     val focusManager = LocalFocusManager.current
+    var isDirty by remember(prefill, initialEvent) { mutableStateOf(false) }
+    var showDiscardDialog by remember(prefill, initialEvent) { mutableStateOf(false) }
+
+    fun markDirty() {
+        if (!isDirty) {
+            isDirty = true
+        }
+    }
 
     BackHandler {
         hideKeyboard()
         focusManager.clearFocus(force = true)
-        onBack()
+        if (showDiscardDialog) {
+            showDiscardDialog = false
+        } else if (isDirty) {
+            showDiscardDialog = true
+        } else {
+            onBack()
+        }
     }
 
     val initialZone = remember(initialEvent) {
@@ -178,6 +192,9 @@ fun AddNoteScreen(
                         Toast.LENGTH_LONG
                     ).show()
                 }
+                if (!alarmEnabled) {
+                    markDirty()
+                }
                 alarmEnabled = true
                 awaitingAlarmEnable = false
             }
@@ -194,6 +211,9 @@ fun AddNoteScreen(
                                 onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
                             )
                             if (!launched) {
+                                if (!alarmEnabled) {
+                                    markDirty()
+                                }
                                 alarmEnabled = true
                                 awaitingAlarmEnable = false
                             }
@@ -203,6 +223,9 @@ fun AddNoteScreen(
                                 context.getString(R.string.alarm_notification_permission_required),
                                 Toast.LENGTH_LONG
                             ).show()
+                            if (alarmEnabled) {
+                                markDirty()
+                            }
                             alarmEnabled = false
                             awaitingAlarmEnable = false
                         }
@@ -211,6 +234,9 @@ fun AddNoteScreen(
                 ReminderPermissionTarget.Reminder -> {
                     if (awaitingReminderEnable) {
                         if (granted) {
+                            if (!reminderEnabled) {
+                                markDirty()
+                            }
                             reminderEnabled = true
                         } else {
                             Toast.makeText(
@@ -218,6 +244,9 @@ fun AddNoteScreen(
                                 context.getString(R.string.reminder_notification_permission_required),
                                 Toast.LENGTH_LONG
                             ).show()
+                            if (reminderEnabled) {
+                                markDirty()
+                            }
                             reminderEnabled = false
                         }
                         awaitingReminderEnable = false
@@ -337,6 +366,7 @@ fun AddNoteScreen(
                 blocks.add(NoteBlock.Image(uri = it, rotation = 0))
                 blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             }
+            markDirty()
         }
         onEnablePinCheck()
     }
@@ -355,6 +385,7 @@ fun AddNoteScreen(
                 blocks.add(NoteBlock.File(it))
                 blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
             }
+            markDirty()
         }
         onEnablePinCheck()
     }
@@ -362,6 +393,7 @@ fun AddNoteScreen(
     fun appendTranscribedText(transcribed: String) {
         val sanitized = transcribed.trim()
         if (sanitized.isEmpty()) return
+        markDirty()
         val lastIndex = blocks.lastIndex
         val last = blocks.getOrNull(lastIndex)
         if (last is NoteBlock.Text && last.value.text.isBlank()) {
@@ -426,7 +458,11 @@ fun AddNoteScreen(
                     IconButton(onClick = {
                         hideKeyboard()
                         focusManager.clearFocus(force = true)
-                        onBack()
+                        if (isDirty) {
+                            showDiscardDialog = true
+                        } else {
+                            onBack()
+                        }
                     }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
@@ -562,7 +598,12 @@ fun AddNoteScreen(
                 ) {
                     OutlinedTextField(
                         value = title,
-                        onValueChange = { title = it },
+                        onValueChange = { newTitle ->
+                            if (title != newTitle) {
+                                markDirty()
+                                title = newTitle
+                            }
+                        },
                         label = { Text("Title") },
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -573,7 +614,12 @@ fun AddNoteScreen(
                     Column(modifier = Modifier.padding(bottom = 16.dp)) {
                         LocationAutocompleteField(
                             value = eventLocation,
-                            onValueChange = { eventLocation = it },
+                            onValueChange = { newLocation ->
+                                if (eventLocation != newLocation) {
+                                    eventLocation = newLocation
+                                    markDirty()
+                                }
+                            },
                             label = "Location",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -586,7 +632,10 @@ fun AddNoteScreen(
                             Text("All-day")
                             Spacer(modifier = Modifier.width(8.dp))
                             Switch(checked = eventAllDay, onCheckedChange = { checked ->
-                                eventAllDay = checked
+                                if (eventAllDay != checked) {
+                                    eventAllDay = checked
+                                    markDirty()
+                                }
                                 if (checked) {
                                     eventStart = eventStart.withHour(0).withMinute(0)
                                     eventEnd = if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
@@ -602,61 +651,79 @@ fun AddNoteScreen(
                             })
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        EventDateTimePicker(
-                            label = "Starts",
-                            date = eventStart,
-                            onDateChange = { newDate ->
-                                eventStart = newDate
-                                if (eventAllDay) {
-                                    eventStart = eventStart.withHour(0).withMinute(0)
-                                    if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
-                                        eventEnd = eventStart.plusDays(1)
+                            EventDateTimePicker(
+                                label = "Starts",
+                                date = eventStart,
+                                onDateChange = { newDate ->
+                                    if (eventStart != newDate) {
+                                        eventStart = newDate
+                                        markDirty()
                                     }
-                                } else if (eventEnd.isBefore(eventStart)) {
-                                    eventEnd = eventStart.plusHours(1)
-                                }
-                            },
-                            onTimeChange = { newTime ->
-                                eventStart = newTime
-                                if (!eventAllDay && eventEnd.isBefore(eventStart)) {
-                                    eventEnd = eventStart.plusHours(1)
-                                }
-                            },
+                                    if (eventAllDay) {
+                                        eventStart = eventStart.withHour(0).withMinute(0)
+                                        if (eventEnd.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                            eventEnd = eventStart.plusDays(1)
+                                        }
+                                    } else if (eventEnd.isBefore(eventStart)) {
+                                        eventEnd = eventStart.plusHours(1)
+                                    }
+                                },
+                                onTimeChange = { newTime ->
+                                    if (eventStart != newTime) {
+                                        eventStart = newTime
+                                        markDirty()
+                                    }
+                                    if (!eventAllDay && eventEnd.isBefore(eventStart)) {
+                                        eventEnd = eventStart.plusHours(1)
+                                    }
+                                },
                             allDay = eventAllDay,
                             dateFormatter = dateFormatter,
                             timeFormatter = timeFormatter,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        EventDateTimePicker(
-                            label = "Ends",
-                            date = eventEnd,
-                            onDateChange = { newDate ->
-                                eventEnd = if (eventAllDay) {
-                                    val normalized = newDate.withHour(0).withMinute(0)
-                                    if (normalized.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                            EventDateTimePicker(
+                                label = "Ends",
+                                date = eventEnd,
+                                onDateChange = { newDate ->
+                                    val updated = if (eventAllDay) {
+                                        val normalized = newDate.withHour(0).withMinute(0)
+                                        if (normalized.toLocalDate().isBefore(eventStart.toLocalDate())) {
+                                            eventStart.plusDays(1)
+                                        } else {
+                                            normalized
+                                        }
+                                    } else {
+                                        if (newDate.isBefore(eventStart)) {
+                                            eventStart.plusHours(1)
+                                        } else {
+                                            newDate
+                                        }
+                                    }
+                                    if (eventEnd != updated) {
+                                        eventEnd = updated
+                                        markDirty()
+                                    } else {
+                                        eventEnd = updated
+                                    }
+                                },
+                                onTimeChange = { newTime ->
+                                    val updated = if (eventAllDay) {
                                         eventStart.plusDays(1)
                                     } else {
-                                        normalized
+                                        if (newTime.isBefore(eventStart)) {
+                                            eventStart.plusHours(1)
+                                        } else {
+                                            newTime
+                                        }
                                     }
-                                } else {
-                                    if (newDate.isBefore(eventStart)) {
-                                        eventStart.plusHours(1)
+                                    if (eventEnd != updated) {
+                                        eventEnd = updated
+                                        markDirty()
                                     } else {
-                                        newDate
+                                        eventEnd = updated
                                     }
-                                }
-                            },
-                            onTimeChange = { newTime ->
-                                if (eventAllDay) {
-                                    eventEnd = eventStart.plusDays(1)
-                                } else {
-                                    eventEnd = if (newTime.isBefore(eventStart)) {
-                                        eventStart.plusHours(1)
-                                    } else {
-                                        newTime
-                                    }
-                                }
-                            },
+                                },
                             allDay = eventAllDay,
                             dateFormatter = dateFormatter,
                             timeFormatter = timeFormatter,
@@ -665,32 +732,35 @@ fun AddNoteScreen(
                         TimeZonePicker(
                             zoneId = zoneId,
                             onZoneChange = { newZone ->
-                                val convertedStart = eventStart.withZoneSameInstant(newZone)
-                                    .truncatedTo(ChronoUnit.MINUTES)
-                                val convertedEnd = eventEnd.withZoneSameInstant(newZone)
-                                    .truncatedTo(ChronoUnit.MINUTES)
-                                val adjustedStart = if (eventAllDay) {
-                                    convertedStart.withHour(0).withMinute(0)
-                                } else {
-                                    convertedStart
-                                }
-                                val adjustedEnd = if (eventAllDay) {
-                                    val normalized = convertedEnd.withHour(0).withMinute(0)
-                                    if (normalized.toLocalDate().isBefore(adjustedStart.toLocalDate())) {
-                                        adjustedStart.plusDays(1)
+                                if (zoneId != newZone) {
+                                    val convertedStart = eventStart.withZoneSameInstant(newZone)
+                                        .truncatedTo(ChronoUnit.MINUTES)
+                                    val convertedEnd = eventEnd.withZoneSameInstant(newZone)
+                                        .truncatedTo(ChronoUnit.MINUTES)
+                                    val adjustedStart = if (eventAllDay) {
+                                        convertedStart.withHour(0).withMinute(0)
                                     } else {
-                                        normalized
+                                        convertedStart
                                     }
-                                } else {
-                                    if (convertedEnd.isBefore(adjustedStart)) {
-                                        adjustedStart.plusHours(1)
+                                    val adjustedEnd = if (eventAllDay) {
+                                        val normalized = convertedEnd.withHour(0).withMinute(0)
+                                        if (normalized.toLocalDate().isBefore(adjustedStart.toLocalDate())) {
+                                            adjustedStart.plusDays(1)
+                                        } else {
+                                            normalized
+                                        }
                                     } else {
-                                        convertedEnd
+                                        if (convertedEnd.isBefore(adjustedStart)) {
+                                            adjustedStart.plusHours(1)
+                                        } else {
+                                            convertedEnd
+                                        }
                                     }
+                                    zoneId = newZone
+                                    eventStart = adjustedStart
+                                    eventEnd = adjustedEnd
+                                    markDirty()
                                 }
-                                zoneId = newZone
-                                eventStart = adjustedStart
-                                eventEnd = adjustedEnd
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -724,11 +794,17 @@ fun AddNoteScreen(
                                                 onNeedsPermission = { intent -> exactAlarmPermissionLauncher.launch(intent) },
                                             )
                                             if (!launched) {
+                                                if (!alarmEnabled) {
+                                                    markDirty()
+                                                }
                                                 alarmEnabled = true
                                                 awaitingAlarmEnable = false
                                             }
                                         } else {
                                             awaitingAlarmEnable = false
+                                            if (alarmEnabled) {
+                                                markDirty()
+                                            }
                                             alarmEnabled = false
                                         }
                                     }
@@ -754,7 +830,12 @@ fun AddNoteScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 ReminderOffsetDropdown(
                                     selectedMinutes = alarmMinutes,
-                                    onMinutesSelected = { alarmMinutes = it },
+                                    onMinutesSelected = { minutes ->
+                                        if (alarmMinutes != minutes) {
+                                            alarmMinutes = minutes
+                                            markDirty()
+                                        }
+                                    },
                                     fieldLabel = stringResource(R.string.event_alarm_lead_time_label),
                                 )
                             }
@@ -781,10 +862,16 @@ fun AddNoteScreen(
                                                     return@Switch
                                                 }
                                             }
+                                            if (!reminderEnabled) {
+                                                markDirty()
+                                            }
                                             reminderEnabled = true
                                             awaitingReminderEnable = false
                                         } else {
                                             awaitingReminderEnable = false
+                                            if (reminderEnabled) {
+                                                markDirty()
+                                            }
                                             reminderEnabled = false
                                         }
                                     }
@@ -794,7 +881,12 @@ fun AddNoteScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 ReminderOffsetDropdown(
                                     selectedMinutes = reminderMinutes,
-                                    onMinutesSelected = { reminderMinutes = it },
+                                    onMinutesSelected = { minutes ->
+                                        if (reminderMinutes != minutes) {
+                                            reminderMinutes = minutes
+                                            markDirty()
+                                        }
+                                    },
                                     fieldLabel = stringResource(R.string.event_reminder_lead_time_label),
                                 )
                             }
@@ -816,6 +908,7 @@ fun AddNoteScreen(
                                 onValueChange = { newValue ->
                                     val updated = block.copy(value = newValue)
                                     blocks[blockIndex] = updated
+                                    markDirty()
                                     syncLinkPreviews(blockIndex, updated)
                                 },
                                 label = if (blockIndex == 0 && entryMode == NoteEntryMode.Note) {
@@ -863,6 +956,7 @@ fun AddNoteScreen(
                             IconButton(
                                 onClick = {
                                     blocks[index] = block.copy(rotation = (block.rotation + 270) % 360)
+                                    markDirty()
                                 },
                                 modifier = Modifier.align(Alignment.BottomStart)
                             ) {
@@ -877,6 +971,7 @@ fun AddNoteScreen(
                                         blocks[index] = block.copy(data = null)
                                     }
                                     blocks.removeAt(index)
+                                    markDirty()
                                     ensureTrailingTextBlock()
                                 },
                                 modifier = Modifier.align(Alignment.TopEnd)
@@ -912,6 +1007,7 @@ fun AddNoteScreen(
                             IconButton(
                                 onClick = {
                                     blocks.removeAt(index)
+                                    markDirty()
                                     ensureTrailingTextBlock()
                                 }
                             ) {
@@ -961,6 +1057,7 @@ fun AddNoteScreen(
                                 dismissedPreviewUrls.getOrPut(previewBlock.sourceId) { mutableSetOf() }
                                     .add(previewBlock.preview.url)
                                 blocks.removeAt(index)
+                                markDirty()
                             },
                             onOpen = if (previewBlock.awaitingCompletion) {
                                 null
@@ -1053,6 +1150,7 @@ fun AddNoteScreen(
                     blocks.add(NoteBlock.Image(data = encoded))
                     blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
                 }
+                markDirty()
                 showSketchPad = false
                 onEnablePinCheck()
             }
@@ -1098,6 +1196,31 @@ fun AddNoteScreen(
             dismissButton = {
                 TextButton(onClick = { showAudioPermissionSettingsDialog = false }) {
                     Text(stringResource(R.string.microphone_permission_settings_dismiss))
+                }
+            }
+        )
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("Discard changes?") },
+            text = { Text("You have unsaved changes. Do you want to discard them?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardDialog = false
+                        hideKeyboard()
+                        focusManager.clearFocus(force = true)
+                        onBack()
+                    }
+                ) {
+                    Text("Discard")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text("Keep editing")
                 }
             }
         )
