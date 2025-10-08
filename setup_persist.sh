@@ -12,10 +12,37 @@ GRADLE_INSTALL_DIR="$HOME/.gradle/gradle-$GRADLE_VERSION"
 GRADLE_DOWNLOAD_URL="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
 PROJECT_DIR="$(pwd)"  # assumes you're in the project root
 
+# Detect build configuration so we install matching SDK components
+APP_BUILD_GRADLE="$PROJECT_DIR/app/build.gradle"
+
+if [ ! -f "$APP_BUILD_GRADLE" ]; then
+  echo "❌ Unable to locate app/build.gradle at $APP_BUILD_GRADLE"
+  exit 1
+fi
+
+COMPILE_SDK=$(grep -E "compileSdk\\s+[0-9]+" "$APP_BUILD_GRADLE" | head -n1 | sed -E 's/.*compileSdk\\s+([0-9]+).*/\1/')
+if [ -z "$COMPILE_SDK" ]; then
+  echo "❌ Unable to detect compileSdk value from $APP_BUILD_GRADLE"
+  exit 1
+fi
+
+# Try to read the declared NDK version (if any)
+NDK_VERSION=$(awk -F"['\"]" '/ndkVersion/ {for (i=2; i<=NF; ++i) {if ($i ~ /^[0-9.]+$/) {print $i; exit}}}' "$APP_BUILD_GRADLE")
+
+# Match the build-tools version with the compile SDK when not explicitly configured
+BUILD_TOOLS_VERSION="${COMPILE_SDK}.0.0"
+
 # Export paths
 export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$GRADLE_INSTALL_DIR/bin:$PATH"
 
 echo "📦 Starting Android SDK + Gradle + asset setup..."
+
+echo "ℹ️  Detected compileSdk: ${COMPILE_SDK}"
+if [ -n "$NDK_VERSION" ]; then
+  echo "ℹ️  Detected ndkVersion: ${NDK_VERSION}"
+else
+  echo "ℹ️  No explicit ndkVersion found in build.gradle"
+fi
 
 # ----------------------------
 # ANDROID SDK INSTALLATION
@@ -38,10 +65,19 @@ echo "🔐 Accepting Android SDK licenses silently..."
 yes | sdkmanager --licenses > /dev/null
 
 echo "📦 Installing required SDK packages..."
-sdkmanager --install \
-  "platform-tools" \
-  "platforms;android-35" \
-  "build-tools;35.0.0" > /dev/null
+REQUIRED_PACKAGES=(
+  "platform-tools"
+  "platforms;android-${COMPILE_SDK}"
+  "build-tools;${BUILD_TOOLS_VERSION}"
+)
+
+if [ -n "$NDK_VERSION" ]; then
+  REQUIRED_PACKAGES+=("ndk;${NDK_VERSION}")
+fi
+
+printf '   - %s\n' "${REQUIRED_PACKAGES[@]}"
+
+sdkmanager --install "${REQUIRED_PACKAGES[@]}" > /dev/null
 
 echo "📄 Writing local.properties with SDK path..."
 cat <<EOF > "$PROJECT_DIR/local.properties"
