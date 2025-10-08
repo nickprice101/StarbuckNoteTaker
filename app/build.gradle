@@ -81,7 +81,7 @@ def alignNativeLibrariesAction = { Project gradleProject, Collection<File> nativ
     }
 }
 
-def ensurePlaceholderResValues(File outputDir) {
+def ensurePlaceholderResValuesAction = { File outputDir ->
     if (outputDir == null) {
         return
     }
@@ -345,7 +345,16 @@ tasks.withType(MergeNativeLibsTask).configureEach { task ->
 
 tasks.withType(GenerateResValues).configureEach { task ->
     task.doLast {
-        ensurePlaceholderResValues(task.resOutputDir)
+        def resOutput = task.resOutputDir
+        def outputDir = null
+        if (resOutput != null) {
+            try {
+                outputDir = resOutput.get().asFile
+            } catch (Throwable ignored) {
+                outputDir = resOutput instanceof File ? resOutput : null
+            }
+        }
+        ensurePlaceholderResValuesAction(outputDir)
     }
 }
 
