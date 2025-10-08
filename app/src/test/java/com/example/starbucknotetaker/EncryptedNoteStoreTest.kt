@@ -1,33 +1,37 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
-import com.example.starbucknotetaker.ChecklistItem
-import com.example.starbucknotetaker.asChecklistContent
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Test
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.whenever
+import androidx.test.core.app.ApplicationProvider
 import java.io.File
-import java.nio.file.Files
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class EncryptedNoteStoreTest {
-    private val context: Context = mock()
-    private val filesDir: File = Files.createTempDirectory("encstore").toFile()
+    private lateinit var context: Context
+    private lateinit var notesFile: File
 
-    init {
-        whenever(context.filesDir).thenReturn(filesDir)
+    @Before
+    fun setUp() {
+        context = ApplicationProvider.getApplicationContext()
+        notesFile = File(context.filesDir, "notes.enc")
+        notesFile.delete()
     }
 
     @After
     fun tearDown() {
-        filesDir.deleteRecursively()
+        notesFile.delete()
+        File(context.filesDir, "attachments").deleteRecursively()
     }
 
     @Test
@@ -76,4 +80,3 @@ class EncryptedNoteStoreTest {
         }
     }
 }
-
