@@ -201,12 +201,11 @@ packaging {
 configurations.all { configuration ->
     configuration.resolutionStrategy.eachDependency { DependencyResolveDetails details ->
         if (details.requested.group == 'org.tensorflow' &&
-                details.requested.name == 'tensorflow-lite-select-tf-ops') {
-            details.useVersion('2.12.0')
-            details.because('CI environment lacks access to 2.17.0 artifacts; fall back to widely available 2.12.0')
+                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
+            details.useVersion('2.17.0')
+            details.because('Keep TensorFlow Lite artifacts aligned so newer builtin ops such as FULLY_CONNECTED v12 remain available')
         }
     }
-    configuration.resolutionStrategy.force('org.tensorflow:tensorflow-lite-select-tf-ops:2.12.0')
 }
 
 dependencies {
@@ -235,7 +234,7 @@ dependencies {
         exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
-    implementation('org.tensorflow:tensorflow-lite-select-tf-ops:2.12.0') {
+    implementation('org.tensorflow:tensorflow-lite-select-tf-ops:2.17.0') {
         exclude group: "org.tensorflow", module: "tensorflow-lite"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
