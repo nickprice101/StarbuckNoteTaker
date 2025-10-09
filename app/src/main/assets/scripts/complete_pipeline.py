@@ -390,21 +390,26 @@ print("\n[5/5] Exporting to TFLite...")
 model.save('note_classifier_final.keras')
 print("Saved: note_classifier_final.keras")
 
-# Convert to TFLite using a concrete function to work around TF 2.16 Keras serialization changes
-@tf.function(input_signature=[tf.TensorSpec(shape=[None], dtype=tf.string)])
-def _serve_fn(inputs):
-    return model(inputs)
+# Convert to TFLite - requires SELECT_TF_OPS for TextVectorization layer
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
-# Export the trackable model so TensorFlow Lite keeps the TF 2.16-compatible op set.
-concrete_fn = _serve_fn.get_concrete_function()
-converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_fn], trackable_obj=model)
-# Stay on the builtin float operators to keep the minimum runtime at or below 2.16.1.
-converter.optimizations = []
-converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+# Enable optimizations for smaller model size
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+# CRITICAL: Support SELECT_TF_OPS for text processing operations
+# TextVectorization uses StringLower, StaticRegexReplace, StringSplitV2, RaggedTensorToTensor
+converter.target_spec.supported_ops = [
+    tf.lite.OpsSet.TFLITE_BUILTINS,  # Standard TFLite ops
+    tf.lite.OpsSet.SELECT_TF_OPS      # Required for text processing
+]
+
+# Keep float32 precision
 converter.target_spec.supported_types = [tf.float32]
+
+# Preserve tensor list operations for text processing
 converter._experimental_lower_tensor_list_ops = False
-if hasattr(converter, "_experimental_disable_per_channel"):
-    converter._experimental_disable_per_channel = True
+
+# Convert model
 tflite_model = converter.convert()
 
 with open('note_classifier.tflite', 'wb') as f:
@@ -412,6 +417,7 @@ with open('note_classifier.tflite', 'wb') as f:
 
 size_mb = len(tflite_model)/(1024*1024)
 print(f"Saved: note_classifier.tflite ({size_mb:.2f} MB)")
+print(f"Note: Model requires SELECT_TF_OPS runtime (text processing operations)")
 
 # Create deployment files
 with open('category_mapping.json', 'w') as f:
@@ -453,7 +459,7 @@ val category = categories[categoryIndex]
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
 
-with open('DEPLOYMENT_README.md', 'w') as f:
+with open('DEPLOYMENT_README.md', 'w', encoding='utf-8') as f:
     f.write(readme)
 
 print("Saved: category_mapping.json")
@@ -468,4 +474,3 @@ print(f"Test: {test_acc:.1f}%")
 print(f"TFLite: note_classifier.tflite ({size_mb:.2f} MB)")
 print("Ready for Android deployment!")
 print("="*80)
-
