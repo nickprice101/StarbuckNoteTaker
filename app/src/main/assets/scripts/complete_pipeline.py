@@ -442,7 +442,12 @@ validation_examples = [
     "git rebase command: interactive rebase using git rebase -i HEAD~3 allows editing and reordering last three commits interactively.",
     "Price comparison memo: Model X laptop offers 32GB RAM at $1,799 while Model Y adds OLED display for $1,950 and extends warranty coverage.",
     "Novel chapter development: produced 3,500 words of confrontation scene between protagonist and antagonist in abandoned warehouse setting.",
-    "Attended workshop on negotiation skills: practiced role-playing scenarios, learned tactics for finding win-win solutions."
+    "Attended workshop on negotiation skills: practiced role-playing scenarios, learned tactics for finding win-win solutions.",
+    "Excerpt from city recycling bulletin: curbside compost pickup shifts to Fridays starting next month; add reminder to bin calendar.",
+    "Saved from barista forum: pour-over recipe calls for 15g coffee to 250g water with 45-second bloom; testing on weekend brew bar.",
+    "Quote from leadership book *The Culture Map*: \"Listen for what isn't said in low-context teams\"; include in Friday lunch-and-learn notes.",
+    "Spec sheet snippet: espresso machine requires 20-amp dedicated circuit and 6\" rear clearance; confirm café electrical plan before install.",
+    "Travel guide note: Louvre extended hours on Wednesdays and Fridays until 9:45 p.m.; schedule night visit for photography practice."
 ]
 
 for i, note in enumerate(validation_examples, 1):
