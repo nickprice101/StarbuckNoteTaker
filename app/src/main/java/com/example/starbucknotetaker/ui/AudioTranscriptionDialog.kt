@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +57,7 @@ private data class RecognitionCandidate(
 )
 
 @Composable
+@OptIn(ExperimentalAnimationApi::class)
 fun AudioTranscriptionDialog(
     onDismiss: () -> Unit,
     onResult: (String) -> Unit,
@@ -251,15 +255,41 @@ fun AudioTranscriptionDialog(
                     else -> "Tap the mic to begin recording."
                 }
 
-                Text(
-                    text = statusMessage,
-                    style = MaterialTheme.typography.body1,
-                    textAlign = TextAlign.Start,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                AnimatedContent(
+                    targetState = statusMessage,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "statusMessage"
+                ) { message ->
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colors.primary.copy(alpha = 0.12f),
+                        contentColor = MaterialTheme.colors.onSurface,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = null
+                            )
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.body1,
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 errorMessage?.let { message ->
-                    Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
