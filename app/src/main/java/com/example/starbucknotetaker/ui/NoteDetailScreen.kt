@@ -13,6 +13,7 @@ import android.util.Base64
 import android.util.Patterns
 import android.widget.Toast
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,6 +24,7 @@ import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -31,10 +33,13 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.*
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -43,6 +48,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.pointer.consumeAllChanges
+import androidx.compose.ui.input.pointer.pointerInput
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.formatReminderOffsetMinutes
@@ -438,40 +445,138 @@ private fun ChecklistDetailSection(
     items: List<ChecklistItem>,
     onChecklistChange: (List<ChecklistItem>) -> Unit,
 ) {
-    val checklistState = remember(noteId, items) {
-        mutableStateListOf<ChecklistItem>().apply { addAll(items) }
+    val checklistState = remember(noteId) {
+        mutableStateListOf<DetailChecklistItem>().apply {
+            items.forEachIndexed { index, item ->
+                add(
+                    DetailChecklistItem(
+                        id = index.toLong(),
+                        text = item.text,
+                        isChecked = item.isChecked,
+                    )
+                )
+            }
+        }
     }
+    val itemHeights = remember(noteId) { mutableStateMapOf<Long, Int>() }
+    var draggingItemId by remember(noteId) { mutableStateOf<Long?>(null) }
+    var dragOffset by remember(noteId) { mutableStateOf(0f) }
+
+    fun toChecklistItems(): List<ChecklistItem> = checklistState.map { it.toChecklistItem() }
+
+    fun resetDrag() {
+        draggingItemId = null
+        dragOffset = 0f
+    }
+
+    fun handleDrag(delta: Float) {
+        val id = draggingItemId ?: return
+        var currentIndex = checklistState.indexOfFirst { it.id == id }
+        if (currentIndex == -1) {
+            return
+        }
+        dragOffset += delta
+        var hasMoved = false
+        while (currentIndex < checklistState.lastIndex) {
+            val nextItem = checklistState[currentIndex + 1]
+            val nextHeight = itemHeights[nextItem.id] ?: break
+            if (dragOffset > nextHeight.toFloat() / 2f) {
+                checklistState.move(currentIndex, currentIndex + 1)
+                dragOffset -= nextHeight.toFloat()
+                currentIndex += 1
+                hasMoved = true
+            } else {
+                break
+            }
+        }
+        while (currentIndex > 0) {
+            val previousItem = checklistState[currentIndex - 1]
+            val previousHeight = itemHeights[previousItem.id] ?: break
+            if (dragOffset < -previousHeight.toFloat() / 2f) {
+                checklistState.move(currentIndex, currentIndex - 1)
+                dragOffset += previousHeight.toFloat()
+                currentIndex -= 1
+                hasMoved = true
+            } else {
+                break
+            }
+        }
+        if (hasMoved) {
+            onChecklistChange(toChecklistItems())
+        }
+    }
+
     LaunchedEffect(items) {
         checklistState.clear()
-        checklistState.addAll(items)
+        items.forEachIndexed { index, item ->
+            checklistState.add(
+                DetailChecklistItem(
+                    id = index.toLong(),
+                    text = item.text,
+                    isChecked = item.isChecked,
+                )
+            )
+        }
+        itemHeights.clear()
+        resetDrag()
     }
+
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        for (index in checklistState.indices) {
-            val item = checklistState[index]
-            ChecklistDetailRow(
-                item = item,
-                onCheckedChange = { checked ->
-                    if (checklistState[index].isChecked != checked) {
-                        checklistState[index] = item.copy(isChecked = checked)
-                        onChecklistChange(checklistState.toList())
+        checklistState.forEachIndexed { index, item ->
+            key(item.id) {
+                ChecklistDetailRow(
+                    item = item,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { size -> itemHeights[item.id] = size.height },
+                    dragHandleModifier = Modifier
+                        .padding(start = 4.dp)
+                        .size(24.dp)
+                        .pointerInput(item.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    draggingItemId = item.id
+                                    dragOffset = 0f
+                                },
+                                onDragCancel = { resetDrag() },
+                                onDragEnd = {
+                                    if (draggingItemId != null) {
+                                        onChecklistChange(toChecklistItems())
+                                    }
+                                    resetDrag()
+                                },
+                                onDrag = { change, dragAmount ->
+                                    @Suppress("DEPRECATION")
+                                    change.consumeAllChanges()
+                                    handleDrag(dragAmount.y)
+                                }
+                            )
+                        },
+                    onCheckedChange = { checked ->
+                        if (checklistState[index].isChecked != checked) {
+                            checklistState[index] = item.copy(isChecked = checked)
+                            onChecklistChange(toChecklistItems())
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun ChecklistDetailRow(
-    item: ChecklistItem,
+    item: DetailChecklistItem,
     onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    dragHandleModifier: Modifier = Modifier,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
         Checkbox(
             checked = item.isChecked,
@@ -486,8 +591,35 @@ private fun ChecklistDetailRow(
             textDecoration = if (item.isChecked) TextDecoration.LineThrough else null,
             color = if (item.isChecked) MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
             else MaterialTheme.colors.onSurface,
+            modifier = Modifier.weight(1f, fill = true)
         )
+        Spacer(modifier = Modifier.width(12.dp))
+        Box(
+            modifier = dragHandleModifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.DragHandle,
+                contentDescription = "Reorder item"
+            )
+        }
     }
+}
+
+private data class DetailChecklistItem(
+    val id: Long,
+    val text: String,
+    val isChecked: Boolean,
+)
+
+private fun DetailChecklistItem.toChecklistItem(): ChecklistItem =
+    ChecklistItem(text = text, isChecked = isChecked)
+
+private fun <T> SnapshotStateList<T>.move(fromIndex: Int, toIndex: Int) {
+    if (fromIndex == toIndex) return
+    val item = removeAt(fromIndex)
+    val targetIndex = toIndex.coerceIn(0, size)
+    add(targetIndex, item)
 }
 
 private suspend fun prepareShareAttachments(

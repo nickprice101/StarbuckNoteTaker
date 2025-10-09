@@ -244,7 +244,7 @@ private fun ChecklistEditorScreen(
                         modifier = Modifier
                             .onSizeChanged { size -> itemHeights[item.id] = size.height },
                         dragHandleModifier = Modifier
-                            .padding(end = 4.dp)
+                            .padding(start = 4.dp)
                             .size(24.dp)
                             .pointerInput(item.id) {
                                 detectDragGesturesAfterLongPress(
@@ -325,15 +325,6 @@ private fun ChecklistItemRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.fillMaxWidth()
     ) {
-        Box(
-            modifier = dragHandleModifier,
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.DragHandle,
-                contentDescription = "Reorder item"
-            )
-        }
         IconButton(onClick = { onCheckedChange(!item.isChecked) }) {
             if (item.isChecked) {
                 Icon(Icons.Default.TaskAlt, contentDescription = "Mark as incomplete")
@@ -364,6 +355,15 @@ private fun ChecklistItemRow(
         )
         IconButton(onClick = onRemove) {
             Icon(Icons.Default.Close, contentDescription = "Remove item")
+        }
+        Box(
+            modifier = dragHandleModifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.DragHandle,
+                contentDescription = "Reorder item"
+            )
         }
     }
 }
