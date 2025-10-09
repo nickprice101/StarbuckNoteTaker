@@ -3,13 +3,59 @@ Complete Note Classifier Training and Deployment
 Trains model, validates with examples, exports to TFLite
 """
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-import tensorflow as tf
-import numpy as np
-from datetime import datetime
+import random
+import shutil
+from pathlib import Path
+import sys
 import json
 import re
+from datetime import datetime
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ.setdefault('TF_USE_LEGACY_KERAS', '1')
+
+import tensorflow as tf
+from tensorflow.lite.python import schema_py_generated as schema_fb
+import numpy as np
+
+REQUIRED_TF_VERSION = "2.16.1"
+
+
+def _enforce_tensorflow_version() -> None:
+    """Ensure the pipeline runs with the expected TensorFlow runtime."""
+
+    runtime_version = tf.__version__.split("+")[0]
+    if runtime_version != REQUIRED_TF_VERSION:
+        raise RuntimeError(
+            "This pipeline must be executed with TensorFlow "
+            f"{REQUIRED_TF_VERSION}, but {runtime_version} was detected. "
+            "Exporting with a newer runtime can raise the FULLY_CONNECTED "
+            "operator version beyond what the Android app (locked to 2.16.1) "
+            "understands. Please recreate your virtual environment or "
+            "install the correct TensorFlow version before running the "
+            "pipeline."
+        )
+
+
+_enforce_tensorflow_version()
+
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
+
+
+def _assert_full_connected_compatibility(model_content: bytes, max_version: int = 11) -> None:
+    """Ensure generated TFLite model keeps FULLY_CONNECTED ops within range."""
+
+    tflite_model = schema_fb.Model.GetRootAsModel(model_content, 0)
+    for idx in range(tflite_model.OperatorCodesLength()):
+        op_code = tflite_model.OperatorCodes(idx)
+        if op_code.BuiltinCode() == schema_fb.BuiltinOperator.FULLY_CONNECTED and op_code.Version() > max_version:
+            raise RuntimeError(
+                "Exported model requires FULLY_CONNECTED op version "
+                f"{op_code.Version()}, which exceeds the maximum supported "
+                f"version ({max_version}) for TensorFlow Lite {REQUIRED_TF_VERSION}."
+            )
 
 print("="*80)
 print("NOTE CLASSIFIER - COMPLETE PIPELINE")
@@ -17,9 +63,10 @@ print("="*80)
 
 # Step 1: Load Data
 print("\n[1/5] Loading training data...")
-import sys
-sys.path.insert(0, 'C:\\Users\\nickp\\python-projects')
-from training_data_large import category_examples
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+from training_data_large import category_examples  # noqa: E402
 
 NOTE_TYPES = [
     "FOOD_RECIPE", "PERSONAL_DAILY_LIFE", "FINANCE_LEGAL", "SELF_IMPROVEMENT",
@@ -50,10 +97,15 @@ print(f"Train: {len(X_train)}, Val: {len(X_val)}")
 # Step 3: Build and Train Model
 print("\n[3/5] Building and training model...")
 
+AUTOTUNE = tf.data.AUTOTUNE
 vectorizer = tf.keras.layers.TextVectorization(max_tokens=10000, output_sequence_length=100)
 # Create TensorFlow dataset directly from the lists
-train_ds = tf.data.Dataset.from_tensor_slices((tf.constant(X_train, dtype=tf.string), tf.constant(y_train, dtype=tf.int32)))
-val_ds = tf.data.Dataset.from_tensor_slices((tf.constant(X_val, dtype=tf.string), tf.constant(y_val, dtype=tf.int32)))
+train_ds = tf.data.Dataset.from_tensor_slices(
+    (tf.constant(X_train, dtype=tf.string), tf.constant(y_train, dtype=tf.int32))
+)
+val_ds = tf.data.Dataset.from_tensor_slices(
+    (tf.constant(X_val, dtype=tf.string), tf.constant(y_val, dtype=tf.int32))
+)
 vectorizer.adapt(train_ds.map(lambda x, y: x))
 
 inputs = tf.keras.Input(shape=(1,), dtype=tf.string)
@@ -77,8 +129,8 @@ model = tf.keras.Model(inputs, outputs)
 model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
 # Prepare datasets for training
-train_ds_batched = train_ds.batch(16)
-val_ds_batched = val_ds.batch(16)
+train_ds_batched = train_ds.batch(16).cache().prefetch(AUTOTUNE)
+val_ds_batched = val_ds.batch(16).cache().prefetch(AUTOTUNE)
 
 history = model.fit(
     train_ds_batched,
@@ -386,12 +438,19 @@ print("="*80 + "\n")
 # Step 5: Export to TFLite
 print("\n[5/5] Exporting to TFLite...")
 
-# Save Keras model
+# Save Keras model and exported SavedModel for conversion
 model.save('note_classifier_final.keras')
 print("Saved: note_classifier_final.keras")
 
-# Convert to TFLite - requires SELECT_TF_OPS for TextVectorization layer
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
+saved_model_dir = 'note_classifier_saved_model'
+if Path(saved_model_dir).exists():
+    shutil.rmtree(saved_model_dir)
+
+tf.saved_model.save(model, saved_model_dir)
+print(f"Saved: {saved_model_dir}/ (SavedModel)")
+
+# Convert to TFLite from the SavedModel representation - requires SELECT_TF_OPS
+converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
 
 # Enable optimizations for smaller model size
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -412,12 +471,27 @@ converter._experimental_lower_tensor_list_ops = False
 # Convert model
 tflite_model = converter.convert()
 
+# Validate operator compatibility with the on-device runtime
+_assert_full_connected_compatibility(tflite_model)
+
+try:
+    tf.lite.Interpreter(model_content=tflite_model)
+except Exception as exc:  # pragma: no cover - defensive verification
+    raise RuntimeError(
+        "Generated model could not be loaded by TensorFlow Lite "
+        f"{REQUIRED_TF_VERSION}. Ensure the conversion environment "
+        "matches the Android runtime."
+    ) from exc
+
 with open('note_classifier.tflite', 'wb') as f:
     f.write(tflite_model)
 
 size_mb = len(tflite_model)/(1024*1024)
 print(f"Saved: note_classifier.tflite ({size_mb:.2f} MB)")
 print(f"Note: Model requires SELECT_TF_OPS runtime (text processing operations)")
+
+shutil.rmtree(saved_model_dir)
+print(f"Cleaned: {saved_model_dir}/")
 
 # Create deployment files
 with open('category_mapping.json', 'w') as f:
