@@ -59,6 +59,8 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -389,11 +391,44 @@ fun SketchPadDialog(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(text = "Line thickness")
+                val strokeWidthLabel = "${strokeWidthDp.roundToInt()} dp"
                 Slider(
                     value = strokeWidthDp,
                     onValueChange = { strokeWidthDp = it },
                     valueRange = 1f..20f,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Line thickness slider, current thickness $strokeWidthLabel"
+                    },
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Canvas(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .semantics {
+                                contentDescription = "Line thickness preview $strokeWidthLabel"
+                            },
+                    ) {
+                        val centerY = size.height / 2
+                        drawLine(
+                            color = selectedColor,
+                            start = Offset(size.width * 0.1f, centerY),
+                            end = Offset(size.width * 0.9f, centerY),
+                            strokeWidth = strokeWidthPx,
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                    Text(
+                        text = strokeWidthLabel,
+                        style = MaterialTheme.typography.body2,
+                    )
+                }
                 if (isPlacingText) {
                     Text(
                         text = "Tap on the sketch to place your text.",
