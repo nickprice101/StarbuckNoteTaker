@@ -5,8 +5,11 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
@@ -277,55 +281,77 @@ fun AudioTranscriptionDialog(
                 Spacer(modifier = Modifier.weight(1f, fill = true))
 
                 val normalizedLevel = ((rms + 2f) / 10f).coerceIn(0f, 1f)
-                val recordButtonSize = 50.dp
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End
+                val recordButtonSize = 72.dp
+                val buttonEnabled = isRecording || !awaitingResult
+                val buttonColor by animateColorAsState(
+                    targetValue = if (isRecording) {
+                        MaterialTheme.colors.primary
+                    } else {
+                        MaterialTheme.colors.surface
+                    }
+                )
+                val buttonElevation by animateDpAsState(
+                    targetValue = if (isRecording) 12.dp else 6.dp
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    AudioLevelMeter(
-                        level = if (isRecording) normalizedLevel else 0f,
-                        meterHeight = recordButtonSize,
-                        modifier = Modifier.width(220.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    val buttonEnabled = isRecording || !awaitingResult
-                    IconButton(
-                        onClick = {
-                            if (isRecording) {
-                                speechRecognizer.stopListening()
-                            } else if (!awaitingResult) {
-                                errorMessage = null
-                                partialText = ""
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                                }
-                                runCatching {
-                                    awaitingResult = true
-                                    showPermissionAction = false
-                                    speechRecognizer.startListening(intent)
-                                }.onFailure { throwable ->
-                                    awaitingResult = false
-                                    errorMessage = throwable.message ?: "Unable to start recording"
-                                    showPermissionAction = false
+                    Surface(
+                        shape = CircleShape,
+                        color = buttonColor,
+                        elevation = buttonElevation,
+                        modifier = Modifier
+                            .size(recordButtonSize)
+                            .clip(CircleShape)
+                            .clickable(enabled = buttonEnabled) {
+                                if (isRecording) {
+                                    speechRecognizer.stopListening()
+                                } else if (!awaitingResult) {
+                                    errorMessage = null
+                                    partialText = ""
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(
+                                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                        )
+                                        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                                    }
+                                    runCatching {
+                                        awaitingResult = true
+                                        showPermissionAction = false
+                                        speechRecognizer.startListening(intent)
+                                    }.onFailure { throwable ->
+                                        awaitingResult = false
+                                        errorMessage = throwable.message ?: "Unable to start recording"
+                                        showPermissionAction = false
+                                    }
                                 }
                             }
-                        },
-                        enabled = buttonEnabled,
-                        modifier = Modifier.size(recordButtonSize)
                     ) {
-                        val iconModifier = Modifier.size(recordButtonSize * 0.75f)
-                        if (isRecording) {
-                            StopRecordingIcon(modifier = iconModifier)
-                        } else {
-                            StartRecordingIcon(modifier = iconModifier)
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val iconModifier = Modifier.size(recordButtonSize * 0.6f)
+                            if (isRecording) {
+                                StopRecordingIcon(modifier = iconModifier)
+                            } else {
+                                StartRecordingIcon(modifier = iconModifier)
+                            }
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    AudioLevelMeter(
+                        level = if (isRecording) normalizedLevel else 0f,
+                        meterHeight = recordButtonSize * 0.75f,
+                        modifier = Modifier
+                            .widthIn(max = 220.dp)
+                            .align(Alignment.CenterHorizontally)
+                    )
                 }
             }
         }
