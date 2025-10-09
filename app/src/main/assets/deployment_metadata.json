@@ -1,7 +1,7 @@
 {
-  "created": "2025-10-07T09:28:24.288442",
-  "validation_accuracy": "95.92%",
-  "test_accuracy": "42.9%",
+  "created": "2025-10-09T08:12:49.267104",
+  "validation_accuracy": "95.51%",
+  "test_accuracy": "85.7%",
   "categories": [
     "FOOD_RECIPE",
     "PERSONAL_DAILY_LIFE",
@@ -18,5 +18,5 @@
     "CREATIVE_WRITING",
     "TECHNICAL_REFERENCE"
   ],
-  "model_size_mb": "2.84"
+  "model_size_mb": "2.78"
 }
