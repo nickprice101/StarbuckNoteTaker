@@ -390,8 +390,13 @@ print("\n[5/5] Exporting to TFLite...")
 model.save('note_classifier_final.keras')
 print("Saved: note_classifier_final.keras")
 
-# Convert to TFLite
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
+# Convert to TFLite using a concrete function to work around TF 2.16 Keras serialization changes
+@tf.function(input_signature=[tf.TensorSpec(shape=[None], dtype=tf.string)])
+def _serve_fn(inputs):
+    return model(inputs)
+
+concrete_fn = _serve_fn.get_concrete_function()
+converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_fn])
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
 converter._experimental_lower_tensor_list_ops = False
