@@ -22,7 +22,7 @@ dependencyResolutionManagement {
             // lookups and rejects the HEAD requests that Gradle issues when probing for
             // *.module descriptors. Restrict the metadata sources so that Gradle only
             // requests the Maven POM and artifacts, which prevents the 403 responses
-            // seen when resolving tensorflow-lite-select-tf-ops 2.17.0.
+            // seen when resolving tensorflow-lite-select-tf-ops 2.16.1.
             metadataSources {
                 mavenPom()
                 artifact()
