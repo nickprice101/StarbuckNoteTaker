@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -135,6 +136,13 @@ fun SketchPadDialog(
                 var textIdCounter by remember { mutableStateOf(0) }
                 var eraserSizeDp by remember { mutableStateOf(20f) }
                 val density = LocalDensity.current
+                val configuration = LocalConfiguration.current
+                val canvasHeightDp = remember(configuration.screenHeightDp) {
+                    val targetHeight = configuration.screenHeightDp * 0.65f
+                    val minHeight = 240f
+                    val maxHeight = 600f
+                    targetHeight.coerceIn(minHeight, maxHeight).dp
+                }
                 val strokeWidthPx = with(density) { strokeWidthDp.dp.toPx() }
                 val eraserRadiusPx = with(density) { eraserSizeDp.dp.toPx() }
                 var canvasSize by remember { mutableStateOf(IntSize.Zero) }
@@ -150,7 +158,7 @@ fun SketchPadDialog(
                 Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(300.dp)
+                            .height(canvasHeightDp)
                             .pointerInput(isPlacingText, textItems, isEraserMode) {
                                 if (!isPlacingText && !isEraserMode) {
                                     detectTapGestures(onDoubleTap = { offset ->
@@ -173,7 +181,7 @@ fun SketchPadDialog(
                     Canvas(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(300.dp)
+                            .height(canvasHeightDp)
                             .pointerInput(
                                 isPlacingText,
                                 selectedColor,
