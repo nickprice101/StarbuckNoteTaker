@@ -12,7 +12,15 @@ This directory contains the offline training pipeline and dataset that produce
    pip install tensorflow==2.16.1 tf_keras==2.16.0 scikit-learn
    ```
 
-2. Run the full pipeline from this folder:
+2. Run the duplicate check any time you edit the training data to ensure notes remain diverse:
+
+   ```bash
+   python detect_duplicates.py --threshold 0.85
+   ```
+
+   The script prints any pairs of notes with high cosine similarity within each category so they can be refreshed before training.
+
+3. Run the full pipeline from this folder:
 
    ```bash
    python complete_pipeline.py
@@ -23,7 +31,7 @@ This directory contains the offline training pipeline and dataset that produce
    `FULLY_CONNECTED` operators in the flatbuffer stay at version ≤ 11 so the
    generated model can be loaded by TensorFlow Lite 2.16.1.
 
-3. Copy the generated `note_classifier.tflite`, `category_mapping.json`, and
+4. Copy the generated `note_classifier.tflite`, `category_mapping.json`, and
    `deployment_metadata.json` into `app/src/main/assets/` for Android builds.
 
 Intermediate training artefacts (SavedModel directories, `.keras` files, etc.)
