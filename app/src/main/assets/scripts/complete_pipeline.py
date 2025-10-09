@@ -71,9 +71,11 @@ from training_data_large import category_examples  # noqa: E402
 NOTE_TYPES = [
     "FOOD_RECIPE", "PERSONAL_DAILY_LIFE", "FINANCE_LEGAL", "SELF_IMPROVEMENT",
     "HEALTH_WELLNESS", "EDUCATION_LEARNING", "HOME_FAMILY", "WORK_PROJECT",
-    "MEETING_RECAP", "SHOPPING_LIST", "REMINDER", "TRAVEL_LOG",
-    "CREATIVE_WRITING", "TECHNICAL_REFERENCE"
+    "MEETING_RECAP", "SHOPPING_LIST", "GENERAL_CHECKLIST", "REMINDER",
+    "TRAVEL_LOG", "CREATIVE_WRITING", "TECHNICAL_REFERENCE"
 ]
+
+NUM_CATEGORIES = len(NOTE_TYPES)
 
 all_notes = []
 all_labels = []
@@ -84,7 +86,7 @@ for idx, cat in enumerate(NOTE_TYPES):
     all_notes.extend(notes_text)
     all_labels.extend([idx] * len(examples))
 
-print(f"Loaded {len(all_notes)} examples ({len(all_notes)//14} per category)")
+print(f"Loaded {len(all_notes)} examples ({len(all_notes)//NUM_CATEGORIES} per category)")
 
 # Step 2: Train/Val Split
 print("\n[2/5] Splitting data...")
@@ -123,7 +125,7 @@ x = tf.keras.layers.Dropout(0.35)(x)
 x = tf.keras.layers.Dense(128, 'relu')(x)
 x = tf.keras.layers.BatchNormalization()(x)
 x = tf.keras.layers.Dropout(0.3)(x)
-outputs = tf.keras.layers.Dense(14, 'softmax')(x)
+outputs = tf.keras.layers.Dense(NUM_CATEGORIES, 'softmax')(x)
 
 model = tf.keras.Model(inputs, outputs)
 model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
@@ -243,7 +245,31 @@ def generate_enhanced_summary(note_text, category):
         else:
             summary = f"Shopping list with {count} items including {', '.join(clean_items[:2])} and more"
         return smart_truncate(summary)
-    
+
+    elif category == "GENERAL_CHECKLIST":
+        raw_items = [
+            re.sub(r'^[-\u2022\u2023\u25CF\u25AA\u25E6\*]+\s*', '', item.strip())
+            for item in re.split(r'(?:,|;|\band\b|\n)', content_part, flags=re.IGNORECASE)
+        ]
+        clean_items = [segment.strip(" .") for segment in raw_items if segment.strip(" .")]
+
+        label = context_part.lower() if context_part else "key tasks"
+        label = re.sub(r'\b(checklist|list|tasks)\b', '', label).strip()
+        if not label:
+            label = "key tasks"
+
+        count = len(clean_items)
+        if count >= 3:
+            summary = f"Checklist for {label} with {count} tasks including {clean_items[0]} and {clean_items[1]}"
+        elif count == 2:
+            summary = f"Checklist for {label} covering {clean_items[0]} and {clean_items[1]}"
+        elif count == 1:
+            summary = f"Checklist for {label} highlighting {clean_items[0]}"
+        else:
+            summary = f"Checklist outlining {label}"
+
+        return smart_truncate(summary)
+
     elif category == "FOOD_RECIPE":
         if context_part:
             recipe_name = context_part.lower().replace(' recipe', '').replace(' how to make', '')
@@ -403,6 +429,7 @@ print("="*80)
 validation_examples = [
     "Shift meeting recap: aligned on mobile order staging flow, assigned Riley to monitor warming oven temps, noted need to reorder grande lids.",
     "Weekly grocery run: oat milk 3 cartons, almond butter 2 jars, spinach, blueberries, cold brew filters, biodegradable soap refill.",
+    "Weekend maintenance checklist: drain water heater, clean dryer vent, replace HVAC filters, test smoke alarms, and document readings in log.",
     "Seattle to Portland trip: departed 8:15am on Amtrak Cascades, tasted seasonal lattes at Pioneer Courthouse store, noted crowd insights for merchandising deck.",
     "Poetic sketch: latte art swan mirrors sunrise commute, foam feathers tracing ambitions of the opening crew.",
     "Machine maintenance SOP: purge Mastrena lines for 6 seconds, run detergent cycle nightly, log pressure readings in Equipment Tracker tab.",
@@ -413,6 +440,7 @@ validation_examples = [
     "Call dentist tomorrow: schedule six-month cleaning appointment, mention tooth sensitivity on lower left side, request lunch hour slot.",
     "Vacation journal: explored Kyoto coffee scene visiting five specialty cafes, sampled pour-over at Arabica with view of Yasaka Pagoda.",
     "git rebase command: interactive rebase using git rebase -i HEAD~3 allows editing and reordering last three commits interactively.",
+    "Price comparison memo: Model X laptop offers 32GB RAM at $1,799 while Model Y adds OLED display for $1,950 and extends warranty coverage.",
     "Novel chapter development: produced 3,500 words of confrontation scene between protagonist and antagonist in abandoned warehouse setting.",
     "Attended workshop on negotiation skills: practiced role-playing scenarios, learned tactics for finding win-win solutions."
 ]
@@ -524,7 +552,7 @@ readme = f"""# Note Classifier - Deployment Package
 ```kotlin
 val interpreter = Interpreter(loadModelFile("note_classifier.tflite"))
 val input = arrayOf(noteText)
-val output = Array(1) {{ FloatArray(14) }}
+val output = Array(1) {{ FloatArray({NUM_CATEGORIES}) }}
 interpreter.run(input, output)
 val categoryIndex = output[0].indices.maxByOrNull {{ output[0][it] }} ?: 0
 val category = categories[categoryIndex]

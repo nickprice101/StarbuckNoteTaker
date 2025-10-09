@@ -237,6 +237,7 @@ class Summarizer(
 
         val summary = when (category) {
             "SHOPPING_LIST" -> buildShoppingListSummary(contentPart)
+            "GENERAL_CHECKLIST" -> buildGeneralChecklistSummary(contextPart, contentPart)
             "FOOD_RECIPE" -> buildFoodRecipeSummary(contextPart, isLong)
             "MEETING_RECAP" -> buildMeetingRecapSummary(contextPart, contentLower)
             "TRAVEL_LOG" -> buildTravelLogSummary(contextPart, subjects)
@@ -272,6 +273,30 @@ class Summarizer(
             "Shopping list with $count items including ${cleanItems.take(2).joinToString(" and ")} and more"
         } else {
             "Shopping list with $count items"
+        }
+    }
+
+    private fun buildGeneralChecklistSummary(contextPart: String, contentPart: String): String {
+        val rawItems = CHECKLIST_SPLIT_REGEX.split(contentPart)
+        val cleanedItems = rawItems.mapNotNull { raw ->
+            val trimmed = CHECKLIST_BULLET_CLEANER.replace(raw.trim(), "").trim().trimEnd('.')
+            trimmed.takeIf { it.isNotEmpty() }
+        }
+
+        val label = if (contextPart.isNotBlank()) {
+            val lowered = contextPart.lowercase(Locale.US)
+            val stripped = CHECKLIST_LABEL_STRIP_REGEX.replace(lowered, "").trim()
+            if (stripped.isNotBlank()) stripped else "key tasks"
+        } else {
+            "key tasks"
+        }
+
+        return when {
+            cleanedItems.size >= 3 -> "Checklist for $label with ${cleanedItems.size} tasks including ${cleanedItems[0]} and ${cleanedItems[1]}"
+            cleanedItems.size == 2 -> "Checklist for $label covering ${cleanedItems[0]} and ${cleanedItems[1]}"
+            cleanedItems.size == 1 -> "Checklist for $label highlighting ${cleanedItems[0]}"
+            contextPart.isNotBlank() -> "Checklist outlining $label"
+            else -> "Task checklist with multiple items"
         }
     }
 
@@ -450,6 +475,9 @@ class Summarizer(
         private const val FALLBACK_FIRST_LINE_TARGET = FALLBACK_CHAR_LIMIT / 2
         private val WHITESPACE_REGEX = Regex("\\s+")
         private val SHOPPING_SPLIT_REGEX = Regex(",| and ", RegexOption.IGNORE_CASE)
+        private val CHECKLIST_SPLIT_REGEX = Regex(",|;|\\band\\b|\\n", RegexOption.IGNORE_CASE)
+        private val CHECKLIST_BULLET_CLEANER = Regex("^[\\-•▪●■∎*]+\\s*")
+        private val CHECKLIST_LABEL_STRIP_REGEX = Regex("\\b(checklist|list|tasks)\\b", RegexOption.IGNORE_CASE)
         private val SUBJECT_REGEX = Regex("\\b[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\\b")
         private val CURRENCY_REGEX = Regex("\\$[\\d,]+(?:\\.\\d{2})?")
         private val HEALTH_METRIC_REGEX = Regex("\\d+(?:\\.\\d+)?\\s*(?:miles|minutes|hours|lbs|kg|calories)")
