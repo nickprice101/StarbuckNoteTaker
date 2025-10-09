@@ -74,7 +74,9 @@ category_examples = {
         {"note": "Created barley mushroom risotto simmered in vegetable stock, finished with truffle oil and shaved parmesan."},
         {"note": "Tried rosemary focaccia stuffed with roasted tomatoes and olives, drizzled extra virgin olive oil before baking."},
         {"note": "Made blueberry lavender jam, tested set point with frozen spoon method, and sealed jars with decorative labels."},
-        {"note": "Prepared caramelized onion galette with goat cheese and thyme on whole wheat crust for dinner party appetizer."}
+        {"note": "Prepared caramelized onion galette with goat cheese and thyme on whole wheat crust for dinner party appetizer."},
+        {"note": "Clipped from Bon Appetit newsletter: marinate skirt steak in 1/4 cup soy, lime zest, and grated garlic before searing, serve over charred scallions."},
+        {"note": "Saved from Tartine Bread appendix: levain build uses 50g mature starter, 200g water, 200g 50/50 white and whole wheat flour; autolyse dough 40 minutes before folds."}
     ],
     "PERSONAL_DAILY_LIFE": [
         {"note": "Jogged three loops around Riverfront Park before sunrise, watched the rowers practice on the glassy water, and cooled down with stretches beside the fountain."},
@@ -146,7 +148,9 @@ category_examples = {
         {"note": "Set up the balcony heater for cooler evenings, curled up with a blanket, and watched the neighborhood lights twinkle below."},
         {"note": "Completed the quarterly wardrobe inventory, photographed outfits to mix and match, and donated items that no longer fit my style."},
         {"note": "Spent an hour in the afternoon planting wildflower seeds in the side yard, watered them, and added markers so I remember what sprouted where."},
-        {"note": "Hosted an impromptu game night when the rain started, brewed spiced cider, taught friends my favorite cooperative board game, and laughed until midnight."}
+        {"note": "Hosted an impromptu game night when the rain started, brewed spiced cider, taught friends my favorite cooperative board game, and laughed until midnight."},
+        {"note": "Excerpt from Samin Nosrat's salt-fat-acid-heat newsletter: whisk 2 tbsp sherry vinegar with roasted shallots, toss with blistered green beans and shaved manchego."},
+        {"note": "Copied from bakery trade mag: hydration ratio for ciabatta test batch set at 78%, fold dough every 30 minutes for two hours before bench rest."}
     ],
     "FINANCE_LEGAL": [
         {"note": "Reviewed the monthly household budget, reconciled grocery receipts against the spreadsheet, and adjusted next month's meal plan to account for rising produce costs."},
@@ -218,7 +222,9 @@ category_examples = {
         {"note": "Reviewed family trust distributions with siblings over video call, agreed on the next quarterly disbursement, and updated the trustee log."},
         {"note": "Compiled the documentation to apply for the solar tax credit, kept copies of contractor invoices, and bookmarked the submission form."},
         {"note": "Scheduled a meeting with the legal aid society to review tenant rights materials, edited language for clarity, and printed handouts for the workshop."},
-        {"note": "Evaluated term life insurance quotes from three providers, compared riders for disability coverage, and scheduled a follow-up call with the preferred agent."}
+        {"note": "Evaluated term life insurance quotes from three providers, compared riders for disability coverage, and scheduled a follow-up call with the preferred agent."},
+        {"note": "Excerpt from IRS Publication 463: 2023 standard mileage rate for business use is 65.5 cents per mile; noted update in reimbursement policy draft."},
+        {"note": "Copied lender rate sheet from Monday email: 30-year fixed refinance quoted at 6.25% APR with 0.5 discount points versus credit union offer at 6.375% with no points for side-by-side comparison."}
     ],
     "SELF_IMPROVEMENT": [
         {"note": "Completed a 20-minute guided meditation focused on loving-kindness, noted improved concentration afterward, and recorded reflections in the mindfulness journal."},
@@ -290,7 +296,9 @@ category_examples = {
         {"note": "Listened to TED talks on emotional agility, wrote down strategies to handle change, and practiced one technique during a tough conversation."},
         {"note": "Kept a kindness log noting small ways I helped others, reviewed it weekly, and felt more motivated to continue."},
         {"note": "Enrolled in a financial literacy course, completed module one on budgeting, and created a personal spending plan."},
-        {"note": "Used a language learning podcast during commutes, repeated phrases aloud, and recorded myself to check pronunciation."}
+        {"note": "Used a language learning podcast during commutes, repeated phrases aloud, and recorded myself to check pronunciation."},
+        {"note": "Excerpt from James Clear's 3-2-1 newsletter: stack the cue 'after brewing coffee' with reviewing three lines of Italian notes; added to morning routine planner."},
+        {"note": "Quote saved from Bren\u00e9 Brown's Dare to Lead podcast: 'Clear is kind'; taped it inside journal as reminder before facilitating next team retro."}
     ],
     "HEALTH_WELLNESS": [
         {"note": "Completed the annual physical exam, discussed cholesterol numbers with the doctor, and set a goal to add two extra cardio sessions each week."},
@@ -362,7 +370,9 @@ category_examples = {
         {"note": "Created a morning stretching routine for shoulders and hips to address sedentary desk habits."},
         {"note": "Completed a park clean-up volunteer day, counted it toward active minutes, and enjoyed fresh air."},
         {"note": "Used a gratitude app to log three positive health wins each night, reinforcing healthy choices."},
-        {"note": "Added strength training twice per week with focus on glutes and hamstrings to support running form."}
+        {"note": "Added strength training twice per week with focus on glutes and hamstrings to support running form."},
+        {"note": "Summary clipped from WHO sleep hygiene guide: aim for 7-9 hours, dim screens one hour before bed, keep bedroom at 65\u00b0F; penciled checklist into evening routine."},
+        {"note": "Saved anti-inflammatory smoothie formula from dietitian blog: blend kefir, frozen cherries, chia seeds, and turmeric for weekday breakfast rotation."}
     ],
     "EDUCATION_LEARNING": [
         {"note": "Completed the week four module of the online statistics class, solved the regression problem set, and submitted discussion posts on data interpretation."},
@@ -434,7 +444,9 @@ category_examples = {
         {"note": "Attended the writing center for feedback on scholarship essay, revised opening paragraph, and submitted before deadline."},
         {"note": "Completed a chemistry lab write-up with detailed methodology, graphed results, and reflected on sources of error."},
         {"note": "Studied medical terminology flashcards, practiced pronouncing complex terms, and took a quiz to check retention."},
-        {"note": "Logged into the machine learning course to complete weekly quiz, reviewed gradient descent concepts, and retook incorrect questions."}
+        {"note": "Logged into the machine learning course to complete weekly quiz, reviewed gradient descent concepts, and retook incorrect questions."},
+        {"note": "Excerpted quote from Nature review on CRISPR ethics discussing germline governance; flagged it for inclusion in seminar position paper."},
+        {"note": "Copied professor's reminder email: upload capstone draft to Canvas by Friday 5 p.m. in APA format; added due date to study tracker."}
     ],
     "HOME_FAMILY": [
         {"note": "Organized the pantry shelves by decanting dry goods into labeled jars, wiped down surfaces, and created a list of staples to restock."},
@@ -506,7 +518,9 @@ category_examples = {
         {"note": "Hosted cousin sleepover night, set up air mattresses in the den, made homemade pizza, and let the kids stay up with a movie marathon."},
         {"note": "Installed a new ceiling fan in the master bedroom, followed wiring instructions carefully, and balanced the blades to prevent wobbling."},
         {"note": "Spent Sunday afternoon organizing the family budget binder, updated insurance policies, and filed tax documents in labeled sleeves."},
-        {"note": "Helped Mom plant bulbs along the front walkway, mapped out color patterns, and watered thoroughly before covering with mulch."}
+        {"note": "Helped Mom plant bulbs along the front walkway, mapped out color patterns, and watered thoroughly before covering with mulch."},
+        {"note": "Copied pediatrician's dosing email: children's acetaminophen 5 mL every 6 hours, max five doses in 24 hours; posted the guidance on fridge for quick reference."},
+        {"note": "Noted from IKEA Besta assembly PDF: anchor cabinet to wall studs with supplied L-brackets after step 11; blocked time Saturday to finish install."}
     ],
     "WORK_PROJECT": [
         {"note": "Kicked off the sprint planning meeting, finalized user stories, and aligned the team on deliverables for the next two weeks."},
@@ -578,7 +592,9 @@ category_examples = {
         {"note": "Analyzed sprint velocity trends, adjusted commitment levels, and communicated rationale to stakeholders."},
         {"note": "Hosted weekly cross-team standup for integration partners, tracked action items, and followed up on blockers."},
         {"note": "Compiled quarterly business review deck highlighting adoption metrics, customer stories, and roadmap highlights."},
-        {"note": "Drafted an onboarding survey for new customers, circulated it to customer success for review, and set up automation to trigger after account activation."}
+        {"note": "Drafted an onboarding survey for new customers, circulated it to customer success for review, and set up automation to trigger after account activation."},
+        {"note": "Excerpt from client RFP appendix: kiosk software must queue 500 orders offline and sync within 5 minutes of reconnect; added requirement to backlog specification."},
+        {"note": "Pulled quote from beta tester email: 'refund workflow took seven taps before confirmation'; flagged the friction for upcoming redesign workshop."}
     ],
     "MEETING_RECAP": [
         {"note": "Marketing Sync \u2013 Reviewed Q3 campaign performance; social ads drove 15% more leads than forecast while email conversions dipped. Action items: Jenna to refresh nurture content by Friday, Rahul to deliver updated creative assets for next week's A/B test, and Maria to coordinate webinar schedule with sales."},
@@ -650,7 +666,9 @@ category_examples = {
         {"note": "Supplier Negotiation Debrief \u2013 Recapped contract renewal meeting, agreed to revised pricing structure, and flagged follow-up clauses. Action items: legal to finalize redlines, finance to update cost models, and procurement to inform stakeholders of new terms."},
         {"note": "Product Beta Feedback \u2013 Summarized insights from early access users; major themes include dashboard customization and notification controls. Next steps: product to document feature requests, design to prototype customization settings, and engineering to estimate development effort."},
         {"note": "HR Wellness Taskforce \u2013 Planned mental health awareness week activities, confirmed speaker lineup, and assigned communication tasks. Actions: HR to send save-the-date, facilities to reserve event space, and taskforce to assemble resource guide."},
-        {"note": "Investor Relations Prep \u2013 Reviewed upcoming conference presentation, aligned on messaging, and finalized talking points. Assignments: CEO to rehearse narrative, finance to prepare metric appendix, and IR to coordinate media briefings."}
+        {"note": "Investor Relations Prep \u2013 Reviewed upcoming conference presentation, aligned on messaging, and finalized talking points. Assignments: CEO to rehearse narrative, finance to prepare metric appendix, and IR to coordinate media briefings."},
+        {"note": "Product Demo Debrief \u2013 Highlighted feedback from webinar survey responses quoting multiple attendees asking for offline dashboards; PM to assess feasibility, support to draft status reply, and design to scope UI adjustments."},
+        {"note": "Partnership Strategy Call \u2013 Captured vendor slide note stating co-branding lockup must maintain 20px clear space; marketing to refresh toolkit, legal to review updated usage rights, and sales to circulate guidelines to field reps."}
     ],
     "SHOPPING_LIST": [
         {"note": "Grocery run: whole wheat bread, almond butter, spinach, cherry tomatoes, feta cheese, chickpeas, lemons, oat milk, and granola bars for lunches."},
@@ -722,7 +740,9 @@ category_examples = {
         {"note": "Travel day snack bag: pretzels, dried apricots, cheddar crackers, granola bites, and refillable water bottle."},
         {"note": "Home office refresh \u2013 ergonomic mouse pad, blue light glasses, plant for desk, cable clips, and footrest."},
         {"note": "Weekend brunch groceries: brioche bread, strawberries, mascarpone, eggs, bacon, and fresh orange juice."},
-        {"note": "New puppy checklist \u2013 adjustable harness, leash, puppy pads, training treats, chew toy, and grooming wipes."}
+        {"note": "New puppy checklist \u2013 adjustable harness, leash, puppy pads, training treats, chew toy, and grooming wipes."},
+        {"note": "Screenshot from price tracker: Lenovo Slim 7 at $849 on MicroCenter through 9/30 versus $899 on Lenovo.com; decide before ordering accessories."},
+        {"note": "Clipped co-op bulk bin pricing sheet: organic almonds $5.79/lb, medjool dates $6.49/lb, unsweetened coconut $3.29/lb; update pantry restock plan."}
     ],
     "GENERAL_CHECKLIST": [
         {"note": "Weekend maintenance checklist: drain water heater, clean dryer vent, replace HVAC filters, test smoke detectors, and inspect sump pump discharge."},
@@ -801,7 +821,9 @@ category_examples = {
         {"note": "Pet sitter instructions checklist: outline feeding schedule, list medication doses, note favorite hiding spots, provide vet contacts, demonstrate alarm code, and set plant watering days."},
         {"note": "Apartment emergency binder: include lease copy, document appliance warranties, compile maintenance contacts, print evacuation map, store spare keys, and list utility shutoff steps."},
         {"note": "Mindful evening wind-down: dim lights, brew herbal tea, queue calming playlist, tidy living room, note gratitude entries, and set alarm for morning workout."},
-        {"note": "STEM fair project prep: finalize hypothesis board, test experiment setup, create data visualization poster, pack extension cord, rehearse presentation, and print judges' summary sheet."}
+        {"note": "STEM fair project prep: finalize hypothesis board, test experiment setup, create data visualization poster, pack extension cord, rehearse presentation, and print judges' summary sheet."},
+        {"note": "Move-out checklist copied from landlord PDF: patch nail holes, wipe baseboards, clean oven racks, steam mop floors, photograph utility meters, and drop keys with forwarding address."},
+        {"note": "Expo booth requirements from organizer email: complete setup by 8:30 a.m., maintain 10-foot aisle clearance, use UL-listed extension cords, keep signage under 6 feet, and submit insurance certificate at check-in."}
     ],
     "REMINDER": [
         {"note": "Reminder: call dentist office Tuesday at 9 AM to reschedule cleaning and confirm insurance coverage."},
@@ -873,7 +895,9 @@ category_examples = {
         {"note": "Check upcoming deadlines in project management tool every morning at 8:30 AM."},
         {"note": "Schedule dentist appointment six months out; calendar hold needed."},
         {"note": "Reminder: renew library card before it expires at month's end."},
-        {"note": "Set monthly reminder to sanitize phone, keyboard, and mouse on first Friday."}
+        {"note": "Set monthly reminder to sanitize phone, keyboard, and mouse on first Friday."},
+        {"note": "Reminder: follow museum ticket email instructions to arrive 15 minutes early with printed QR code for Saturday's timed entry."},
+        {"note": "Contractor deposit deadline per agreement: send ACH by Thursday 5 PM to confirm countertop install date."}
     ],
     "TRAVEL_LOG": [
         {"note": "Arrived in Lisbon after overnight flight; checked into Alfama apartment, wandered cobblestone streets, and sampled past\u00e9is de nata at Manteigaria."},
@@ -945,7 +969,9 @@ category_examples = {
         {"note": "Arrived in San Francisco, biked across Golden Gate Bridge, visited Alcatraz, and explored Ferry Building marketplace."},
         {"note": "Weekend in Napa Valley: tasted wines at three vineyards, enjoyed picnic at V. Sattui, and booked hot air balloon ride."},
         {"note": "Arrived in Helsinki, warmed up in Oodi Library, and took evening sauna at L\u00f6yly overlooking the frozen harbour."},
-        {"note": "Day trip to Tallinn via ferry, explored medieval Old Town, sampled black bread at a caf\u00e9, and returned by sunset cruise."}
+        {"note": "Day trip to Tallinn via ferry, explored medieval Old Town, sampled black bread at a caf\u00e9, and returned by sunset cruise."},
+        {"note": "Lonely Planet ferry note: Istanbul Emin\u00f6n\u00fc to Kadik\u00f6y departures every 20 minutes until midnight; penciled in 19:20 sailing before dinner in Moda."},
+        {"note": "Berlin Welcome Card blurb clipped from tourist office: ABC zone pass covers transit plus 25% Fernsehturm discount; buy at airport kiosk on arrival day."}
     ],
     "CREATIVE_WRITING": [
         {"note": "Fragment of a dream: the moon hung on a string above the city, and every taxi driver tugged it once before starting their shift."},
@@ -1017,7 +1043,9 @@ category_examples = {
         {"note": "Poetic fragment: In the attic of the old lighthouse, time folded napkins into origami ships."},
         {"note": "Setting: An ice hotel at the edge of an aurora, where the walls glow with stories frozen mid-sentence."},
         {"note": "Twist idea: The prophecy was written in invisible ink that reveals itself only when someone laughs."},
-        {"note": "Ending line: She unlocked the final door and stepped into a sunrise she had only ever heard described in braille."}
+        {"note": "Ending line: She unlocked the final door and stepped into a sunrise she had only ever heard described in braille."},
+        {"note": "Quote clipped from Ocean Vuong interview: \"Language is the house we can never finish building\"; saving it to anchor new prose poem draft."},
+        {"note": "Exercise note from Ursula K. Le Guin's *Steering the Craft*: write one page without adjectives to tighten rhythm for workshop submission."}
     ],
     "TECHNICAL_REFERENCE": [
         {"note": "Command cheat sheet: Use `kubectl get pods -n staging --watch` to monitor deployment rollout in real time, then `kubectl rollout status deployment/api -n staging` for completion confirmation."},
@@ -1099,6 +1127,8 @@ category_examples = {
         {"note": "Article snippet saved for reference: Harvard Business Review's \"Leading Hybrid Teams\" outlines weekly cadence, explicit norms, and asynchronous updates."},
         {"note": "Code review feedback quote: \"Consider extracting the retry policy so mobile and web clients stay consistent when the API rate limits.\""},
         {"note": "Kitchen appliance spec: Induction range requires 240V/40A dedicated circuit, clearance of 2 inches at back, and supports bridge element sync mode."},
-        {"note": "How-to reference: To descale espresso machine, dissolve manufacturer tablets in 1 liter of warm water, run cleaning cycle, and flush twice with fresh water."}
+        {"note": "How-to reference: To descale espresso machine, dissolve manufacturer tablets in 1 liter of warm water, run cleaning cycle, and flush twice with fresh water."},
+        {"note": "AWS Lambda doc excerpt: deployment package plus layers must stay under 250 MB uncompressed; prune dev dependencies before publishing update."},
+        {"note": "Jetpack Compose guidance from developer.android.com: hoist mutable state to caller and expose events for reuse; avoid storing state inside reusable composables."}
     ],
 }
