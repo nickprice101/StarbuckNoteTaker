@@ -37,17 +37,18 @@ import androidx.compose.material.Text
 import androidx.compose.material.TextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.Redo
-import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -63,6 +64,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 private data class Stroke(
@@ -80,7 +83,9 @@ private data class TextItem(
 
 private sealed class DrawAction {
     data class StrokeAction(val stroke: Stroke) : DrawAction()
+    data class StrokeRemoveAction(val stroke: Stroke, val index: Int) : DrawAction()
     data class TextAddAction(val textItem: TextItem) : DrawAction()
+    data class TextRemoveAction(val textItem: TextItem, val index: Int) : DrawAction()
     data class TextMoveAction(val textId: Int, val from: Offset, val to: Offset) : DrawAction()
     data class TextEditAction(val textId: Int, val oldText: String, val newText: String) : DrawAction()
 }
@@ -90,12 +95,20 @@ fun SketchPadDialog(
     onDismiss: () -> Unit,
     onSave: (ByteArray) -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
+            modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colors.surface,
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
                 Text(
                     text = "Sketch",
                     style = MaterialTheme.typography.h6,
@@ -119,7 +132,9 @@ fun SketchPadDialog(
                 var textIdCounter by remember { mutableStateOf(0) }
                 val density = LocalDensity.current
                 val strokeWidthPx = with(density) { strokeWidthDp.dp.toPx() }
+                val eraserRadiusPx = with(density) { 20.dp.toPx() }
                 var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+                var isEraserMode by remember { mutableStateOf(false) }
                 val colorOptions = listOf(
                     Color.Black,
                     Color.Red,
@@ -132,8 +147,8 @@ fun SketchPadDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(300.dp)
-                            .pointerInput(isPlacingText, textItems) {
-                                if (!isPlacingText) {
+                            .pointerInput(isPlacingText, textItems, isEraserMode) {
+                                if (!isPlacingText && !isEraserMode) {
                                     detectTapGestures(onDoubleTap = { offset ->
                                         val target = textItems
                                             .asReversed()
@@ -155,7 +170,7 @@ fun SketchPadDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(300.dp)
-                            .pointerInput(isPlacingText, selectedColor, strokeWidthPx) {
+                            .pointerInput(isPlacingText, selectedColor, strokeWidthPx, isEraserMode) {
                                 if (isPlacingText) {
                                     detectTapGestures { offset ->
                                         val text = pendingText.trim()
@@ -173,6 +188,32 @@ fun SketchPadDialog(
                                         pendingText = ""
                                         isPlacingText = false
                                     }
+                                } else if (isEraserMode) {
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            performErase(
+                                                offset = offset,
+                                                strokes = strokes,
+                                                textItems = textItems,
+                                                undoStack = undoStack,
+                                                redoStack = redoStack,
+                                                eraserRadiusPx = eraserRadiusPx,
+                                                density = density,
+                                            )
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            performErase(
+                                                offset = change.position,
+                                                strokes = strokes,
+                                                textItems = textItems,
+                                                undoStack = undoStack,
+                                                redoStack = redoStack,
+                                                eraserRadiusPx = eraserRadiusPx,
+                                                density = density,
+                                            )
+                                        },
+                                    )
                                 } else {
                                     var currentStrokePoints: MutableList<Offset>? = null
                                     detectDragGestures(
@@ -360,16 +401,6 @@ fun SketchPadDialog(
                         color = MaterialTheme.colors.primary,
                     )
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                RoundIconButton(
-                    onClick = {
-                        pendingText = ""
-                        showTextDialog = true
-                    },
-                    icon = Icons.Filled.TextFields,
-                    contentDescription = "Add text",
-                    backgroundColor = MaterialTheme.colors.primary,
-                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Tip: Drag text to move it or double-tap to edit.",
@@ -379,117 +410,159 @@ fun SketchPadDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        RoundIconButton(
-                            onClick = {
-                                if (undoStack.isNotEmpty()) {
-                                    val action = undoStack.removeAt(undoStack.lastIndex)
-                                    when (action) {
-                                        is DrawAction.StrokeAction -> {
-                                            val index = strokes.indexOfLast { it == action.stroke }
-                                            if (index >= 0) {
-                                                strokes.removeAt(index)
-                                            }
-                                            redoStack.add(action)
+                    RoundIconButton(
+                        onClick = {
+                            pendingText = ""
+                            showTextDialog = true
+                            isEraserMode = false
+                        },
+                        icon = Icons.Filled.TextFields,
+                        contentDescription = "Add text",
+                        backgroundColor = MaterialTheme.colors.primary,
+                    )
+                    RoundIconButton(
+                        onClick = {
+                            if (undoStack.isNotEmpty()) {
+                                val action = undoStack.removeAt(undoStack.lastIndex)
+                                when (action) {
+                                    is DrawAction.StrokeAction -> {
+                                        val index = strokes.indexOfLast { it == action.stroke }
+                                        if (index >= 0) {
+                                            strokes.removeAt(index)
                                         }
-                                        is DrawAction.TextAddAction -> {
-                                            val index = textItems.indexOfLast { it.id == action.textItem.id }
-                                            if (index >= 0) {
-                                                textItems.removeAt(index)
-                                            }
-                                            redoStack.add(action)
+                                        redoStack.add(action)
+                                    }
+                                    is DrawAction.StrokeRemoveAction -> {
+                                        val targetIndex = action.index.coerceIn(0, strokes.size)
+                                        strokes.add(targetIndex, action.stroke)
+                                        redoStack.add(action)
+                                    }
+                                    is DrawAction.TextAddAction -> {
+                                        val index = textItems.indexOfLast { it.id == action.textItem.id }
+                                        if (index >= 0) {
+                                            textItems.removeAt(index)
                                         }
-                                        is DrawAction.TextMoveAction -> {
-                                            val index = textItems.indexOfFirst { it.id == action.textId }
-                                            if (index >= 0) {
-                                                textItems[index] = textItems[index].copy(position = action.from)
-                                            }
-                                            redoStack.add(action)
+                                        redoStack.add(action)
+                                    }
+                                    is DrawAction.TextRemoveAction -> {
+                                        val targetIndex = action.index.coerceIn(0, textItems.size)
+                                        textItems.add(targetIndex, action.textItem)
+                                        redoStack.add(action)
+                                    }
+                                    is DrawAction.TextMoveAction -> {
+                                        val index = textItems.indexOfFirst { it.id == action.textId }
+                                        if (index >= 0) {
+                                            textItems[index] = textItems[index].copy(position = action.from)
                                         }
-                                        is DrawAction.TextEditAction -> {
-                                            val index = textItems.indexOfFirst { it.id == action.textId }
-                                            if (index >= 0) {
-                                                textItems[index] = textItems[index].copy(text = action.oldText)
-                                            }
-                                            redoStack.add(action)
+                                        redoStack.add(action)
+                                    }
+                                    is DrawAction.TextEditAction -> {
+                                        val index = textItems.indexOfFirst { it.id == action.textId }
+                                        if (index >= 0) {
+                                            textItems[index] = textItems[index].copy(text = action.oldText)
                                         }
+                                        redoStack.add(action)
                                     }
                                 }
-                            },
-                            icon = Icons.AutoMirrored.Filled.Undo,
-                            contentDescription = "Undo",
-                            backgroundColor = MaterialTheme.colors.surface,
-                            iconTint = MaterialTheme.colors.onSurface,
-                        )
-                        RoundIconButton(
-                            onClick = {
-                                if (redoStack.isNotEmpty()) {
-                                    val action = redoStack.removeAt(redoStack.lastIndex)
-                                    when (action) {
-                                        is DrawAction.StrokeAction -> {
-                                            strokes.add(action.stroke)
-                                            undoStack.add(action)
-                                        }
-                                        is DrawAction.TextAddAction -> {
-                                            textItems.add(action.textItem)
-                                            undoStack.add(action)
-                                        }
-                                        is DrawAction.TextMoveAction -> {
-                                            val index = textItems.indexOfFirst { it.id == action.textId }
-                                            if (index >= 0) {
-                                                textItems[index] = textItems[index].copy(position = action.to)
+                            }
+                        },
+                        icon = Icons.AutoMirrored.Filled.Undo,
+                        contentDescription = "Undo",
+                        backgroundColor = MaterialTheme.colors.surface,
+                        iconTint = MaterialTheme.colors.onSurface,
+                    )
+                    RoundIconButton(
+                        onClick = {
+                            if (redoStack.isNotEmpty()) {
+                                val action = redoStack.removeAt(redoStack.lastIndex)
+                                when (action) {
+                                    is DrawAction.StrokeAction -> {
+                                        strokes.add(action.stroke)
+                                        undoStack.add(action)
+                                    }
+                                    is DrawAction.StrokeRemoveAction -> {
+                                        val targetIndex = action.index
+                                        if (targetIndex in 0 until strokes.size) {
+                                            strokes.removeAt(targetIndex)
+                                        } else {
+                                            val fallbackIndex = strokes.indexOfLast { it == action.stroke }
+                                            if (fallbackIndex >= 0) {
+                                                strokes.removeAt(fallbackIndex)
                                             }
-                                            undoStack.add(action)
                                         }
-                                        is DrawAction.TextEditAction -> {
-                                            val index = textItems.indexOfFirst { it.id == action.textId }
-                                            if (index >= 0) {
-                                                textItems[index] = textItems[index].copy(text = action.newText)
+                                        undoStack.add(action)
+                                    }
+                                    is DrawAction.TextAddAction -> {
+                                        textItems.add(action.textItem)
+                                        undoStack.add(action)
+                                    }
+                                    is DrawAction.TextRemoveAction -> {
+                                        val targetIndex = action.index
+                                        if (targetIndex in 0 until textItems.size) {
+                                            textItems.removeAt(targetIndex)
+                                        } else {
+                                            val fallbackIndex = textItems.indexOfLast { it.id == action.textItem.id }
+                                            if (fallbackIndex >= 0) {
+                                                textItems.removeAt(fallbackIndex)
                                             }
-                                            undoStack.add(action)
                                         }
+                                        undoStack.add(action)
+                                    }
+                                    is DrawAction.TextMoveAction -> {
+                                        val index = textItems.indexOfFirst { it.id == action.textId }
+                                        if (index >= 0) {
+                                            textItems[index] = textItems[index].copy(position = action.to)
+                                        }
+                                        undoStack.add(action)
+                                    }
+                                    is DrawAction.TextEditAction -> {
+                                        val index = textItems.indexOfFirst { it.id == action.textId }
+                                        if (index >= 0) {
+                                            textItems[index] = textItems[index].copy(text = action.newText)
+                                        }
+                                        undoStack.add(action)
                                     }
                                 }
-                            },
-                            icon = Icons.AutoMirrored.Filled.Redo,
-                            contentDescription = "Redo",
-                            backgroundColor = MaterialTheme.colors.surface,
-                            iconTint = MaterialTheme.colors.onSurface,
-                        )
-                        RoundIconButton(
-                            onClick = {
-                                strokes.clear()
-                                textItems.clear()
-                                activeStroke = null
-                                undoStack.clear()
-                                redoStack.clear()
-                            },
-                            icon = Icons.Filled.Clear,
-                            contentDescription = "Clear",
-                            backgroundColor = MaterialTheme.colors.surface,
-                            iconTint = MaterialTheme.colors.error,
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        RoundIconButton(
-                            onClick = onDismiss,
-                            icon = Icons.Filled.Close,
-                            contentDescription = "Cancel",
-                            backgroundColor = MaterialTheme.colors.surface,
-                            iconTint = MaterialTheme.colors.onSurface,
-                        )
-                        RoundIconButton(
-                            onClick = {
-                                if (canvasSize.width <= 0 || canvasSize.height <= 0 ||
-                                    (strokes.isEmpty() && activeStroke == null && textItems.isEmpty())
-                                ) {
-                                    onDismiss()
-                                    return@RoundIconButton
-                                }
-                                val bitmap = Bitmap.createBitmap(
-                                    canvasSize.width,
+                            }
+                        },
+                        icon = Icons.AutoMirrored.Filled.Redo,
+                        contentDescription = "Redo",
+                        backgroundColor = MaterialTheme.colors.surface,
+                        iconTint = MaterialTheme.colors.onSurface,
+                    )
+                    RoundIconButton(
+                        onClick = {
+                            isEraserMode = !isEraserMode
+                            if (isEraserMode) {
+                                isPlacingText = false
+                            }
+                        },
+                        icon = Icons.Filled.CleaningServices,
+                        contentDescription = if (isEraserMode) "Disable eraser" else "Enable eraser",
+                        backgroundColor = if (isEraserMode) MaterialTheme.colors.primary else MaterialTheme.colors.surface,
+                        iconTint = if (isEraserMode) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    RoundIconButton(
+                        onClick = onDismiss,
+                        icon = Icons.Filled.Close,
+                        contentDescription = "Cancel",
+                        backgroundColor = MaterialTheme.colors.surface,
+                        iconTint = MaterialTheme.colors.onSurface,
+                    )
+                    RoundIconButton(
+                        onClick = {
+                            if (canvasSize.width <= 0 || canvasSize.height <= 0 ||
+                                (strokes.isEmpty() && activeStroke == null && textItems.isEmpty())
+                            ) {
+                                onDismiss()
+                                return@RoundIconButton
+                            }
+                            val bitmap = Bitmap.createBitmap(
+                                canvasSize.width,
                                 canvasSize.height,
                                 Bitmap.Config.ARGB_8888,
                             )
@@ -539,11 +612,10 @@ fun SketchPadDialog(
                             bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
                             onSave(output.toByteArray())
                         },
-                            icon = Icons.Filled.Check,
-                            contentDescription = "Save",
-                            backgroundColor = MaterialTheme.colors.primary,
-                        )
-                    }
+                        icon = Icons.Filled.Check,
+                        contentDescription = "Save",
+                        backgroundColor = MaterialTheme.colors.primary,
+                    )
                 }
                 if (showTextDialog) {
                     AlertDialog(
@@ -567,6 +639,7 @@ fun SketchPadDialog(
                             Button(onClick = {
                                 if (pendingText.isNotBlank()) {
                                     isPlacingText = true
+                                    isEraserMode = false
                                     showTextDialog = false
                                 }
                             }) {
@@ -678,4 +751,49 @@ private fun RoundIconButton(
             )
         }
     }
+}
+
+private fun performErase(
+    offset: Offset,
+    strokes: MutableList<Stroke>,
+    textItems: MutableList<TextItem>,
+    undoStack: MutableList<DrawAction>,
+    redoStack: MutableList<DrawAction>,
+    eraserRadiusPx: Float,
+    density: Density,
+) {
+    var hasRemoved = false
+    val removedStrokes = strokes.withIndex()
+        .filter { (_, stroke) ->
+            stroke.points.any { point -> distanceBetween(point, offset) <= eraserRadiusPx }
+        }
+    if (removedStrokes.isNotEmpty()) {
+        removedStrokes
+            .sortedByDescending { it.index }
+            .forEach { indexedValue ->
+                strokes.removeAt(indexedValue.index)
+                undoStack.add(DrawAction.StrokeRemoveAction(indexedValue.value, indexedValue.index))
+            }
+        hasRemoved = true
+    }
+    val removedTexts = textItems.withIndex()
+        .filter { (_, textItem) ->
+            isPointInTextItem(offset, textItem, density)
+        }
+    if (removedTexts.isNotEmpty()) {
+        removedTexts
+            .sortedByDescending { it.index }
+            .forEach { indexedValue ->
+                textItems.removeAt(indexedValue.index)
+                undoStack.add(DrawAction.TextRemoveAction(indexedValue.value, indexedValue.index))
+            }
+        hasRemoved = true
+    }
+    if (hasRemoved) {
+        redoStack.clear()
+    }
+}
+
+private fun distanceBetween(first: Offset, second: Offset): Float {
+    return hypot((first.x - second.x).toDouble(), (first.y - second.y).toDouble()).toFloat()
 }
