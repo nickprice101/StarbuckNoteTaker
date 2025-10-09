@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 private data class Stroke(
@@ -132,9 +133,10 @@ fun SketchPadDialog(
                 var textDragOffset by remember { mutableStateOf(Offset.Zero) }
                 var textDragStart by remember { mutableStateOf<Offset?>(null) }
                 var textIdCounter by remember { mutableStateOf(0) }
+                var eraserSizeDp by remember { mutableStateOf(20f) }
                 val density = LocalDensity.current
                 val strokeWidthPx = with(density) { strokeWidthDp.dp.toPx() }
-                val eraserRadiusPx = with(density) { 20.dp.toPx() }
+                val eraserRadiusPx = with(density) { eraserSizeDp.dp.toPx() }
                 var canvasSize by remember { mutableStateOf(IntSize.Zero) }
                 var isEraserMode by remember { mutableStateOf(false) }
                 val colorOptions = listOf(
@@ -172,7 +174,13 @@ fun SketchPadDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(300.dp)
-                            .pointerInput(isPlacingText, selectedColor, strokeWidthPx, isEraserMode) {
+                            .pointerInput(
+                                isPlacingText,
+                                selectedColor,
+                                strokeWidthPx,
+                                isEraserMode,
+                                eraserRadiusPx,
+                            ) {
                                 if (isPlacingText) {
                                     detectTapGestures { offset ->
                                         val text = pendingText.trim()
@@ -426,6 +434,45 @@ fun SketchPadDialog(
                     }
                     Text(
                         text = strokeWidthLabel,
+                        style = MaterialTheme.typography.body2,
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(text = "Eraser size")
+                val eraserSizeLabel = "${eraserSizeDp.roundToInt()} dp"
+                Slider(
+                    value = eraserSizeDp,
+                    onValueChange = { eraserSizeDp = it },
+                    valueRange = 5f..80f,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Eraser size slider, current size $eraserSizeLabel"
+                    },
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Canvas(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .semantics {
+                                contentDescription = "Eraser size preview $eraserSizeLabel"
+                            },
+                    ) {
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val radius = eraserRadiusPx.coerceAtMost(minOf(size.width, size.height) / 2f)
+                        drawCircle(
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.2f),
+                            radius = radius,
+                            center = center,
+                        )
+                    }
+                    Text(
+                        text = eraserSizeLabel,
                         style = MaterialTheme.typography.body2,
                     )
                 }
@@ -746,7 +793,12 @@ fun SketchPadDialog(
     }
 }
 
-private fun isPointInTextItem(point: Offset, textItem: TextItem, density: Density): Boolean {
+private fun isPointInTextItem(
+    point: Offset,
+    textItem: TextItem,
+    density: Density,
+    touchRadiusPx: Float = 0f,
+): Boolean {
     val textSizePx = with(density) { 16.sp.toPx() }
     val paint = Paint().apply {
         textSize = textSizePx
@@ -758,7 +810,7 @@ private fun isPointInTextItem(point: Offset, textItem: TextItem, density: Densit
     val bottom = textItem.position.y + fontMetrics.descent
     val left = textItem.position.x
     val right = left + textWidth
-    val padding = 16f
+    val padding = max(16f, touchRadiusPx)
     return point.x in (left - padding)..(right + padding) &&
         point.y in (top - padding)..(bottom + padding)
 }
@@ -813,7 +865,7 @@ private fun performErase(
     }
     val removedTexts = textItems.withIndex()
         .filter { (_, textItem) ->
-            isPointInTextItem(offset, textItem, density)
+            isPointInTextItem(offset, textItem, density, touchRadiusPx = eraserRadiusPx)
         }
     if (removedTexts.isNotEmpty()) {
         removedTexts
