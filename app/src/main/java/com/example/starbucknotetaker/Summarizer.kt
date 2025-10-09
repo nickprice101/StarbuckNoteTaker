@@ -84,7 +84,7 @@ class Summarizer(
             }
 
             val output = Array(1) { FloatArray(categories.size) }
-            val input = arrayOf(arrayOf(trimmed))
+            val input = arrayOf(trimmed)
             interpreter.run(input, output)
             val scores = output[0]
             val predictedIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
