@@ -395,11 +395,16 @@ print("Saved: note_classifier_final.keras")
 def _serve_fn(inputs):
     return model(inputs)
 
+# Export the trackable model so TensorFlow Lite keeps the TF 2.16-compatible op set.
 concrete_fn = _serve_fn.get_concrete_function()
-converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_fn])
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
-converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
+converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_fn], trackable_obj=model)
+# Stay on the builtin float operators to keep the minimum runtime at or below 2.16.1.
+converter.optimizations = []
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+converter.target_spec.supported_types = [tf.float32]
 converter._experimental_lower_tensor_list_ops = False
+if hasattr(converter, "_experimental_disable_per_channel"):
+    converter._experimental_disable_per_channel = True
 tflite_model = converter.convert()
 
 with open('note_classifier.tflite', 'wb') as f:
@@ -428,11 +433,11 @@ readme = f"""# Note Classifier - Deployment Package
 - Test Accuracy: {test_acc:.1f}%
 - Model Size: {size_mb:.2f} MB
 
-## Files
-1. note_classifier.tflite - TFLite model
-2. category_mapping.json - Category names
-3. deployment_metadata.json - Training results
-4. note_classifier_final.keras - Keras model
+## Files␊
+1. note_classifier.tflite - TFLite model␊
+2. category_mapping.json - Category names␊
+3. deployment_metadata.json - Training results␊
+4. note_classifier_final.keras - Optional Keras checkpoint for reference (not bundled in app)
 
 ## Android Integration
 
@@ -463,3 +468,4 @@ print(f"Test: {test_acc:.1f}%")
 print(f"TFLite: note_classifier.tflite ({size_mb:.2f} MB)")
 print("Ready for Android deployment!")
 print("="*80)
+
