@@ -321,22 +321,26 @@ private fun SwipeToDeleteNoteItem(
             )
     ) {
         Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .width(actionWidth)
-                .background(Color.Red)
-                .clickable {
-                    onDelete()
-                    scope.launch { swipeState.snapTo(SwipeActionState.Closed) }
-                }
+            modifier = Modifier.matchParentSize()
         ) {
-            Icon(
-                Icons.Default.Delete,
-                contentDescription = "Delete",
-                tint = Color.White,
-                modifier = Modifier.align(Alignment.Center)
-            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(actionWidth)
+                    .background(Color.Red)
+                    .clickable {
+                        onDelete()
+                        scope.launch { swipeState.snapTo(SwipeActionState.Closed) }
+                    }
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = Color.White,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
         }
         NoteListItem(
             note = note,
