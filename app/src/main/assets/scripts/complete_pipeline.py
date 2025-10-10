@@ -32,18 +32,14 @@ def _assert_full_connected_compatibility(model_content: bytes, max_version: int 
     """Ensure generated TFLite model keeps FULLY_CONNECTED ops within range."""
 
     tflite_model = schema_fb.Model.GetRootAsModel(model_content, 0)
-    max_detected = 0
     for idx in range(tflite_model.OperatorCodesLength()):
         op_code = tflite_model.OperatorCodes(idx)
         if op_code.BuiltinCode() == schema_fb.BuiltinOperator.FULLY_CONNECTED:
-            max_detected = max(max_detected, op_code.Version())
             if op_code.Version() > max_version:
                 raise RuntimeError(
                     "Exported model requires FULLY_CONNECTED op version "
                     f"{op_code.Version()}, which exceeds the maximum supported version."
                 )
-
-    print(f"FULLY_CONNECTED operator versions <= {max_version}: detected max version {max_detected}")
 
 print("="*80)
 print("NOTE CLASSIFIER - COMPLETE PIPELINE")
@@ -497,8 +493,7 @@ converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
 # Use the legacy converter to maintain operator compatibility with older runtimes
-if hasattr(converter, "experimental_new_converter"):
-    converter.experimental_new_converter = False
+converter.experimental_new_converter = False
 
 # CRITICAL: Support SELECT_TF_OPS for text processing operations
 # TextVectorization uses StringLower, StaticRegexReplace, StringSplitV2, RaggedTensorToTensor
