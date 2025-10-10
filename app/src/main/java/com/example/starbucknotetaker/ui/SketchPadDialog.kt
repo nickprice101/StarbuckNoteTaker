@@ -653,6 +653,7 @@ fun SketchPadDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
+                                    val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
                                     Slider(
                                         value = eraserSizeDp,
                                         onValueChange = { eraserSizeDp = it },
@@ -672,7 +673,6 @@ fun SketchPadDialog(
                                             },
                                     ) {
                                         val radius = with(density) { eraserSizeDp.dp.toPx() / 2f }
-                                        val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
                                         val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
                                         drawCircle(
                                             color = eraserPreviewColor,
