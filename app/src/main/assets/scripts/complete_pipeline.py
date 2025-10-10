@@ -468,19 +468,24 @@ print("="*80 + "\n")
 # Step 5: Export to TFLite
 print("\n[5/5] Exporting to TFLite...")
 
-# Save Keras model and exported SavedModel for conversion
-model.save('note_classifier_final.keras')
-print("Saved: note_classifier_final.keras")
+# Define output directory (always save to project directory)
+OUTPUT_DIR = SCRIPT_DIR
+print(f"Output directory: {OUTPUT_DIR}")
 
-saved_model_dir = 'note_classifier_saved_model'
-if Path(saved_model_dir).exists():
+# Save Keras model and exported SavedModel for conversion
+keras_path = OUTPUT_DIR / 'note_classifier_final.keras'
+model.save(str(keras_path))
+print(f"Saved: {keras_path}")
+
+saved_model_dir = OUTPUT_DIR / 'note_classifier_saved_model'
+if saved_model_dir.exists():
     shutil.rmtree(saved_model_dir)
 
-tf.saved_model.save(model, saved_model_dir)
+tf.saved_model.save(model, str(saved_model_dir))
 print(f"Saved: {saved_model_dir}/ (SavedModel)")
 
 # Convert to TFLite from the SavedModel representation - requires SELECT_TF_OPS
-converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
+converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
 
 # Enable optimizations for smaller model size
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -512,21 +517,24 @@ except Exception as exc:  # pragma: no cover - defensive verification
         "Ensure the conversion environment matches the Android runtime."
     ) from exc
 
-with open('note_classifier.tflite', 'wb') as f:
+tflite_path = OUTPUT_DIR / 'note_classifier.tflite'
+with open(tflite_path, 'wb') as f:
     f.write(tflite_model)
 
 size_mb = len(tflite_model)/(1024*1024)
-print(f"Saved: note_classifier.tflite ({size_mb:.2f} MB)")
+print(f"Saved: {tflite_path} ({size_mb:.2f} MB)")
 print(f"Note: Model requires SELECT_TF_OPS runtime (text processing operations)")
 
 shutil.rmtree(saved_model_dir)
 print(f"Cleaned: {saved_model_dir}/")
 
 # Create deployment files
-with open('category_mapping.json', 'w') as f:
+mapping_path = OUTPUT_DIR / 'category_mapping.json'
+with open(mapping_path, 'w') as f:
     json.dump({"categories": NOTE_TYPES}, f, indent=2)
 
-with open('deployment_metadata.json', 'w') as f:
+metadata_path = OUTPUT_DIR / 'deployment_metadata.json'
+with open(metadata_path, 'w') as f:
     json.dump({
         "created": datetime.now().isoformat(),
         "validation_accuracy": f"{best_acc*100:.2f}%",
@@ -562,12 +570,13 @@ val category = categories[categoryIndex]
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
 
-with open('DEPLOYMENT_README.md', 'w', encoding='utf-8') as f:
+readme_path = OUTPUT_DIR / 'DEPLOYMENT_README.md'
+with open(readme_path, 'w', encoding='utf-8') as f:
     f.write(readme)
 
-print("Saved: category_mapping.json")
-print("Saved: deployment_metadata.json")
-print("Saved: DEPLOYMENT_README.md")
+print(f"Saved: {mapping_path}")
+print(f"Saved: {metadata_path}")
+print(f"Saved: {readme_path}")
 
 print("\n" + "="*80)
 print("DEPLOYMENT COMPLETE!")
