@@ -644,14 +644,14 @@ fun SketchPadDialog(
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
                                     Row(
-                                        verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
                                     ) {
                                         Text(
                                             text = if (isEraserMode) "Eraser enabled" else "Eraser disabled",
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier.padding(end = 12.dp),
                                         )
-                                        Spacer(modifier = Modifier.width(12.dp))
                                         Switch(
                                             checked = isEraserMode,
                                             onCheckedChange = { checked ->
