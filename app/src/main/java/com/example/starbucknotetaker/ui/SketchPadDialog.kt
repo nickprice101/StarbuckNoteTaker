@@ -23,8 +23,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.Icon
@@ -36,12 +39,15 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.TextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.DropdownMenu
+import androidx.compose.material.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -108,10 +114,12 @@ fun SketchPadDialog(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colors.surface,
         ) {
+            val scrollState = rememberScrollState()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .verticalScroll(scrollState),
             ) {
                 Text(
                     text = "Sketch",
@@ -138,7 +146,7 @@ fun SketchPadDialog(
                 val density = LocalDensity.current
                 val configuration = LocalConfiguration.current
                 val canvasHeightDp = remember(configuration.screenHeightDp) {
-                    val targetHeight = configuration.screenHeightDp * 0.65f
+                    val targetHeight = configuration.screenHeightDp * 0.55f
                     val minHeight = 240f
                     val maxHeight = 600f
                     targetHeight.coerceIn(minHeight, maxHeight).dp
@@ -156,24 +164,24 @@ fun SketchPadDialog(
                     Color(0xFFFFA500),
                 )
                 Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(canvasHeightDp)
-                            .pointerInput(isPlacingText, textItems, isEraserMode) {
-                                if (!isPlacingText && !isEraserMode) {
-                                    detectTapGestures(onDoubleTap = { offset ->
-                                        val target = textItems
-                                            .asReversed()
-                                            .firstOrNull { textItem ->
-                                                isPointInTextItem(offset, textItem, density)
-                                            }
-                                        if (target != null) {
-                                            editingTextItem = target
-                                            editTextValue = target.text
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(canvasHeightDp)
+                        .pointerInput(isPlacingText, textItems, isEraserMode) {
+                            if (!isPlacingText && !isEraserMode) {
+                                detectTapGestures(onDoubleTap = { offset ->
+                                    val target = textItems
+                                        .asReversed()
+                                        .firstOrNull { textItem ->
+                                            isPointInTextItem(offset, textItem, density)
                                         }
-                                    })
-                                }
+                                    if (target != null) {
+                                        editingTextItem = target
+                                        editTextValue = target.text
+                                    }
+                                })
                             }
+                        }
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color.White)
                             .border(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
@@ -406,85 +414,8 @@ fun SketchPadDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(text = "Line thickness")
-                val strokeWidthLabel = "${strokeWidthDp.roundToInt()} dp"
-                Slider(
-                    value = strokeWidthDp,
-                    onValueChange = { strokeWidthDp = it },
-                    valueRange = 1f..20f,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Line thickness slider, current thickness $strokeWidthLabel"
-                    },
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Canvas(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp)
-                            .semantics {
-                                contentDescription = "Line thickness preview $strokeWidthLabel"
-                            },
-                    ) {
-                        val centerY = size.height / 2
-                        drawLine(
-                            color = selectedColor,
-                            start = Offset(size.width * 0.1f, centerY),
-                            end = Offset(size.width * 0.9f, centerY),
-                            strokeWidth = strokeWidthPx,
-                            cap = StrokeCap.Round,
-                        )
-                    }
-                    Text(
-                        text = strokeWidthLabel,
-                        style = MaterialTheme.typography.body2,
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(text = "Eraser size")
-                val eraserSizeLabel = "${eraserSizeDp.roundToInt()} dp"
-                Slider(
-                    value = eraserSizeDp,
-                    onValueChange = { eraserSizeDp = it },
-                    valueRange = 5f..80f,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Eraser size slider, current size $eraserSizeLabel"
-                    },
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
-                    Canvas(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp)
-                            .semantics {
-                                contentDescription = "Eraser size preview $eraserSizeLabel"
-                            },
-                    ) {
-                        val center = Offset(size.width / 2f, size.height / 2f)
-                        val radius = eraserRadiusPx.coerceAtMost(minOf(size.width, size.height) / 2f)
-                        drawCircle(
-                            color = eraserPreviewColor,
-                            radius = radius,
-                            center = center,
-                        )
-                    }
-                    Text(
-                        text = eraserSizeLabel,
-                        style = MaterialTheme.typography.body2,
-                    )
-                }
+                var showPenOptions by remember { mutableStateOf(false) }
+                var showEraserOptions by remember { mutableStateOf(false) }
                 if (isPlacingText) {
                     Text(
                         text = "Tap on the sketch to place your text.",
@@ -514,6 +445,66 @@ fun SketchPadDialog(
                         contentDescription = "Add text",
                         backgroundColor = MaterialTheme.colors.primary,
                     )
+                    Box {
+                        RoundIconButton(
+                            onClick = {
+                                showPenOptions = true
+                                isEraserMode = false
+                            },
+                            icon = Icons.Filled.Brush,
+                            contentDescription = "Pen options",
+                            backgroundColor = if (isEraserMode) MaterialTheme.colors.surface else MaterialTheme.colors.primary,
+                            iconTint = if (isEraserMode) MaterialTheme.colors.onSurface else MaterialTheme.colors.onPrimary,
+                        )
+                        DropdownMenu(
+                            expanded = showPenOptions,
+                            onDismissRequest = { showPenOptions = false },
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .widthIn(min = 220.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text(text = "Brush size")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Slider(
+                                        value = strokeWidthDp,
+                                        onValueChange = { strokeWidthDp = it },
+                                        valueRange = 1f..20f,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .semantics {
+                                                val label = "${strokeWidthDp.roundToInt()} dp"
+                                                contentDescription = "Brush size slider, current size $label"
+                                            },
+                                    )
+                                    Canvas(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .semantics {
+                                                contentDescription = "Brush size preview ${strokeWidthDp.roundToInt()} dp"
+                                            },
+                                    ) {
+                                        val radius = with(density) { strokeWidthDp.dp.toPx() / 2f }
+                                        val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
+                                        drawCircle(
+                                            color = selectedColor,
+                                            radius = clampedRadius,
+                                            center = Offset(size.width / 2f, size.height / 2f),
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "${strokeWidthDp.roundToInt()} dp",
+                                    style = MaterialTheme.typography.caption,
+                                )
+                            }
+                        }
+                    }
                     RoundIconButton(
                         onClick = {
                             if (undoStack.isNotEmpty()) {
@@ -624,18 +615,79 @@ fun SketchPadDialog(
                         backgroundColor = MaterialTheme.colors.surface,
                         iconTint = MaterialTheme.colors.onSurface,
                     )
-                    RoundIconButton(
-                        onClick = {
-                            isEraserMode = !isEraserMode
-                            if (isEraserMode) {
-                                isPlacingText = false
+                    Box {
+                        RoundIconButton(
+                            onClick = { showEraserOptions = true },
+                            icon = Icons.Filled.CleaningServices,
+                            contentDescription = "Eraser options",
+                            backgroundColor = if (isEraserMode) MaterialTheme.colors.primary else MaterialTheme.colors.surface,
+                            iconTint = if (isEraserMode) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
+                        )
+                        DropdownMenu(
+                            expanded = showEraserOptions,
+                            onDismissRequest = { showEraserOptions = false },
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .widthIn(min = 220.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(text = if (isEraserMode) "Eraser enabled" else "Eraser disabled")
+                                    Switch(
+                                        checked = isEraserMode,
+                                        onCheckedChange = { checked ->
+                                            isEraserMode = checked
+                                            if (checked) {
+                                                isPlacingText = false
+                                            }
+                                        },
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Slider(
+                                        value = eraserSizeDp,
+                                        onValueChange = { eraserSizeDp = it },
+                                        valueRange = 5f..80f,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .semantics {
+                                                val label = "${eraserSizeDp.roundToInt()} dp"
+                                                contentDescription = "Eraser size slider, current size $label"
+                                            },
+                                    )
+                                    Canvas(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .semantics {
+                                                contentDescription = "Eraser size preview ${eraserSizeDp.roundToInt()} dp"
+                                            },
+                                    ) {
+                                        val radius = with(density) { eraserSizeDp.dp.toPx() / 2f }
+                                        val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
+                                        val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
+                                        drawCircle(
+                                            color = eraserPreviewColor,
+                                            radius = clampedRadius,
+                                            center = Offset(size.width / 2f, size.height / 2f),
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "${eraserSizeDp.roundToInt()} dp",
+                                    style = MaterialTheme.typography.caption,
+                                )
                             }
-                        },
-                        icon = Icons.Filled.CleaningServices,
-                        contentDescription = if (isEraserMode) "Disable eraser" else "Enable eraser",
-                        backgroundColor = if (isEraserMode) MaterialTheme.colors.primary else MaterialTheme.colors.surface,
-                        iconTint = if (isEraserMode) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
-                    )
+                        }
+                    }
                     Spacer(modifier = Modifier.weight(1f))
                     RoundIconButton(
                         onClick = onDismiss,
