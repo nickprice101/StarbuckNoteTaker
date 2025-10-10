@@ -18,6 +18,7 @@ from datetime import datetime
 
 import tensorflow as tf
 from tensorflow.lite.python import schema_py_generated as schema_fb
+import flatbuffers
 import numpy as np
 from sklearn.model_selection import train_test_split
 
@@ -40,6 +41,58 @@ def _assert_full_connected_compatibility(model_content: bytes, max_version: int 
                     "Exported model requires FULLY_CONNECTED op version "
                     f"{op_code.Version()}, which exceeds the maximum supported version."
                 )
+
+
+def _downgrade_fully_connected_ops(model_content: bytes, target_version: int = 11) -> bytes:
+    """Downgrade FULLY_CONNECTED ops to a lower version when safe."""
+
+    model_fb = schema_fb.Model.GetRootAsModel(model_content, 0)
+    needs_downgrade = False
+    for idx in range(model_fb.OperatorCodesLength()):
+        op_code = model_fb.OperatorCodes(idx)
+        if (
+            op_code.BuiltinCode() == schema_fb.BuiltinOperator.FULLY_CONNECTED
+            and op_code.Version() > target_version
+        ):
+            needs_downgrade = True
+            break
+
+    if not needs_downgrade:
+        return model_content
+
+    model_t = schema_fb.ModelT.InitFromObj(model_fb)
+
+    # Ensure we only downgrade when the model does not rely on newer attributes.
+    for subgraph in model_t.subgraphs:
+        for operator in subgraph.operators:
+            opcode = model_t.operatorCodes[operator.opcodeIndex]
+            if opcode.builtinCode != schema_fb.BuiltinOperator.FULLY_CONNECTED:
+                continue
+
+            if operator.builtinOptionsType == schema_fb.BuiltinOptions.FullyConnectedOptions:
+                options = operator.builtinOptions
+                # weightsFormat other than DEFAULT requires newer interpreter support.
+                if getattr(
+                    options,
+                    "weightsFormat",
+                    schema_fb.FullyConnectedOptionsWeightsFormat.DEFAULT,
+                ) != schema_fb.FullyConnectedOptionsWeightsFormat.DEFAULT:
+                    raise RuntimeError(
+                        "Cannot downgrade FULLY_CONNECTED op that depends on non-default "
+                        "weights format. Update the Android TensorFlow Lite runtime instead."
+                    )
+
+    for op_code in model_t.operatorCodes:
+        if (
+            op_code.builtinCode == schema_fb.BuiltinOperator.FULLY_CONNECTED
+            and op_code.version > target_version
+        ):
+            op_code.version = target_version
+
+    builder = flatbuffers.Builder(0)
+    model_offset = model_t.Pack(builder)
+    builder.Finish(model_offset, b"TFL3")
+    return bytes(builder.Output())
 
 print("="*80)
 print("NOTE CLASSIFIER - COMPLETE PIPELINE")
@@ -512,7 +565,15 @@ converter._experimental_lower_tensor_list_ops = False
 tflite_model = converter.convert()
 
 # Validate operator compatibility with the on-device runtime
-_assert_full_connected_compatibility(tflite_model)
+try:
+    _assert_full_connected_compatibility(tflite_model)
+except RuntimeError:
+    print(
+        "Detected FULLY_CONNECTED op version > 11. Attempting safe downgrade "
+        "for legacy interpreter compatibility..."
+    )
+    tflite_model = _downgrade_fully_connected_ops(tflite_model)
+    _assert_full_connected_compatibility(tflite_model)
 
 try:
     tf.lite.Interpreter(model_content=tflite_model)
