@@ -445,7 +445,10 @@ fun SketchPadDialog(
                         contentDescription = "Add text",
                         backgroundColor = MaterialTheme.colors.primary,
                     )
-                    Box {
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         RoundIconButton(
                             onClick = {
                                 showPenOptions = true
@@ -615,7 +618,10 @@ fun SketchPadDialog(
                         backgroundColor = MaterialTheme.colors.surface,
                         iconTint = MaterialTheme.colors.onSurface,
                     )
-                    Box {
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         RoundIconButton(
                             onClick = { showEraserOptions = true },
                             icon = Icons.Filled.CleaningServices,
