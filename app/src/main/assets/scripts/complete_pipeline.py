@@ -17,6 +17,7 @@ import re
 from datetime import datetime
 
 import tensorflow as tf
+from tensorflow.lite.python import schema_py_generated as schema_fb
 import numpy as np
 from sklearn.model_selection import train_test_split
 
@@ -27,17 +28,18 @@ tf.random.set_seed(42)
 
 print(f"Using TensorFlow {tf.__version__}")
 
-# Unused validation function - commented out
-# def _assert_full_connected_compatibility(model_content: bytes, max_version: int = 11) -> None:
-#     """Ensure generated TFLite model keeps FULLY_CONNECTED ops within range."""
-#     tflite_model = schema_fb.Model.GetRootAsModel(model_content, 0)
-#     for idx in range(tflite_model.OperatorCodesLength()):
-#         op_code = tflite_model.OperatorCodes(idx)
-#         if op_code.BuiltinCode() == schema_fb.BuiltinOperator.FULLY_CONNECTED and op_code.Version() > max_version:
-#             raise RuntimeError(
-#                 "Exported model requires FULLY_CONNECTED op version "
-#                 f"{op_code.Version()}, which exceeds the maximum supported version."
-#             )
+def _assert_full_connected_compatibility(model_content: bytes, max_version: int = 11) -> None:
+    """Ensure generated TFLite model keeps FULLY_CONNECTED ops within range."""
+
+    tflite_model = schema_fb.Model.GetRootAsModel(model_content, 0)
+    for idx in range(tflite_model.OperatorCodesLength()):
+        op_code = tflite_model.OperatorCodes(idx)
+        if op_code.BuiltinCode() == schema_fb.BuiltinOperator.FULLY_CONNECTED:
+            if op_code.Version() > max_version:
+                raise RuntimeError(
+                    "Exported model requires FULLY_CONNECTED op version "
+                    f"{op_code.Version()}, which exceeds the maximum supported version."
+                )
 
 print("="*80)
 print("NOTE CLASSIFIER - COMPLETE PIPELINE")
@@ -490,6 +492,9 @@ converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
 # Enable optimizations for smaller model size
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
+# Use the legacy converter to maintain operator compatibility with older runtimes
+converter.experimental_new_converter = False
+
 # CRITICAL: Support SELECT_TF_OPS for text processing operations
 # TextVectorization uses StringLower, StaticRegexReplace, StringSplitV2, RaggedTensorToTensor
 converter.target_spec.supported_ops = [
@@ -507,7 +512,7 @@ converter._experimental_lower_tensor_list_ops = False
 tflite_model = converter.convert()
 
 # Validate operator compatibility with the on-device runtime
-# _assert_full_connected_compatibility(tflite_model)  # Commented out - validation function not needed
+_assert_full_connected_compatibility(tflite_model)
 
 try:
     tf.lite.Interpreter(model_content=tflite_model)
