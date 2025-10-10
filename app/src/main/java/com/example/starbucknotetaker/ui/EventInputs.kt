@@ -196,6 +196,8 @@ fun LocationAutocompleteField(
             DropdownMenu(
                 expanded = expanded && suggestions.isNotEmpty(),
                 onDismissRequest = { expanded = false },
+                modifier = Modifier.exposedDropdownSize(),
+                // Keep the dropdown non-focusable so the text field retains focus for typing.
                 properties = PopupProperties(focusable = false),
             ) {
                 suggestions.forEach { suggestion ->
