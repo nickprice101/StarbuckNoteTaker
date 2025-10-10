@@ -313,7 +313,7 @@ private fun SwipeToDeleteNoteItem(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
+            .wrapContentHeight()
             .background(Color.Transparent)
             .anchoredDraggable(
                 state = swipeState,
