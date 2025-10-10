@@ -1,7 +1,7 @@
 {
-  "created": "2025-10-09T09:05:42.415169",
-  "validation_accuracy": "96.33%",
-  "test_accuracy": "85.7%",
+  "created": "2025-10-10T14:50:28.659061",
+  "validation_accuracy": "69.45%",
+  "test_accuracy": "42.9%",
   "categories": [
     "FOOD_RECIPE",
     "PERSONAL_DAILY_LIFE",
@@ -13,10 +13,11 @@
     "WORK_PROJECT",
     "MEETING_RECAP",
     "SHOPPING_LIST",
+    "GENERAL_CHECKLIST",
     "REMINDER",
     "TRAVEL_LOG",
     "CREATIVE_WRITING",
     "TECHNICAL_REFERENCE"
   ],
-  "model_size_mb": "11.10"
+  "model_size_mb": "11.50"
 }

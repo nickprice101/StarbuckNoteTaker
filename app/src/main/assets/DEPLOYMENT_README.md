@@ -1,9 +1,9 @@
 # Note Classifier - Deployment Package
 
 ## Performance
-- Validation Accuracy: 96.33%
-- Test Accuracy: 85.7%
-- Model Size: 11.10 MB
+- Validation Accuracy: 69.45%
+- Test Accuracy: 42.9%
+- Model Size: 11.50 MB
 
 ## Files␊
 1. note_classifier.tflite - TFLite model␊
@@ -16,10 +16,10 @@
 ```kotlin
 val interpreter = Interpreter(loadModelFile("note_classifier.tflite"))
 val input = arrayOf(noteText)
-val output = Array(1) { FloatArray(14) }
+val output = Array(1) { FloatArray(15) }
 interpreter.run(input, output)
 val categoryIndex = output[0].indices.maxByOrNull { output[0][it] } ?: 0
 val category = categories[categoryIndex]
 ```
 
-Generated: 2025-10-09 09:05:42
+Generated: 2025-10-10 14:50:28
