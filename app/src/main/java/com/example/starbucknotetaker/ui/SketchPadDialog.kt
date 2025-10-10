@@ -432,339 +432,348 @@ fun SketchPadDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    RoundIconButton(
-                        onClick = {
-                            pendingText = ""
-                            showTextDialog = true
-                            isEraserMode = false
-                        },
-                        icon = Icons.Filled.TextFields,
-                        contentDescription = "Add text",
-                        backgroundColor = MaterialTheme.colors.primary,
-                    )
-                    Box(
-                        modifier = Modifier.size(48.dp),
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RoundIconButton(
                             onClick = {
-                                showPenOptions = true
+                                pendingText = ""
+                                showTextDialog = true
                                 isEraserMode = false
                             },
-                            icon = Icons.Filled.Brush,
-                            contentDescription = "Pen options",
-                            backgroundColor = if (isEraserMode) MaterialTheme.colors.surface else MaterialTheme.colors.primary,
-                            iconTint = if (isEraserMode) MaterialTheme.colors.onSurface else MaterialTheme.colors.onPrimary,
+                            icon = Icons.Filled.TextFields,
+                            contentDescription = "Add text",
+                            backgroundColor = MaterialTheme.colors.primary,
                         )
-                        DropdownMenu(
-                            expanded = showPenOptions,
-                            onDismissRequest = { showPenOptions = false },
+                        Box(
+                            modifier = Modifier.size(48.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .padding(12.dp)
-                                    .widthIn(min = 220.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            RoundIconButton(
+                                onClick = {
+                                    showPenOptions = true
+                                    isEraserMode = false
+                                },
+                                icon = Icons.Filled.Brush,
+                                contentDescription = "Pen options",
+                                backgroundColor = if (isEraserMode) MaterialTheme.colors.surface else MaterialTheme.colors.primary,
+                                iconTint = if (isEraserMode) MaterialTheme.colors.onSurface else MaterialTheme.colors.onPrimary,
+                            )
+                            DropdownMenu(
+                                expanded = showPenOptions,
+                                onDismissRequest = { showPenOptions = false },
                             ) {
-                                Text(text = "Brush size")
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                Column(
+                                    modifier = Modifier
+                                        .padding(12.dp)
+                                        .widthIn(min = 220.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
-                                    Slider(
-                                        value = strokeWidthDp,
-                                        onValueChange = { strokeWidthDp = it },
-                                        valueRange = 1f..20f,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .semantics {
-                                                val label = "${strokeWidthDp.roundToInt()} dp"
-                                                contentDescription = "Brush size slider, current size $label"
-                                            },
-                                    )
-                                    Canvas(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .semantics {
-                                                contentDescription = "Brush size preview ${strokeWidthDp.roundToInt()} dp"
-                                            },
+                                    Text(text = "Brush size")
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
-                                        val radius = with(density) { strokeWidthDp.dp.toPx() / 2f }
-                                        val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
-                                        drawCircle(
-                                            color = selectedColor,
-                                            radius = clampedRadius,
-                                            center = Offset(size.width / 2f, size.height / 2f),
+                                        Slider(
+                                            value = strokeWidthDp,
+                                            onValueChange = { strokeWidthDp = it },
+                                            valueRange = 1f..20f,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .semantics {
+                                                    val label = "${strokeWidthDp.roundToInt()} dp"
+                                                    contentDescription = "Brush size slider, current size $label"
+                                                },
                                         )
+                                        Canvas(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .semantics {
+                                                    contentDescription = "Brush size preview ${strokeWidthDp.roundToInt()} dp"
+                                                },
+                                        ) {
+                                            val radius = with(density) { strokeWidthDp.dp.toPx() / 2f }
+                                            val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
+                                            drawCircle(
+                                                color = selectedColor,
+                                                radius = clampedRadius,
+                                                center = Offset(size.width / 2f, size.height / 2f),
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "${strokeWidthDp.roundToInt()} dp",
+                                        style = MaterialTheme.typography.caption,
+                                    )
+                                }
+                            }
+                        }
+                        RoundIconButton(
+                            onClick = {
+                                if (undoStack.isNotEmpty()) {
+                                    val action = undoStack.removeAt(undoStack.lastIndex)
+                                    when (action) {
+                                        is DrawAction.StrokeAction -> {
+                                            val index = strokes.indexOfLast { it == action.stroke }
+                                            if (index >= 0) {
+                                                strokes.removeAt(index)
+                                            }
+                                            redoStack.add(action)
+                                        }
+                                        is DrawAction.StrokeRemoveAction -> {
+                                            val targetIndex = action.index.coerceIn(0, strokes.size)
+                                            strokes.add(targetIndex, action.stroke)
+                                            redoStack.add(action)
+                                        }
+                                        is DrawAction.TextAddAction -> {
+                                            val index = textItems.indexOfLast { it.id == action.textItem.id }
+                                            if (index >= 0) {
+                                                textItems.removeAt(index)
+                                            }
+                                            redoStack.add(action)
+                                        }
+                                        is DrawAction.TextRemoveAction -> {
+                                            val targetIndex = action.index.coerceIn(0, textItems.size)
+                                            textItems.add(targetIndex, action.textItem)
+                                            redoStack.add(action)
+                                        }
+                                        is DrawAction.TextMoveAction -> {
+                                            val index = textItems.indexOfFirst { it.id == action.textId }
+                                            if (index >= 0) {
+                                                textItems[index] = textItems[index].copy(position = action.from)
+                                            }
+                                            redoStack.add(action)
+                                        }
+                                        is DrawAction.TextEditAction -> {
+                                            val index = textItems.indexOfFirst { it.id == action.textId }
+                                            if (index >= 0) {
+                                                textItems[index] = textItems[index].copy(text = action.oldText)
+                                            }
+                                            redoStack.add(action)
+                                        }
                                     }
                                 }
-                                Text(
-                                    text = "${strokeWidthDp.roundToInt()} dp",
-                                    style = MaterialTheme.typography.caption,
-                                )
+                            },
+                            icon = Icons.AutoMirrored.Filled.Undo,
+                            contentDescription = "Undo",
+                            backgroundColor = MaterialTheme.colors.surface,
+                            iconTint = MaterialTheme.colors.onSurface,
+                        )
+                        RoundIconButton(
+                            onClick = {
+                                if (redoStack.isNotEmpty()) {
+                                    val action = redoStack.removeAt(redoStack.lastIndex)
+                                    when (action) {
+                                        is DrawAction.StrokeAction -> {
+                                            strokes.add(action.stroke)
+                                            undoStack.add(action)
+                                        }
+                                        is DrawAction.StrokeRemoveAction -> {
+                                            val targetIndex = action.index
+                                            if (targetIndex in 0 until strokes.size) {
+                                                strokes.removeAt(targetIndex)
+                                            } else {
+                                                val fallbackIndex = strokes.indexOfLast { it == action.stroke }
+                                                if (fallbackIndex >= 0) {
+                                                    strokes.removeAt(fallbackIndex)
+                                                }
+                                            }
+                                            undoStack.add(action)
+                                        }
+                                        is DrawAction.TextAddAction -> {
+                                            textItems.add(action.textItem)
+                                            undoStack.add(action)
+                                        }
+                                        is DrawAction.TextRemoveAction -> {
+                                            val targetIndex = action.index
+                                            if (targetIndex in 0 until textItems.size) {
+                                                textItems.removeAt(targetIndex)
+                                            } else {
+                                                val fallbackIndex = textItems.indexOfLast { it.id == action.textItem.id }
+                                                if (fallbackIndex >= 0) {
+                                                    textItems.removeAt(fallbackIndex)
+                                                }
+                                            }
+                                            undoStack.add(action)
+                                        }
+                                        is DrawAction.TextMoveAction -> {
+                                            val index = textItems.indexOfFirst { it.id == action.textId }
+                                            if (index >= 0) {
+                                                textItems[index] = textItems[index].copy(position = action.to)
+                                            }
+                                            undoStack.add(action)
+                                        }
+                                        is DrawAction.TextEditAction -> {
+                                            val index = textItems.indexOfFirst { it.id == action.textId }
+                                            if (index >= 0) {
+                                                textItems[index] = textItems[index].copy(text = action.newText)
+                                            }
+                                            undoStack.add(action)
+                                        }
+                                    }
+                                }
+                            },
+                            icon = Icons.AutoMirrored.Filled.Redo,
+                            contentDescription = "Redo",
+                            backgroundColor = MaterialTheme.colors.surface,
+                            iconTint = MaterialTheme.colors.onSurface,
+                        )
+                        Box(
+                            modifier = Modifier.size(48.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            RoundIconButton(
+                                onClick = { showEraserOptions = true },
+                                icon = Icons.Filled.CleaningServices,
+                                contentDescription = "Eraser options",
+                                backgroundColor = if (isEraserMode) MaterialTheme.colors.primary else MaterialTheme.colors.surface,
+                                iconTint = if (isEraserMode) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
+                            )
+                            DropdownMenu(
+                                expanded = showEraserOptions,
+                                onDismissRequest = { showEraserOptions = false },
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(12.dp)
+                                        .widthIn(min = 220.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(text = if (isEraserMode) "Eraser enabled" else "Eraser disabled")
+                                        Switch(
+                                            checked = isEraserMode,
+                                            onCheckedChange = { checked ->
+                                                isEraserMode = checked
+                                                if (checked) {
+                                                    isPlacingText = false
+                                                }
+                                            },
+                                        )
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
+                                        Slider(
+                                            value = eraserSizeDp,
+                                            onValueChange = { eraserSizeDp = it },
+                                            valueRange = 5f..80f,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .semantics {
+                                                    val label = "${eraserSizeDp.roundToInt()} dp"
+                                                    contentDescription = "Eraser size slider, current size $label"
+                                                },
+                                        )
+                                        Canvas(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .semantics {
+                                                    contentDescription = "Eraser size preview ${eraserSizeDp.roundToInt()} dp"
+                                                },
+                                        ) {
+                                            val radius = with(density) { eraserSizeDp.dp.toPx() / 2f }
+                                            val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
+                                            drawCircle(
+                                                color = eraserPreviewColor,
+                                                radius = clampedRadius,
+                                                center = Offset(size.width / 2f, size.height / 2f),
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "${eraserSizeDp.roundToInt()} dp",
+                                        style = MaterialTheme.typography.caption,
+                                    )
+                                }
                             }
                         }
                     }
-                    RoundIconButton(
-                        onClick = {
-                            if (undoStack.isNotEmpty()) {
-                                val action = undoStack.removeAt(undoStack.lastIndex)
-                                when (action) {
-                                    is DrawAction.StrokeAction -> {
-                                        val index = strokes.indexOfLast { it == action.stroke }
-                                        if (index >= 0) {
-                                            strokes.removeAt(index)
-                                        }
-                                        redoStack.add(action)
-                                    }
-                                    is DrawAction.StrokeRemoveAction -> {
-                                        val targetIndex = action.index.coerceIn(0, strokes.size)
-                                        strokes.add(targetIndex, action.stroke)
-                                        redoStack.add(action)
-                                    }
-                                    is DrawAction.TextAddAction -> {
-                                        val index = textItems.indexOfLast { it.id == action.textItem.id }
-                                        if (index >= 0) {
-                                            textItems.removeAt(index)
-                                        }
-                                        redoStack.add(action)
-                                    }
-                                    is DrawAction.TextRemoveAction -> {
-                                        val targetIndex = action.index.coerceIn(0, textItems.size)
-                                        textItems.add(targetIndex, action.textItem)
-                                        redoStack.add(action)
-                                    }
-                                    is DrawAction.TextMoveAction -> {
-                                        val index = textItems.indexOfFirst { it.id == action.textId }
-                                        if (index >= 0) {
-                                            textItems[index] = textItems[index].copy(position = action.from)
-                                        }
-                                        redoStack.add(action)
-                                    }
-                                    is DrawAction.TextEditAction -> {
-                                        val index = textItems.indexOfFirst { it.id == action.textId }
-                                        if (index >= 0) {
-                                            textItems[index] = textItems[index].copy(text = action.oldText)
-                                        }
-                                        redoStack.add(action)
-                                    }
-                                }
-                            }
-                        },
-                        icon = Icons.AutoMirrored.Filled.Undo,
-                        contentDescription = "Undo",
-                        backgroundColor = MaterialTheme.colors.surface,
-                        iconTint = MaterialTheme.colors.onSurface,
-                    )
-                    RoundIconButton(
-                        onClick = {
-                            if (redoStack.isNotEmpty()) {
-                                val action = redoStack.removeAt(redoStack.lastIndex)
-                                when (action) {
-                                    is DrawAction.StrokeAction -> {
-                                        strokes.add(action.stroke)
-                                        undoStack.add(action)
-                                    }
-                                    is DrawAction.StrokeRemoveAction -> {
-                                        val targetIndex = action.index
-                                        if (targetIndex in 0 until strokes.size) {
-                                            strokes.removeAt(targetIndex)
-                                        } else {
-                                            val fallbackIndex = strokes.indexOfLast { it == action.stroke }
-                                            if (fallbackIndex >= 0) {
-                                                strokes.removeAt(fallbackIndex)
-                                            }
-                                        }
-                                        undoStack.add(action)
-                                    }
-                                    is DrawAction.TextAddAction -> {
-                                        textItems.add(action.textItem)
-                                        undoStack.add(action)
-                                    }
-                                    is DrawAction.TextRemoveAction -> {
-                                        val targetIndex = action.index
-                                        if (targetIndex in 0 until textItems.size) {
-                                            textItems.removeAt(targetIndex)
-                                        } else {
-                                            val fallbackIndex = textItems.indexOfLast { it.id == action.textItem.id }
-                                            if (fallbackIndex >= 0) {
-                                                textItems.removeAt(fallbackIndex)
-                                            }
-                                        }
-                                        undoStack.add(action)
-                                    }
-                                    is DrawAction.TextMoveAction -> {
-                                        val index = textItems.indexOfFirst { it.id == action.textId }
-                                        if (index >= 0) {
-                                            textItems[index] = textItems[index].copy(position = action.to)
-                                        }
-                                        undoStack.add(action)
-                                    }
-                                    is DrawAction.TextEditAction -> {
-                                        val index = textItems.indexOfFirst { it.id == action.textId }
-                                        if (index >= 0) {
-                                            textItems[index] = textItems[index].copy(text = action.newText)
-                                        }
-                                        undoStack.add(action)
-                                    }
-                                }
-                            }
-                        },
-                        icon = Icons.AutoMirrored.Filled.Redo,
-                        contentDescription = "Redo",
-                        backgroundColor = MaterialTheme.colors.surface,
-                        iconTint = MaterialTheme.colors.onSurface,
-                    )
-                    Box(
-                        modifier = Modifier.size(48.dp),
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RoundIconButton(
-                            onClick = { showEraserOptions = true },
-                            icon = Icons.Filled.CleaningServices,
-                            contentDescription = "Eraser options",
-                            backgroundColor = if (isEraserMode) MaterialTheme.colors.primary else MaterialTheme.colors.surface,
-                            iconTint = if (isEraserMode) MaterialTheme.colors.onPrimary else MaterialTheme.colors.onSurface,
+                            onClick = onDismiss,
+                            icon = Icons.Filled.Close,
+                            contentDescription = "Cancel",
+                            backgroundColor = MaterialTheme.colors.surface,
+                            iconTint = MaterialTheme.colors.onSurface,
                         )
-                        DropdownMenu(
-                            expanded = showEraserOptions,
-                            onDismissRequest = { showEraserOptions = false },
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .padding(12.dp)
-                                    .widthIn(min = 220.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth(),
+                        RoundIconButton(
+                            onClick = {
+                                if (canvasSize.width <= 0 || canvasSize.height <= 0 ||
+                                    (strokes.isEmpty() && activeStroke == null && textItems.isEmpty())
                                 ) {
-                                    Text(text = if (isEraserMode) "Eraser enabled" else "Eraser disabled")
-                                    Switch(
-                                        checked = isEraserMode,
-                                        onCheckedChange = { checked ->
-                                            isEraserMode = checked
-                                            if (checked) {
-                                                isPlacingText = false
+                                    onDismiss()
+                                    return@RoundIconButton
+                                }
+                                val bitmap = Bitmap.createBitmap(
+                                    canvasSize.width,
+                                    canvasSize.height,
+                                    Bitmap.Config.ARGB_8888,
+                                )
+                                val canvas = AndroidCanvas(bitmap)
+                                canvas.drawColor(AndroidColor.WHITE)
+                                val allStrokesForBitmap = buildList {
+                                    addAll(strokes)
+                                    activeStroke?.let { add(it) }
+                                }
+                                allStrokesForBitmap.forEach { stroke ->
+                                    val paint = Paint().apply {
+                                        color = stroke.color.toArgb()
+                                        style = Paint.Style.STROKE
+                                        strokeJoin = Paint.Join.ROUND
+                                        strokeCap = Paint.Cap.ROUND
+                                        strokeWidth = stroke.strokeWidth
+                                        isAntiAlias = true
+                                    }
+                                    val points = stroke.points
+                                    if (points.size == 1) {
+                                        canvas.drawPoint(points.first().x, points.first().y, paint)
+                                    } else if (points.size > 1) {
+                                        val path = Path().apply {
+                                            moveTo(points.first().x, points.first().y)
+                                            points.drop(1).forEach { point ->
+                                                lineTo(point.x, point.y)
                                             }
-                                        },
-                                    )
-                                }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
-                                    Slider(
-                                        value = eraserSizeDp,
-                                        onValueChange = { eraserSizeDp = it },
-                                        valueRange = 5f..80f,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .semantics {
-                                                val label = "${eraserSizeDp.roundToInt()} dp"
-                                                contentDescription = "Eraser size slider, current size $label"
-                                            },
-                                    )
-                                    Canvas(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .semantics {
-                                                contentDescription = "Eraser size preview ${eraserSizeDp.roundToInt()} dp"
-                                            },
-                                    ) {
-                                        val radius = with(density) { eraserSizeDp.dp.toPx() / 2f }
-                                        val clampedRadius = radius.coerceAtMost(minOf(size.width, size.height) / 2f)
-                                        drawCircle(
-                                            color = eraserPreviewColor,
-                                            radius = clampedRadius,
-                                            center = Offset(size.width / 2f, size.height / 2f),
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = "${eraserSizeDp.roundToInt()} dp",
-                                    style = MaterialTheme.typography.caption,
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    RoundIconButton(
-                        onClick = onDismiss,
-                        icon = Icons.Filled.Close,
-                        contentDescription = "Cancel",
-                        backgroundColor = MaterialTheme.colors.surface,
-                        iconTint = MaterialTheme.colors.onSurface,
-                    )
-                    RoundIconButton(
-                        onClick = {
-                            if (canvasSize.width <= 0 || canvasSize.height <= 0 ||
-                                (strokes.isEmpty() && activeStroke == null && textItems.isEmpty())
-                            ) {
-                                onDismiss()
-                                return@RoundIconButton
-                            }
-                            val bitmap = Bitmap.createBitmap(
-                                canvasSize.width,
-                                canvasSize.height,
-                                Bitmap.Config.ARGB_8888,
-                            )
-                            val canvas = AndroidCanvas(bitmap)
-                            canvas.drawColor(AndroidColor.WHITE)
-                            val allStrokesForBitmap = buildList {
-                                addAll(strokes)
-                                activeStroke?.let { add(it) }
-                            }
-                            allStrokesForBitmap.forEach { stroke ->
-                                val paint = Paint().apply {
-                                    color = stroke.color.toArgb()
-                                    style = Paint.Style.STROKE
-                                    strokeJoin = Paint.Join.ROUND
-                                    strokeCap = Paint.Cap.ROUND
-                                    strokeWidth = stroke.strokeWidth
-                                    isAntiAlias = true
-                                }
-                                val points = stroke.points
-                                if (points.size == 1) {
-                                    canvas.drawPoint(points.first().x, points.first().y, paint)
-                                } else if (points.size > 1) {
-                                    val path = Path().apply {
-                                        moveTo(points.first().x, points.first().y)
-                                        points.drop(1).forEach { point ->
-                                            lineTo(point.x, point.y)
                                         }
+                                        canvas.drawPath(path, paint)
                                     }
-                                    canvas.drawPath(path, paint)
                                 }
-                            }
-                            textItems.forEach { textItem ->
-                                val paint = Paint().apply {
-                                    color = textItem.color.toArgb()
-                                    style = Paint.Style.FILL
-                                    textSize = with(density) { 16.sp.toPx() }
-                                    isAntiAlias = true
+                                textItems.forEach { textItem ->
+                                    val paint = Paint().apply {
+                                        color = textItem.color.toArgb()
+                                        style = Paint.Style.FILL
+                                        textSize = with(density) { 16.sp.toPx() }
+                                        isAntiAlias = true
+                                    }
+                                    canvas.drawText(
+                                        textItem.text,
+                                        textItem.position.x,
+                                        textItem.position.y,
+                                        paint,
+                                    )
                                 }
-                                canvas.drawText(
-                                    textItem.text,
-                                    textItem.position.x,
-                                    textItem.position.y,
-                                    paint,
-                                )
-                            }
-                            val output = ByteArrayOutputStream()
-                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-                            onSave(output.toByteArray())
-                        },
-                        icon = Icons.Filled.Check,
-                        contentDescription = "Save",
-                        backgroundColor = MaterialTheme.colors.primary,
-                    )
+                                val output = ByteArrayOutputStream()
+                                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+                                onSave(output.toByteArray())
+                            },
+                            icon = Icons.Filled.Check,
+                            contentDescription = "Save",
+                            backgroundColor = MaterialTheme.colors.primary,
+                        )
+                    }
                 }
                 if (showTextDialog) {
                     AlertDialog(
