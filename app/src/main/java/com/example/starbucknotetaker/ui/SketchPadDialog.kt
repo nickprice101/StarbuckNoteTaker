@@ -463,6 +463,7 @@ fun SketchPadDialog(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val eraserPreviewColor = MaterialTheme.colors.onSurface.copy(alpha = 0.2f)
                     Canvas(
                         modifier = Modifier
                             .weight(1f)
@@ -474,7 +475,7 @@ fun SketchPadDialog(
                         val center = Offset(size.width / 2f, size.height / 2f)
                         val radius = eraserRadiusPx.coerceAtMost(minOf(size.width, size.height) / 2f)
                         drawCircle(
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.2f),
+                            color = eraserPreviewColor,
                             radius = radius,
                             center = center,
                         )
