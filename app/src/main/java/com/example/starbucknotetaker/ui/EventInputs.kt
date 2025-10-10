@@ -5,15 +5,16 @@ import android.location.Address
 import android.location.Geocoder
 import android.util.Log
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.DropdownMenu
 import androidx.compose.material.ExperimentalMaterialApi
-import androidx.compose.material.ExposedDropdownMenuBox
 import androidx.compose.material.ExposedDropdownMenuDefaults
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
@@ -38,8 +39,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -97,6 +100,8 @@ fun LocationAutocompleteField(
     var fetchJob by remember { mutableStateOf<Job?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    val density = LocalDensity.current
+    var textFieldWidthPx by remember { mutableStateOf(0) }
 
     fun requestSuggestions(query: String) {
         fetchJob?.cancel()
@@ -163,21 +168,9 @@ fun LocationAutocompleteField(
     }
 
     Column(modifier = modifier) {
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = {
-                if (suggestions.isNotEmpty()) {
-                    expanded = it
-                    if (it) {
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
-                    }
-                } else {
-                    expanded = false
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        val menuExpanded = expanded && suggestions.isNotEmpty()
+        val dropdownWidth = textFieldWidthPx.takeIf { it > 0 }?.let { with(density) { it.toDp() } }
+        Box(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
                 value = value,
                 onValueChange = { newValue ->
@@ -187,16 +180,34 @@ fun LocationAutocompleteField(
                 },
                 label = { Text(label) },
                 leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(
+                        expanded = menuExpanded,
+                        onIconClick = {
+                            if (suggestions.isNotEmpty()) {
+                                val nextExpanded = !expanded
+                                expanded = nextExpanded
+                                if (nextExpanded) {
+                                    focusRequester.requestFocus()
+                                    keyboardController?.show()
+                                }
+                            }
+                        },
+                    )
+                },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .onGloballyPositioned { coordinates ->
+                        textFieldWidthPx = coordinates.size.width
+                    },
             )
+            val dropdownModifier = dropdownWidth?.let { Modifier.width(it) } ?: Modifier
             DropdownMenu(
-                expanded = expanded && suggestions.isNotEmpty(),
+                expanded = menuExpanded,
                 onDismissRequest = { expanded = false },
-                modifier = Modifier.exposedDropdownSize(),
+                modifier = dropdownModifier,
                 // Keep the dropdown non-focusable so the text field retains focus for typing.
                 properties = PopupProperties(focusable = false),
             ) {
