@@ -778,6 +778,7 @@ fun SketchPadDialog(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
                 if (showTextDialog) {
                     AlertDialog(
                         onDismissRequest = {
