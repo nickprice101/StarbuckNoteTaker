@@ -6,6 +6,7 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Paint
 import android.graphics.Path
 import java.io.ByteArrayOutputStream
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.Icon
@@ -47,7 +49,6 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.DropdownMenu
-import androidx.compose.material.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -67,7 +68,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -643,25 +646,15 @@ fun SketchPadDialog(
                                         .widthIn(min = 220.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        Text(
-                                            text = if (isEraserMode) "Eraser enabled" else "Eraser disabled",
-                                            modifier = Modifier.padding(end = 12.dp),
-                                        )
-                                        Switch(
-                                            checked = isEraserMode,
-                                            onCheckedChange = { checked ->
-                                                isEraserMode = checked
-                                                if (checked) {
-                                                    isPlacingText = false
-                                                }
-                                            },
-                                        )
-                                    }
+                                    EraserModeToggleRow(
+                                        checked = isEraserMode,
+                                        onCheckedChange = { checked ->
+                                            isEraserMode = checked
+                                            if (checked) {
+                                                isPlacingText = false
+                                            }
+                                        },
+                                    )
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -893,6 +886,65 @@ private fun isPointInTextItem(
     val padding = max(16f, touchRadiusPx)
     return point.x in (left - padding)..(right + padding) &&
         point.y in (top - padding)..(bottom + padding)
+}
+
+@Composable
+private fun EraserModeToggleRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val statusLabel = if (checked) "Eraser enabled" else "Eraser disabled"
+    val chipBackground = if (checked) {
+        MaterialTheme.colors.primary
+    } else {
+        MaterialTheme.colors.onSurface.copy(alpha = 0.12f)
+    }
+    val chipContentColor = if (checked) {
+        MaterialTheme.colors.onPrimary
+    } else {
+        MaterialTheme.colors.onSurface
+    }
+    val chipBorder = if (checked) {
+        null
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.2f))
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .semantics {
+                contentDescription = "Eraser mode toggle"
+                stateDescription = if (checked) "On" else "Off"
+            }
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = statusLabel,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = chipBackground,
+            contentColor = chipContentColor,
+            border = chipBorder,
+            elevation = 0.dp,
+        ) {
+            Text(
+                text = if (checked) "On" else "Off",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.caption,
+            )
+        }
+    }
 }
 
 @Composable
