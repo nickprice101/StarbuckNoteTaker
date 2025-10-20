@@ -43,8 +43,14 @@ def _assert_full_connected_compatibility(model_content: bytes, max_version: int 
                 )
 
 
-def _downgrade_fully_connected_ops(model_content: bytes, target_version: int = 11) -> bytes:
-    """Downgrade FULLY_CONNECTED ops to a lower version when safe."""
+def _downgrade_fully_connected_ops(
+    model_content: bytes, target_version: int = 11
+) -> tuple[bytes, bool]:
+    """Downgrade FULLY_CONNECTED ops to a lower version when safe.
+
+    Returns a tuple of the potentially modified model buffer and a boolean flag
+    indicating whether any operator codes were rewritten.
+    """
 
     model_fb = schema_fb.Model.GetRootAsModel(model_content, 0)
     needs_downgrade = False
@@ -58,7 +64,7 @@ def _downgrade_fully_connected_ops(model_content: bytes, target_version: int = 1
             break
 
     if not needs_downgrade:
-        return model_content
+        return model_content, False
 
     model_t = schema_fb.ModelT.InitFromObj(model_fb)
 
@@ -92,7 +98,7 @@ def _downgrade_fully_connected_ops(model_content: bytes, target_version: int = 1
     builder = flatbuffers.Builder(0)
     model_offset = model_t.Pack(builder)
     builder.Finish(model_offset, b"TFL3")
-    return bytes(builder.Output())
+    return bytes(builder.Output()), True
 
 print("="*80)
 print("NOTE CLASSIFIER - COMPLETE PIPELINE")
@@ -564,16 +570,19 @@ converter._experimental_lower_tensor_list_ops = False
 # Convert model
 tflite_model = converter.convert()
 
-# Validate operator compatibility with the on-device runtime
-try:
-    _assert_full_connected_compatibility(tflite_model)
-except RuntimeError:
+# Always attempt to downgrade any FULLY_CONNECTED ops that exceed the
+# interpreter version supported by the Android runtime. This guarantees that
+# the exported artifact is compatible even if the converter adds newer
+# operator versions.
+tflite_model, downgraded = _downgrade_fully_connected_ops(tflite_model)
+if downgraded:
     print(
-        "Detected FULLY_CONNECTED op version > 11. Attempting safe downgrade "
-        "for legacy interpreter compatibility..."
+        "Detected FULLY_CONNECTED op version > 11. Downgraded for legacy "
+        "interpreter compatibility."
     )
-    tflite_model = _downgrade_fully_connected_ops(tflite_model)
-    _assert_full_connected_compatibility(tflite_model)
+
+# Validate operator compatibility with the on-device runtime
+_assert_full_connected_compatibility(tflite_model)
 
 try:
     tf.lite.Interpreter(model_content=tflite_model)
