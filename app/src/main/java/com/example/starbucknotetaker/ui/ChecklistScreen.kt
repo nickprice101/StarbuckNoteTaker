@@ -27,9 +27,11 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.consumeAllChanges
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
 import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.Summarizer
@@ -105,10 +107,12 @@ private fun ChecklistEditorScreen(
     val itemHeights = remember(initialItems) { mutableStateMapOf<Long, Int>() }
     var draggingItemId by remember(initialItems) { mutableStateOf<Long?>(null) }
     var dragOffset by remember(initialItems) { mutableStateOf(0f) }
+    var dragTranslation by remember(initialItems) { mutableStateOf(0f) }
 
     fun resetDrag() {
         draggingItemId = null
         dragOffset = 0f
+        dragTranslation = 0f
     }
 
     fun handleDrag(delta: Float) {
@@ -118,12 +122,14 @@ private fun ChecklistEditorScreen(
             return
         }
         dragOffset += delta
+        dragTranslation += delta
         while (currentIndex < items.lastIndex) {
             val nextItem = items[currentIndex + 1]
             val nextHeight = itemHeights[nextItem.id] ?: break
             if (dragOffset > nextHeight.toFloat() / 2f) {
                 items.move(currentIndex, currentIndex + 1)
                 dragOffset -= nextHeight.toFloat()
+                dragTranslation -= nextHeight.toFloat()
                 currentIndex += 1
             } else {
                 break
@@ -135,6 +141,7 @@ private fun ChecklistEditorScreen(
             if (dragOffset < -previousHeight.toFloat() / 2f) {
                 items.move(currentIndex, currentIndex - 1)
                 dragOffset += previousHeight.toFloat()
+                dragTranslation += previousHeight.toFloat()
                 currentIndex -= 1
             } else {
                 break
@@ -234,15 +241,27 @@ private fun ChecklistEditorScreen(
                 modifier = Modifier
                     .fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                userScrollEnabled = draggingItemId == null
             ) {
                 items(items, key = { it.id }) { item ->
+                    val isDragging = draggingItemId == item.id
                     ChecklistItemRow(
                         item = item,
                         requestFocus = pendingFocusId == item.id,
                         onFocusHandled = { pendingFocusId = null },
                         modifier = Modifier
-                            .onSizeChanged { size -> itemHeights[item.id] = size.height },
+                            .onSizeChanged { size -> itemHeights[item.id] = size.height }
+                            .graphicsLayer {
+                                if (isDragging) {
+                                    translationY = dragTranslation
+                                    shadowElevation = 8.dp.toPx()
+                                } else {
+                                    translationY = 0f
+                                    shadowElevation = 0f
+                                }
+                            }
+                            .zIndex(if (isDragging) 1f else 0f),
                         dragHandleModifier = Modifier
                             .padding(start = 4.dp)
                             .size(24.dp)
@@ -251,6 +270,7 @@ private fun ChecklistEditorScreen(
                                     onDragStart = {
                                         draggingItemId = item.id
                                         dragOffset = 0f
+                                        dragTranslation = 0f
                                     },
                                     onDragEnd = { resetDrag() },
                                     onDragCancel = { resetDrag() },

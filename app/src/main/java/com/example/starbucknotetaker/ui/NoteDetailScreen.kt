@@ -38,9 +38,10 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.AnnotatedString
@@ -50,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.consumeAllChanges
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
 import com.example.starbucknotetaker.formatReminderOffsetMinutes
@@ -461,12 +463,14 @@ private fun ChecklistDetailSection(
     val itemHeights = remember(noteId) { mutableStateMapOf<Long, Int>() }
     var draggingItemId by remember(noteId) { mutableStateOf<Long?>(null) }
     var dragOffset by remember(noteId) { mutableStateOf(0f) }
+    var dragTranslation by remember(noteId) { mutableStateOf(0f) }
 
     fun toChecklistItems(): List<ChecklistItem> = checklistState.map { it.toChecklistItem() }
 
     fun resetDrag() {
         draggingItemId = null
         dragOffset = 0f
+        dragTranslation = 0f
     }
 
     fun handleDrag(delta: Float) {
@@ -476,6 +480,7 @@ private fun ChecklistDetailSection(
             return
         }
         dragOffset += delta
+        dragTranslation += delta
         var hasMoved = false
         while (currentIndex < checklistState.lastIndex) {
             val nextItem = checklistState[currentIndex + 1]
@@ -483,6 +488,7 @@ private fun ChecklistDetailSection(
             if (dragOffset > nextHeight.toFloat() / 2f) {
                 checklistState.move(currentIndex, currentIndex + 1)
                 dragOffset -= nextHeight.toFloat()
+                dragTranslation -= nextHeight.toFloat()
                 currentIndex += 1
                 hasMoved = true
             } else {
@@ -495,6 +501,7 @@ private fun ChecklistDetailSection(
             if (dragOffset < -previousHeight.toFloat() / 2f) {
                 checklistState.move(currentIndex, currentIndex - 1)
                 dragOffset += previousHeight.toFloat()
+                dragTranslation += previousHeight.toFloat()
                 currentIndex -= 1
                 hasMoved = true
             } else {
@@ -527,11 +534,22 @@ private fun ChecklistDetailSection(
     ) {
         checklistState.forEachIndexed { index, item ->
             key(item.id) {
+                val isDragging = draggingItemId == item.id
                 ChecklistDetailRow(
                     item = item,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onSizeChanged { size -> itemHeights[item.id] = size.height },
+                        .onSizeChanged { size -> itemHeights[item.id] = size.height }
+                        .graphicsLayer {
+                            if (isDragging) {
+                                translationY = dragTranslation
+                                shadowElevation = 8.dp.toPx()
+                            } else {
+                                translationY = 0f
+                                shadowElevation = 0f
+                            }
+                        }
+                        .zIndex(if (isDragging) 1f else 0f),
                     dragHandleModifier = Modifier
                         .padding(start = 4.dp)
                         .size(24.dp)
@@ -540,6 +558,7 @@ private fun ChecklistDetailSection(
                                 onDragStart = {
                                     draggingItemId = item.id
                                     dragOffset = 0f
+                                    dragTranslation = 0f
                                 },
                                 onDragCancel = { resetDrag() },
                                 onDragEnd = {
