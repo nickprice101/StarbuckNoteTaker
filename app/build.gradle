@@ -1,386 +1,90 @@
-import com.android.build.gradle.internal.tasks.MergeNativeLibsTask
-import com.android.build.gradle.tasks.GenerateResValues
-import org.gradle.process.ExecSpec
-
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-}
-
-def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
-def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
-def abiToLibcxxTriple = [
-        'arm64-v8a': 'aarch64-linux-android',
-        'armeabi-v7a': 'arm-linux-androideabi',
-        'x86'      : 'i686-linux-android',
-        'x86_64'   : 'x86_64-linux-android'
-]
-def libcxxNativeLibsDir = "${buildDir}/generated/libcxxJniLibs"
-
-def resolveNdkHostTag(File ndkDir) {
-    def prebuiltDir = new File(ndkDir, 'toolchains/llvm/prebuilt')
-    def osName = System.properties['os.name']?.toLowerCase(java.util.Locale.US)
-    def archName = System.properties['os.arch']?.toLowerCase(java.util.Locale.US)
-    def candidateTag
-    if (osName?.contains('mac')) {
-        candidateTag = (archName?.contains('arm') || archName?.contains('aarch64')) ? 'darwin-arm64' : 'darwin-x86_64'
-    } else if (osName?.contains('win')) {
-        candidateTag = 'windows-x86_64'
-    } else if (osName?.contains('linux')) {
-        candidateTag = (archName?.contains('aarch64') || archName?.contains('arm64')) ? 'linux-arm64' : 'linux-x86_64'
+    id 'org.jetbrains.kotlin.kapt'
     }
-
-    if (candidateTag) {
-        def candidateDir = new File(prebuiltDir, candidateTag)
-        if (candidateDir.exists()) {
-            return candidateTag
-        }
-    }
-
-    def fallback = prebuiltDir.listFiles()?.find { it.isDirectory() }
-    if (fallback == null) {
-        throw new GradleException("Unable to locate an NDK prebuilt directory under ${prebuiltDir}")
-    }
-    return fallback.name
-}
-
-def alignNativeLibrariesAction = { Project gradleProject, Collection<File> nativeLibraries ->
-    if (nativeLibraries == null || nativeLibraries.isEmpty()) {
-        return
-    }
-
-    def alignmentScript = gradleProject.rootProject.file('scripts/align_elf_segments.py')
-    if (!alignmentScript.exists()) {
-        throw new GradleException("Unable to find native alignment script at ${alignmentScript}")
-    }
-
-    nativeLibraries.each { File library ->
-        if (!library.exists()) {
-            return
-        }
-        if (!library.name.endsWith('.so')) {
-            gradleProject.logger.info("Skipping native alignment for non-ELF file {}", library)
-            return
-        }
-
-        byte[] magic = new byte[4]
-        int headerBytes = library.withInputStream { stream ->
-            stream.read(magic)
-        }
-        boolean isElf = headerBytes == 4 &&
-                magic[0] == 0x7f && magic[1] == 0x45 && magic[2] == 0x4c && magic[3] == 0x46
-        if (!isElf) {
-            gradleProject.logger.info("Skipping native alignment for non-ELF file {}", library)
-            return
-        }
-
-        gradleProject.exec { ExecSpec spec ->
-            spec.executable = 'python3'
-            spec.args = [alignmentScript.absolutePath, library.absolutePath]
-        }
-    }
-}
-
-def ensurePlaceholderResValuesAction = { File outputDir ->
-    if (outputDir == null) {
-        return
-    }
-
-    def valuesDir = new File(outputDir, 'values')
-    if (!valuesDir.exists() && !valuesDir.mkdirs()) {
-        throw new GradleException("Unable to create generated values directory at ${valuesDir}")
-    }
-
-    def valuesFile = new File(valuesDir, 'values.xml')
-    if (!valuesFile.exists()) {
-        valuesFile.text = '''<?xml version="1.0" encoding="utf-8"?>
-<resources/>
-'''
-    }
-}
 
 android {
-    namespace 'com.example.starbucknotetaker'
+    namespace 'com.example.starbuckrecipevault'
     compileSdk 34
-    ndkVersion '26.1.10909125'
 
     defaultConfig {
-        applicationId 'com.example.starbucknotetaker'
+        applicationId 'com.example.starbuckrecipevault'
         minSdk 26
         targetSdk 34
         versionCode System.getenv("ANDROID_VERSION_CODE")?.toInteger() ?: 1
         versionName System.getenv("ANDROID_VERSION_NAME") ?: '1.0'
-
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        ndk {
-            abiFilters(*penguinSupportedAbis)
-        }
-    }
-
-    signingConfigs {
-        release {
-            def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
-            if (keystorePath) {
-                def keyFile = keystorePath.startsWith("/") ? file(keystorePath) : rootProject.file(keystorePath)
-                storeFile keyFile
-                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-            }
-        }
+        vectorDrawables {
+            useSupportLibrary true
+                    }
     }
 
     buildTypes {
         release {
-            if (signingConfigs.release.storeFile != null) {
-                signingConfig signingConfigs.release
-            }
             minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
-        debug {
-            if (signingConfigs.release.storeFile != null) {
-                signingConfig signingConfigs.release
-            }
-        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
     }
 
     buildFeatures {
         compose true
-        aidl true
         buildConfig true
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.10'
+        kotlinCompilerExtensionVersion '1.5.11'
     }
 
-    kotlinOptions {
-        jvmTarget = '11'
-    }
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
-        coreLibraryDesugaringEnabled true
-    }
-
-packaging {
+    packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
-        }
-        jniLibs {
-            useLegacyPackaging true
-            // The TensorFlow Lite runtime, select TF ops, and flex delegate AARs
-            // all package identically named native libraries.  When Gradle merges
-            // the JNI folders without explicit guidance it surfaces duplicate file
-            // errors for libtensorflowlite_jni.so / libtensorflowlite_flex_jni.so on
-            // select build variants.  Prefer the copies that ship with the runtime
-            // dependency to avoid the merge failure that triggered the earlier
-            // rollback to 2.16.1.
-            pickFirst '**/libtensorflowlite_jni.so'
-            pickFirst '**/libtensorflowlite_flex_jni.so'
-            pickFirst '**/libtensorflowlite_select_tf_ops.so'
-        }
-    }
-
-    testOptions {
-        unitTests.includeAndroidResources = true
-        unitTests.all { unitTest ->
-            unitTest.systemProperty('robolectric.offline', 'true')
-            unitTest.systemProperty('robolectric.logging', 'stdout')
-        }
-    }
-
-    sourceSets {
-        main {
-            jniLibs.srcDirs += [penguinNativeLibsDir, libcxxNativeLibsDir]
         }
     }
 }
 
-configurations.all { configuration ->
-    configuration.resolutionStrategy.eachDependency { DependencyResolveDetails details ->
-        if (details.requested.group == 'org.tensorflow' &&
-                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
-            details.useVersion('2.16.1')
-            details.because('Keep TensorFlow Lite artifacts aligned so builtin ops remain available and match the bundled model')
-        }
-    }
+kapt {
+    correctErrorTypes = true
 }
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation platform('androidx.compose:compose-bom:2024.06.00')
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-tooling-preview'
-    implementation 'androidx.compose.material:material'
+    implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.material:material-icons-extended'
     implementation 'androidx.navigation:navigation-compose:2.7.7'
     implementation 'io.coil-kt:coil-compose:2.5.0'
     implementation 'androidx.activity:activity-compose:1.8.2'
-    implementation 'androidx.biometric:biometric:1.1.0'
-    implementation 'com.google.android.material:material:1.12.0' // Or the latest version
-    implementation 'androidx.exifinterface:exifinterface:1.3.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
+    implementation 'androidx.datastore:datastore-preferences:1.1.1'
+    implementation 'androidx.room:room-runtime:2.6.1'
+    implementation 'androidx.room:room-ktx:2.6.1'
+    kapt 'androidx.room:room-compiler:2.6.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    implementation("org.tensorflow:tensorflow-lite:2.16.1") {
-        exclude group: "org.tensorflow", module: "tensorflow-lite-api"
-    }
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4") {
-        exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
-        exclude group: "org.tensorflow", module: "tensorflow-lite-api"
-    }
-    implementation("org.tensorflow:tensorflow-lite-task-text:0.4.4") {
-        exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
-        exclude group: "org.tensorflow", module: "tensorflow-lite-api"
-    }
-    implementation('org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1') {
-        exclude group: "org.tensorflow", module: "tensorflow-lite"
-        exclude group: "org.tensorflow", module: "tensorflow-lite-api"
-    }
-    // Provide the TensorFlow Lite Java API at runtime so InterpreterImpl$Option is available.
-    implementation 'org.tensorflow:tensorflow-lite-api:2.16.1'
-    implementation "com.squareup.okhttp3:okhttp:4.12.0"
-    implementation 'androidx.work:work-runtime-ktx:2.9.0'
-    implementation 'ai.djl.android:tokenizer-native:0.33.0'
-    implementation 'ai.djl.huggingface:tokenizers:0.33.0'
-    implementation 'com.getkeepsafe.relinker:relinker:1.4.5'
-    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    implementation 'org.jsoup:jsoup:1.17.2'
+    implementation 'org.burnoutcrew.composereorderable:reorderable:0.9.6
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.mockito:mockito-core:5.2.0'
-    testImplementation 'org.mockito:mockito-inline:5.2.0'
-    testImplementation 'org.mockito.kotlin:mockito-kotlin:5.1.0'
-    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
-    testImplementation 'org.tensorflow:tensorflow-lite-api:2.16.1'
-    testImplementation 'org.json:json:20240303'
-    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
-    testImplementation 'androidx.lifecycle:lifecycle-runtime-testing:2.6.2'
-    testImplementation 'androidx.compose.ui:ui-test-junit4'
-    testImplementation 'androidx.test:core:1.5.0'
-    testImplementation 'androidx.test.ext:junit:1.1.5'
-    testImplementation 'org.robolectric:robolectric:4.12.1'
-    testImplementation 'org.robolectric:android-all-instrumented:14-robolectric-10818077-i6'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
-    androidTestImplementation 'androidx.test:core:1.5.0'
     androidTestImplementation platform('androidx.compose:compose-bom:2024.06.00')
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
-}
-
-def penguinNativeConfiguration = configurations.detachedConfiguration(
-        dependencies.create('ai.djl.android:tokenizer-native:0.33.0')
-)
-penguinNativeConfiguration.transitive = false
-
-def preparePenguinNativeLibs = tasks.register('preparePenguinNativeLibs', Sync) {
-    from {
-        penguinNativeConfiguration.files.collect { zipTree(it) }
-    }
-    include(*penguinSupportedAbis.collect { "jni/${it}/libdjl_tokenizer.so" })
-    eachFile { file ->
-        file.path = file.path
-                .replaceFirst('jni/', '')
-    }
-    includeEmptyDirs = false
-    into(penguinNativeLibsDir)
-}
-
-def prepareLibcxxShared = tasks.register('prepareLibcxxShared', Sync) {
-    into(libcxxNativeLibsDir)
-    penguinSupportedAbis.each { abi ->
-        from({
-            File ndkDir = null
-            try {
-                ndkDir = android.ndkDirectory
-            } catch (Throwable ignored) {
-                ndkDir = null
-            }
-            if (ndkDir == null || !ndkDir.exists()) {
-                logger.warn("android.ndkDirectory is not available; using placeholder libc++ for ABI ${abi}")
-                def placeholderDir = new File(buildDir, "ndkPlaceholders/${abi}")
-                placeholderDir.mkdirs()
-                def placeholder = new File(placeholderDir, 'libc++_shared.so')
-                if (!placeholder.exists()) {
-                    placeholder.bytes = new byte[0]
-                }
-                return placeholder
-            }
-            def hostTag = resolveNdkHostTag(ndkDir)
-            def triple = abiToLibcxxTriple[abi]
-            def libcxxFile = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/sysroot/usr/lib/${triple}/libc++_shared.so")
-            if (!libcxxFile.exists()) {
-                throw new GradleException("Unable to find libc++_shared.so for ABI ${abi} at ${libcxxFile}")
-            }
-            return libcxxFile
-        }) {
-            into(abi)
-        }
-    }
-}
-
-tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.configureEach {
-    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
-}
-
-tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
-    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
-}
-
-def robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
-
-tasks.withType(MergeNativeLibsTask).configureEach { task ->
-    task.notCompatibleWithConfigurationCache('Aligns native libraries using an external script')
-    def gradleProject = task.project
-    task.doLast {
-        def outputDir = task.outputDir.get().asFile
-        def alignedLibraries = gradleProject.fileTree(dir: outputDir, include: ['**/*.so']).files
-        alignNativeLibrariesAction(gradleProject, alignedLibraries)
-    }
-}
-
-tasks.withType(GenerateResValues).configureEach { task ->
-    task.doLast {
-        def resOutput = task.resOutputDir
-        def outputDir = null
-        if (resOutput != null) {
-            try {
-                outputDir = resOutput.get().asFile
-            } catch (Throwable ignored) {
-                outputDir = resOutput instanceof File ? resOutput : null
-            }
-        }
-        ensurePlaceholderResValuesAction(outputDir)
-    }
-}
-
-tasks.register('prepareRobolectricDependencies', Copy) {
-    into(robolectricDependencyDir)
-    from(project.provider {
-        configurations.getByName("debugUnitTestRuntimeClasspath")
-            .filter { file -> file.name.startsWith('android-all-instrumented-') }
-    })
-    includeEmptyDirs = false
-}
-
-tasks.withType(Test).configureEach { testTask ->
-    testTask.dependsOn('prepareRobolectricDependencies')
-    testTask.systemProperty 'robolectric.offline', 'true'
-    testTask.systemProperty 'robolectric.logging', 'stdout'
-    def depsDir = robolectricDependencyDir.get().asFile.absolutePath
-    testTask.systemProperty 'robolectric.dependency.dir', depsDir
-    testTask.environment 'ROBOLECTRIC_DEPENDENCY_DIR', depsDir
-}
-
-configurations.configureEach { configuration ->
-    configuration.resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'org.tensorflow' &&
-                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
-            details.useVersion '2.16.1'
-        }
-    }
 }
