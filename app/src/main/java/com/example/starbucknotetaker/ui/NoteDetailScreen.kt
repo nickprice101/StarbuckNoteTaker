@@ -87,6 +87,8 @@ fun NoteDetailScreen(
     var fullImage by remember { mutableStateOf<ByteArray?>(null) }
     val scope = rememberCoroutineScope()
     val eventLocationDisplay = rememberEventLocationDisplay(note.event?.location)
+    val scrollState = rememberScrollState()
+    var isChecklistDragging by remember { mutableStateOf(false) }
     Scaffold(topBar = {
         TopAppBar(
             title = {
@@ -207,7 +209,7 @@ fun NoteDetailScreen(
         Column(
             modifier = Modifier
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState, enabled = !isChecklistDragging)
                 .padding(16.dp)
         ) {
             note.event?.let { event ->
@@ -219,6 +221,7 @@ fun NoteDetailScreen(
                     noteId = note.id,
                     items = note.checklistItems,
                     onChecklistChange = onChecklistChange,
+                    onDragStateChange = { isChecklistDragging = it },
                 )
             } else {
                 val styledSource = remember(note.styledContent, note.content) {
@@ -446,6 +449,7 @@ private fun ChecklistDetailSection(
     noteId: Long,
     items: List<ChecklistItem>,
     onChecklistChange: (List<ChecklistItem>) -> Unit,
+    onDragStateChange: (Boolean) -> Unit = {},
 ) {
     val checklistState = remember(noteId) {
         mutableStateListOf<DetailChecklistItem>().apply {
@@ -468,6 +472,9 @@ private fun ChecklistDetailSection(
     fun toChecklistItems(): List<ChecklistItem> = checklistState.map { it.toChecklistItem() }
 
     fun resetDrag() {
+        if (draggingItemId != null) {
+            onDragStateChange(false)
+        }
         draggingItemId = null
         dragOffset = 0f
         dragTranslation = 0f
@@ -535,52 +542,56 @@ private fun ChecklistDetailSection(
         checklistState.forEachIndexed { index, item ->
             key(item.id) {
                 val isDragging = draggingItemId == item.id
-                ChecklistDetailRow(
-                    item = item,
+                Card(
+                    shape = MaterialTheme.shapes.medium,
+                    elevation = if (isDragging) 6.dp else 0.dp,
+                    backgroundColor = MaterialTheme.colors.surface,
                     modifier = Modifier
                         .fillMaxWidth()
                         .onSizeChanged { size -> itemHeights[item.id] = size.height }
                         .graphicsLayer {
-                            if (isDragging) {
-                                translationY = dragTranslation
-                                shadowElevation = 8.dp.toPx()
-                            } else {
-                                translationY = 0f
-                                shadowElevation = 0f
+                            translationY = if (isDragging) dragTranslation else 0f
+                        }
+                        .zIndex(if (isDragging) 1f else 0f)
+                ) {
+                    ChecklistDetailRow(
+                        item = item,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        dragHandleModifier = Modifier
+                            .padding(start = 4.dp)
+                            .size(24.dp)
+                            .pointerInput(item.id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        draggingItemId = item.id
+                                        dragOffset = 0f
+                                        dragTranslation = 0f
+                                        onDragStateChange(true)
+                                    },
+                                    onDragCancel = { resetDrag() },
+                                    onDragEnd = {
+                                        if (draggingItemId != null) {
+                                            onChecklistChange(toChecklistItems())
+                                        }
+                                        resetDrag()
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        @Suppress("DEPRECATION")
+                                        change.consumeAllChanges()
+                                        handleDrag(dragAmount.y)
+                                    }
+                                )
+                            },
+                        onCheckedChange = { checked ->
+                            if (checklistState[index].isChecked != checked) {
+                                checklistState[index] = item.copy(isChecked = checked)
+                                onChecklistChange(toChecklistItems())
                             }
                         }
-                        .zIndex(if (isDragging) 1f else 0f),
-                    dragHandleModifier = Modifier
-                        .padding(start = 4.dp)
-                        .size(24.dp)
-                        .pointerInput(item.id) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = {
-                                    draggingItemId = item.id
-                                    dragOffset = 0f
-                                    dragTranslation = 0f
-                                },
-                                onDragCancel = { resetDrag() },
-                                onDragEnd = {
-                                    if (draggingItemId != null) {
-                                        onChecklistChange(toChecklistItems())
-                                    }
-                                    resetDrag()
-                                },
-                                onDrag = { change, dragAmount ->
-                                    @Suppress("DEPRECATION")
-                                    change.consumeAllChanges()
-                                    handleDrag(dragAmount.y)
-                                }
-                            )
-                        },
-                    onCheckedChange = { checked ->
-                        if (checklistState[index].isChecked != checked) {
-                            checklistState[index] = item.copy(isChecked = checked)
-                            onChecklistChange(toChecklistItems())
-                        }
-                    }
-                )
+                    )
+                }
             }
         }
     }
