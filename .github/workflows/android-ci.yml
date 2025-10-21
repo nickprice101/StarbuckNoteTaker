@@ -37,6 +37,40 @@ jobs:
           fi
           echo "sdk.dir=$SDK_PATH" > local.properties
 
+      - name: Download latest summarizer model assets
+        env:
+          RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/latest/download
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          ASSETS_DIR="app/src/main/assets"
+          mkdir -p "$ASSETS_DIR"
+
+          download_asset() {
+            local file="$1"
+            local url="${RELEASE_BASE_URL}/${file}"
+            local dest="${ASSETS_DIR}/${file}"
+
+            echo "Fetching ${file} from ${url}" >&2
+
+            if [ -n "${GH_TOKEN:-}" ]; then
+              curl --fail --location --retry 3 --retry-all-errors \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/octet-stream" \
+                "$url" \
+                --output "$dest"
+            else
+              curl --fail --location --retry 3 --retry-all-errors \
+                "$url" \
+                --output "$dest"
+            fi
+          }
+
+          download_asset "note_classifier.tflite"
+          download_asset "category_mapping.json"
+          download_asset "deployment_metadata.json"
+
       - name: Verify summarizer model assets
         run: |
 
