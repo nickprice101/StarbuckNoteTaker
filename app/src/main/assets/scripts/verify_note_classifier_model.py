@@ -37,7 +37,7 @@ SAMPLE_NOTE_TEXT = (
     "knead for 10 minutes until smooth and elastic, roll thin with pasta machine, "
     "cut into fettuccine strips, boil in salted water for 3 minutes."
 )
-EXPECTED_SAMPLE_CATEGORY = "PERSONAL_DAILY_LIFE"
+EXPECTED_SAMPLE_CATEGORY = "FOOD_RECIPE"
 
 
 def _decode_optional_string(value: str | bytes | None) -> str | None:
