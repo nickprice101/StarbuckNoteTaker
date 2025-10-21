@@ -1,5 +1,6 @@
 import com.android.build.gradle.internal.tasks.MergeNativeLibsTask
 import com.android.build.gradle.tasks.GenerateResValues
+import groovy.io.FileType
 import org.gradle.process.ExecSpec
 
 plugins {
@@ -44,22 +45,25 @@ def resolveNdkHostTag(File ndkDir) {
     return fallback.name
 }
 
-def alignNativeLibrariesAction = { Project gradleProject, Collection<File> nativeLibraries ->
+def alignmentScriptFile = rootProject.file('scripts/align_elf_segments.py')
+
+def alignNativeLibrariesAction = { File alignmentScript, org.gradle.api.logging.Logger logger, Collection<File> nativeLibraries ->
     if (nativeLibraries == null || nativeLibraries.isEmpty()) {
         return
     }
 
-    def alignmentScript = gradleProject.rootProject.file('scripts/align_elf_segments.py')
     if (!alignmentScript.exists()) {
         throw new GradleException("Unable to find native alignment script at ${alignmentScript}")
     }
+
+    def pythonExecutable = System.getenv('PYTHON') ?: 'python3'
 
     nativeLibraries.each { File library ->
         if (!library.exists()) {
             return
         }
         if (!library.name.endsWith('.so')) {
-            gradleProject.logger.info("Skipping native alignment for non-ELF file {}", library)
+            logger.info("Skipping native alignment for non-ELF file {}", library)
             return
         }
 
@@ -70,14 +74,23 @@ def alignNativeLibrariesAction = { Project gradleProject, Collection<File> nativ
         boolean isElf = headerBytes == 4 &&
                 magic[0] == 0x7f && magic[1] == 0x45 && magic[2] == 0x4c && magic[3] == 0x46
         if (!isElf) {
-            gradleProject.logger.info("Skipping native alignment for non-ELF file {}", library)
+            logger.info("Skipping native alignment for non-ELF file {}", library)
             return
         }
 
-        gradleProject.exec { ExecSpec spec ->
-            spec.executable = 'python3'
-            spec.args = [alignmentScript.absolutePath, library.absolutePath]
+        def process = new ProcessBuilder(pythonExecutable, alignmentScript.absolutePath, library.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        def output = process.inputStream.text
+        process.inputStream.close()
+        def exitCode = process.waitFor()
+        if (output?.trim()) {
+            logger.info(output)
         }
+        if (exitCode != 0) {
+            throw new GradleException("Native library alignment failed for ${library} (exit code ${exitCode})")
+        }
+        process.destroy()
     }
 }
 
@@ -370,11 +383,17 @@ def robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
 
 tasks.withType(MergeNativeLibsTask).configureEach { task ->
     task.notCompatibleWithConfigurationCache('Aligns native libraries using an external script')
-    def gradleProject = task.project
     task.doLast {
         def outputDir = task.outputDir.get().asFile
-        def alignedLibraries = gradleProject.fileTree(dir: outputDir, include: ['**/*.so']).files
-        alignNativeLibrariesAction(gradleProject, alignedLibraries)
+        def alignedLibraries = [] as Set<File>
+        if (outputDir.exists()) {
+            outputDir.eachFileRecurse(FileType.FILES) { File file ->
+                if (file.name.endsWith('.so')) {
+                    alignedLibraries.add(file)
+                }
+            }
+        }
+        alignNativeLibrariesAction(alignmentScriptFile, task.logger, alignedLibraries)
     }
 }
 
