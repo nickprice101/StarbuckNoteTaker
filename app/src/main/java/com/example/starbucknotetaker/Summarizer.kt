@@ -84,7 +84,17 @@ class Summarizer(
             }
 
             val output = Array(1) { FloatArray(categories.size) }
-            val input = arrayOf(trimmed)
+            // The TensorFlow Lite model was exported with an input signature of
+            // shape [batch, 1] and dtype string (see complete_pipeline.py). When
+            // invoking Interpreter.run the input array must therefore match the
+            // 2-D structure `[ [ text ] ]` rather than a flattened 1-D array. The
+            // previous implementation used `arrayOf(trimmed)`, which produced a
+            // single-dimensional array and triggered `IllegalArgumentException`
+            // errors when the interpreter attempted to resolve the input tensor.
+            // Supplying the correctly nested array keeps the batch dimension
+            // intact and allows the summariser to run against the bundled
+            // `note_classifier.tflite` model.
+            val input = arrayOf(arrayOf(trimmed))
             interpreter.run(input, output)
             val scores = output[0]
             val predictedIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
