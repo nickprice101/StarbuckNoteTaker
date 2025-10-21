@@ -1,0 +1,16 @@
+# TensorFlow Lite smoke test output
+# Captured at 2025-10-21T12:28:20.319570+00:00
+# Model path: note_classifier.tflite
+
+2025-10-21 12:28:16.530175: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+INFO: Created TensorFlow Lite delegate for select TF ops.
+INFO: TfLiteFlexDelegate delegate: 4 nodes delegated out of 27 nodes with 3 partitions.
+
+2025-10-21 12:28:19.715948: E tensorflow/core/framework/node_def_util.cc:676] NodeDef mentions attribute use_inter_op_parallelism which is not in the op definition: Op<name=StringLower; signature=input:string -> output:string; attr=encoding:string,default=""> This may be expected if your graph generating binary is newer  than this binary. Unknown attributes will be ignored. NodeDef: {{node StringLower}}
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+FULLY_CONNECTED operator usage: 4 occurrences across 1 operator codes (highest version v1).
+Declared min_runtime_version: 2.5.0
+Inference smoke test predicted category: PERSONAL_DAILY_LIFE (score=0.788)
+Warning: Expected sample note to classify as FOOD_RECIPE but received PERSONAL_DAILY_LIFE.
+Example enhanced summary: Daily life note about homemade pasta recipe
