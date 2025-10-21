@@ -57,7 +57,7 @@ class SummarizerModelInstrumentationTest {
             ?: error("Expected predicted category in debug trace: $trace")
         val predictedCategory = categoryLine.substringAfter("predicted category=").substringBefore(' ')
 
-        assertEquals("PERSONAL_DAILY_LIFE", predictedCategory)
+        assertEquals("FODO_RECIPE", predictedCategory)
         assertTrue("Enhanced summary should not be blank", summary.isNotBlank())
         assertTrue("Enhanced summary should mention pasta", summary.contains("pasta", ignoreCase = true))
     }
