@@ -17,6 +17,11 @@ try:
 except ImportError:  # pragma: no cover - optional dependency for inference smoke test
     tf = None
 
+try:
+    from tflite_runtime.interpreter import Interpreter as TFLiteRuntimeInterpreter
+except ImportError:  # pragma: no cover - optional dependency for inference smoke test
+    TFLiteRuntimeInterpreter = None
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 VENDOR_DIR = SCRIPT_DIR / "_vendor"
 if VENDOR_DIR.exists():
@@ -220,9 +225,27 @@ def _build_sample_summary(note_text: str, category: str) -> str:
     return f"{friendly} summary example unavailable for sample input"
 
 
+def _create_interpreter(model_path: Path):
+    if tf is not None:
+        return tf.lite.Interpreter(model_path=str(model_path))
+    if TFLiteRuntimeInterpreter is not None:
+        return TFLiteRuntimeInterpreter(model_path=str(model_path))
+    raise RuntimeError(
+        "TensorFlow Lite runtime not available; install tensorflow or tflite-runtime to "
+        "enable the inference smoke test."
+    )
+
+
 def _run_inference_smoke_test(model_path: Path) -> None:
-    if tf is None or np is None:
-        print("TensorFlow not available; skipping inference smoke test.")
+    if np is None:
+        print("NumPy not available; skipping inference smoke test.")
+        return
+
+    if tf is None and TFLiteRuntimeInterpreter is None:
+        print(
+            "TensorFlow Lite runtime not available; skipping inference smoke test. "
+            "Install tensorflow or tflite-runtime to enable this check."
+        )
         return
 
     try:
@@ -232,7 +255,7 @@ def _run_inference_smoke_test(model_path: Path) -> None:
         return
 
     try:
-        interpreter = tf.lite.Interpreter(model_path=str(model_path))
+        interpreter = _create_interpreter(model_path)
         interpreter.allocate_tensors()
 
         input_details = interpreter.get_input_details()
