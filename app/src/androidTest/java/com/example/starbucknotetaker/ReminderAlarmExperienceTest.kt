@@ -26,6 +26,7 @@ class ReminderAlarmExperienceTest {
         isLocked = false,
         reminderMinutes = 15,
         fallbackToNotification = false,
+        kind = ReminderPayload.Kind.ALARM,
     )
 
     @get:Rule

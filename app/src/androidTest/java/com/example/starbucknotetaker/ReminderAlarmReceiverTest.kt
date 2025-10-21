@@ -41,6 +41,7 @@ class ReminderAlarmReceiverTest {
             isLocked = false,
             reminderMinutes = 10,
             fallbackToNotification = true,
+            kind = ReminderPayload.Kind.ALARM,
         )
         val intent = ReminderAlarmReceiver.createIntent(context, payload)
         ReminderAlarmReceiver().onReceive(context, intent)
