@@ -100,16 +100,93 @@ def _downgrade_fully_connected_ops(
     builder.Finish(model_offset, b"TFL3")
     return bytes(builder.Output()), True
 
+
+def _summarise_fully_connected_versions(model_content: bytes) -> tuple[int, int]:
+    """Return count and max version for FULLY_CONNECTED operators."""
+
+    model_fb = schema_fb.Model.GetRootAsModel(model_content, 0)
+    count = 0
+    max_version = 0
+    seen_opcode_indices: set[int] = set()
+
+    # OperatorCodes provide declared versions, but double-checking operators
+    # ensures the summary reflects what the runtime will request at execution
+    # time (some graphs keep unused OperatorCodes around).
+    for idx in range(model_fb.OperatorCodesLength()):
+        op_code = model_fb.OperatorCodes(idx)
+        if op_code.BuiltinCode() == schema_fb.BuiltinOperator.FULLY_CONNECTED:
+            count += 1
+            max_version = max(max_version, op_code.Version())
+            seen_opcode_indices.add(idx)
+
+    model_t = schema_fb.ModelT.InitFromObj(model_fb)
+    for subgraph in model_t.subgraphs:
+        for operator in subgraph.operators:
+            if operator.opcodeIndex in seen_opcode_indices:
+                op_code = model_t.operatorCodes[operator.opcodeIndex]
+                max_version = max(max_version, op_code.version)
+
+    return count, max_version
+
+
+def _describe_model_compatibility(model_content: bytes, *, label: str) -> None:
+    """Print compatibility details for a TFLite buffer and enforce constraints."""
+
+    fc_count, fc_max_version = _summarise_fully_connected_versions(model_content)
+    print(
+        f"{label}: FULLY_CONNECTED operators present: "
+        f"{fc_count} (highest version v{fc_max_version})"
+    )
+
+    if fc_count:
+        _assert_full_connected_compatibility(model_content)
+
+    declared_runtime = _extract_declared_min_runtime(model_content)
+    if declared_runtime:
+        print(f"{label}: Metadata min_runtime_version: {declared_runtime}")
+
+
+def _extract_declared_min_runtime(model_content: bytes) -> str | None:
+    """Read the min_runtime_version metadata if present."""
+
+    model_fb = schema_fb.Model.GetRootAsModel(model_content, 0)
+    model_t = schema_fb.ModelT.InitFromObj(model_fb)
+    if not model_t.metadata:
+        return None
+
+    for meta in model_t.metadata:
+        if getattr(meta, "name", b"") == b"min_runtime_version":
+            buffer = model_t.buffers[meta.buffer]
+            if buffer.data:
+                try:
+                    return bytes(buffer.data).decode("utf-8")
+                except UnicodeDecodeError:
+                    return None
+    return None
+
 print("="*80)
 print("NOTE CLASSIFIER - COMPLETE PIPELINE")
 print("="*80)
 
-# Step 1: Load Data
-print("\n[1/5] Loading training data...")
-
 SCRIPT_DIR = Path(__file__).resolve().parent
+# All generated artifacts must stay alongside this script so the Android assets
+# mirror can simply copy them without juggling multiple output locations.
+ASSETS_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from training_data_large import category_examples  # noqa: E402
+
+# Provide a quick diagnostic for the currently bundled model before training so
+# regressions are caught even when the pipeline is not re-run end-to-end.
+existing_asset = ASSETS_DIR / "note_classifier.tflite"
+if existing_asset.exists():
+    print("\n[0/5] Inspecting existing TensorFlow Lite asset...")
+    try:
+        _describe_model_compatibility(existing_asset.read_bytes(), label="Existing asset")
+    except RuntimeError as exc:
+        print(f"Existing asset is incompatible with the Android runtime: {exc}")
+
+# Step 1: Load Data
+print("\n[1/5] Loading training data...")
 
 NOTE_TYPES = [
     "FOOD_RECIPE", "PERSONAL_DAILY_LIFE", "FINANCE_LEGAL", "SELF_IMPROVEMENT",
@@ -581,8 +658,10 @@ if downgraded:
         "interpreter compatibility."
     )
 
-# Validate operator compatibility with the on-device runtime
-_assert_full_connected_compatibility(tflite_model)
+# Validate operator compatibility with the on-device runtime and summarise the
+# exported buffer, ensuring the downgrade helper actually took effect.
+_describe_model_compatibility(tflite_model, label="Exported model")
+
 
 try:
     tf.lite.Interpreter(model_content=tflite_model)
@@ -599,6 +678,11 @@ with open(tflite_path, 'wb') as f:
 size_mb = len(tflite_model)/(1024*1024)
 print(f"Saved: {tflite_path} ({size_mb:.2f} MB)")
 print(f"Note: Model requires SELECT_TF_OPS runtime (text processing operations)")
+
+if ASSETS_DIR != OUTPUT_DIR:
+    dest_path = ASSETS_DIR / 'note_classifier.tflite'
+    shutil.copy2(tflite_path, dest_path)
+    print(f"Copied: {dest_path}")
 
 shutil.rmtree(saved_model_dir)
 print(f"Cleaned: {saved_model_dir}/")
@@ -617,6 +701,15 @@ with open(metadata_path, 'w') as f:
         "categories": NOTE_TYPES,
         "model_size_mb": f"{size_mb:.2f}"
     }, f, indent=2)
+
+if ASSETS_DIR != OUTPUT_DIR:
+    mapping_dest = ASSETS_DIR / 'category_mapping.json'
+    shutil.copy2(mapping_path, mapping_dest)
+    print(f"Copied: {mapping_dest}")
+
+    metadata_dest = ASSETS_DIR / 'deployment_metadata.json'
+    shutil.copy2(metadata_path, metadata_dest)
+    print(f"Copied: {metadata_dest}")
 
 readme = f"""# Note Classifier - Deployment Package
 
