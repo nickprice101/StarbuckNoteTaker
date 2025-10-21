@@ -198,6 +198,41 @@ packaging {
     }
 }
 
+tasks.register("verifyNoteClassifierModel") {
+    group = "verification"
+    description = "Ensures the bundled TensorFlow Lite model stays compatible with the Android runtime."
+    notCompatibleWithConfigurationCache("Invokes a Python helper outside of Gradle's configuration cache semantics.")
+
+    def modelFile = project.layout.projectDirectory.file("src/main/assets/note_classifier.tflite")
+    def scriptFile = project.rootProject.layout.projectDirectory.file("app/src/main/assets/scripts/verify_note_classifier_model.py")
+
+    inputs.file(modelFile)
+    inputs.file(scriptFile)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        def pythonExecutable = System.getenv("PYTHON") ?: "python3"
+        File verifier = scriptFile.asFile
+        File bundledModel = modelFile.asFile
+
+        if (!verifier.exists()) {
+            throw new GradleException("Unable to find TensorFlow Lite verifier script at ${verifier}")
+        }
+        if (!bundledModel.exists()) {
+            throw new GradleException("Expected bundled model is missing: ${bundledModel}")
+        }
+
+        exec { ExecSpec spec ->
+            spec.executable = pythonExecutable
+            spec.args = [verifier.absolutePath, "--model", bundledModel.absolutePath]
+        }
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(tasks.named("verifyNoteClassifierModel"))
+}
+
 configurations.all { configuration ->
     configuration.resolutionStrategy.eachDependency { DependencyResolveDetails details ->
         if (details.requested.group == 'org.tensorflow' &&
