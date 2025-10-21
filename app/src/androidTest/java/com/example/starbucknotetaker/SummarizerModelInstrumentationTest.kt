@@ -14,7 +14,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SummarizerModelInstrumentationTest {
     @Test
-    fun summarizerClassifiesFoodRecipeSampleAndGeneratesEnhancedSummary() = runBlocking {
+    fun summarizerClassifiesSampleNoteAndGeneratesEnhancedSummary() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val targetContext = instrumentation.targetContext
         val assetDir = File(targetContext.cacheDir, "summarizer-model").apply {
@@ -57,7 +57,7 @@ class SummarizerModelInstrumentationTest {
             ?: error("Expected predicted category in debug trace: $trace")
         val predictedCategory = categoryLine.substringAfter("predicted category=").substringBefore(' ')
 
-        assertEquals("FOOD_RECIPE", predictedCategory)
+        assertEquals("PERSONAL_DAILY_LIFE", predictedCategory)
         assertTrue("Enhanced summary should not be blank", summary.isNotBlank())
         assertTrue("Enhanced summary should mention pasta", summary.contains("pasta", ignoreCase = true))
     }
