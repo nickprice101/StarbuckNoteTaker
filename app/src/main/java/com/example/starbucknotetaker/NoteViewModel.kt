@@ -246,13 +246,14 @@ class NoteViewModel(
         val finalStyled = processed.styled
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
-        val summarizerSource = buildSummarizerSource(finalTitle, finalContent, event)
         val summarizerEnabled = isSummarizerEnabled()
-        val initialSummary = if (summarizerEnabled) {
-            synchronousSummaryPlaceholder(summarizerSource)
+        val summarizerSource = if (summarizerEnabled && normalizedChecklist == null) {
+            buildSummarizerSource(finalTitle, finalContent, event)
         } else {
-            manualSummaryFromContent(finalContent)
+            null
         }
+        val initialSummary = summarizerSource?.let(::synchronousSummaryPlaceholder)
+            ?: manualSummaryFromContent(finalContent)
         val note = Note(
             title = finalTitle,
             content = finalContent.trim(),
@@ -270,7 +271,7 @@ class NoteViewModel(
         pin?.let { store?.saveNotes(_notes, it) }
         reminderScheduler?.scheduleIfNeeded(note)
         tryEmitPendingReminder()
-        if (summarizerEnabled) {
+        if (summarizerSource != null) {
             val noteId = note.id
             launchSummaryUpdates(noteId, finalTitle, summarizerSource, event)
         }
@@ -327,13 +328,15 @@ class NoteViewModel(
                 } else {
                     styledContent
                 }
-            val summarizerSource = buildSummarizerSource(finalTitle, contentForUpdate, finalEvent)
             val summarizerEnabled = isSummarizerEnabled()
-            val initialSummary = if (summarizerEnabled) {
-                synchronousSummaryPlaceholder(summarizerSource)
+            val hasChecklist = finalChecklistItems != null
+            val summarizerSource = if (summarizerEnabled && !hasChecklist) {
+                buildSummarizerSource(finalTitle, contentForUpdate, finalEvent)
             } else {
-                manualSummaryFromContent(contentForUpdate)
+                null
             }
+            val initialSummary = summarizerSource?.let(::synchronousSummaryPlaceholder)
+                ?: manualSummaryFromContent(contentForUpdate)
             val updatedDate = finalEvent?.start ?: System.currentTimeMillis()
             val preparedImages = prepareImagesForStorage(images)
             val preparedFiles = prepareFilesForStorage(files)
@@ -359,7 +362,7 @@ class NoteViewModel(
             deleteAttachments(removedImageIds + removedFileIds)
             reminderScheduler?.scheduleIfNeeded(updated)
             tryEmitPendingReminder()
-            if (summarizerEnabled) {
+            if (summarizerSource != null) {
                 val noteId = updated.id
                 launchSummaryUpdates(noteId, finalTitle, summarizerSource, finalEvent)
             }

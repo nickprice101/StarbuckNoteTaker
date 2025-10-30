@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.animateItemPlacement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.ClickableText
@@ -468,6 +469,8 @@ private fun ChecklistDetailSection(
     var draggingItemId by remember(noteId) { mutableStateOf<Long?>(null) }
     var dragOffset by remember(noteId) { mutableStateOf(0f) }
     var dragTranslation by remember(noteId) { mutableStateOf(0f) }
+    var hasReordered by remember(noteId) { mutableStateOf(false) }
+    var dragStartItems by remember(noteId) { mutableStateOf<List<DetailChecklistItem>>(emptyList()) }
 
     fun toChecklistItems(): List<ChecklistItem> = checklistState.map { it.toChecklistItem() }
 
@@ -478,6 +481,8 @@ private fun ChecklistDetailSection(
         draggingItemId = null
         dragOffset = 0f
         dragTranslation = 0f
+        hasReordered = false
+        dragStartItems = emptyList()
     }
 
     fun handleDrag(delta: Float) {
@@ -516,23 +521,34 @@ private fun ChecklistDetailSection(
             }
         }
         if (hasMoved) {
-            onChecklistChange(toChecklistItems())
+            hasReordered = true
         }
     }
 
     LaunchedEffect(items) {
-        checklistState.clear()
-        items.forEachIndexed { index, item ->
-            checklistState.add(
-                DetailChecklistItem(
-                    id = index.toLong(),
-                    text = item.text,
-                    isChecked = item.isChecked,
-                )
+        if (draggingItemId != null) {
+            return@LaunchedEffect
+        }
+        val desiredState = items.mapIndexed { index, item ->
+            DetailChecklistItem(
+                id = index.toLong(),
+                text = item.text,
+                isChecked = item.isChecked,
             )
         }
-        itemHeights.clear()
-        resetDrag()
+        val needsUpdate = checklistState.size != desiredState.size ||
+            checklistState.zip(desiredState).any { (current, target) ->
+                current.text != target.text || current.isChecked != target.isChecked
+            }
+        if (needsUpdate) {
+            checklistState.clear()
+            checklistState.addAll(desiredState)
+            itemHeights.clear()
+            dragOffset = 0f
+            dragTranslation = 0f
+            hasReordered = false
+            dragStartItems = emptyList()
+        }
     }
 
     Column(
@@ -548,6 +564,7 @@ private fun ChecklistDetailSection(
                     backgroundColor = MaterialTheme.colors.surface,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .animateItemPlacement()
                         .onSizeChanged { size -> itemHeights[item.id] = size.height }
                         .graphicsLayer {
                             translationY = if (isDragging) dragTranslation else 0f
@@ -565,14 +582,23 @@ private fun ChecklistDetailSection(
                             .pointerInput(item.id) {
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = {
+                                        dragStartItems = checklistState.map { it.copy() }
                                         draggingItemId = item.id
                                         dragOffset = 0f
                                         dragTranslation = 0f
+                                        hasReordered = false
                                         onDragStateChange(true)
                                     },
-                                    onDragCancel = { resetDrag() },
+                                    onDragCancel = {
+                                        if (dragStartItems.isNotEmpty()) {
+                                            checklistState.clear()
+                                            checklistState.addAll(dragStartItems)
+                                            itemHeights.clear()
+                                        }
+                                        resetDrag()
+                                    },
                                     onDragEnd = {
-                                        if (draggingItemId != null) {
+                                        if (draggingItemId != null && hasReordered) {
                                             onChecklistChange(toChecklistItems())
                                         }
                                         resetDrag()
