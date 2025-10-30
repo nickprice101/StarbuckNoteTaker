@@ -17,7 +17,6 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.animateItemPlacement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.ClickableText
@@ -40,9 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.AnnotatedString
@@ -52,6 +49,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.consumeAllChanges
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
@@ -72,6 +71,7 @@ import com.example.starbucknotetaker.richtext.RichTextDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 @Composable
 fun NoteDetailScreen(
@@ -564,11 +564,8 @@ private fun ChecklistDetailSection(
                     backgroundColor = MaterialTheme.colors.surface,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .animateItemPlacement()
                         .onSizeChanged { size -> itemHeights[item.id] = size.height }
-                        .graphicsLayer {
-                            translationY = if (isDragging) dragTranslation else 0f
-                        }
+                        .offset { IntOffset(0, if (isDragging) dragTranslation.roundToInt() else 0) }
                         .zIndex(if (isDragging) 1f else 0f)
                 ) {
                     ChecklistDetailRow(
