@@ -34,13 +34,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
 import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.Note
-import com.example.starbucknotetaker.Summarizer
 
 @Composable
 fun AddChecklistScreen(
     onSave: (String?, List<ChecklistItem>) -> Unit,
     onBack: () -> Unit,
-    summarizerState: Summarizer.SummarizerState,
 ) {
     ChecklistEditorScreen(
         topBarTitle = "New Checklist",
@@ -49,7 +47,6 @@ fun AddChecklistScreen(
         initialItems = emptyList(),
         onBack = onBack,
         onSave = onSave,
-        summarizerState = summarizerState,
     )
 }
 
@@ -58,7 +55,6 @@ fun EditChecklistScreen(
     note: Note,
     onSave: (String?, List<ChecklistItem>) -> Unit,
     onCancel: () -> Unit,
-    summarizerState: Summarizer.SummarizerState,
 ) {
     ChecklistEditorScreen(
         topBarTitle = "Edit Checklist",
@@ -67,7 +63,6 @@ fun EditChecklistScreen(
         initialItems = note.checklistItems.orEmpty(),
         onBack = onCancel,
         onSave = onSave,
-        summarizerState = summarizerState,
     )
 }
 
@@ -79,7 +74,6 @@ private fun ChecklistEditorScreen(
     initialItems: List<ChecklistItem>,
     onBack: () -> Unit,
     onSave: (String?, List<ChecklistItem>) -> Unit,
-    summarizerState: Summarizer.SummarizerState,
 ) {
     var title by remember(initialTitle) { mutableStateOf(initialTitle) }
     var nextItemId by remember(initialItems) { mutableStateOf(initialItems.size.toLong()) }
@@ -228,7 +222,6 @@ private fun ChecklistEditorScreen(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            SummarizerStatusBanner(state = summarizerState)
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },

@@ -447,7 +447,6 @@ fun AppContent(
                     navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() },
-                summarizerState = summarizerState,
             )
         }
         composable("add_event") {
@@ -546,7 +545,6 @@ fun AppContent(
                         navController.popBackStack()
                     },
                     onCancel = { navController.popBackStack() },
-                    summarizerState = summarizerState,
                 )
             } else {
                 navController.popBackStack()
