@@ -1,3 +1,13 @@
+Before performing any edits in this repository:
+
+1. Ensure the repository matches origin/main.
+2. Run:
+   git fetch origin
+   git reset --hard origin/main
+   git clean -fd
+
+Do not proceed with modifications until the repo is synced.
+
 This application is a fully featured note taking applicaiton with checklist and reminder functionality. It should wrok 100% offline and provide encryption for user selected notes and archived note collections.
 
 The application uses a trained tflite model to summarise note contents using AI (contained in the assets directory and named "note_classifier.tflite"). The model is generated offline and uploaded to the assets directory. The code for building this model can be found in complete_pipeline.py and the training data is contained in training_data_large.py. These files are contained in the assets/scripts directory. The model is bundled with the app apk to ensure that it functions offline.
