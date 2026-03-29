@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -50,7 +51,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.consumeAllChanges
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteEvent
@@ -465,7 +465,10 @@ private fun ChecklistDetailSection(
             }
         }
     }
+    val scope = rememberCoroutineScope()
     val itemHeights = remember(noteId) { mutableStateMapOf<Long, Int>() }
+    val density = LocalDensity.current
+    val itemSpacingPx = with(density) { 6.dp.toPx() }
     var draggingItemId by remember(noteId) { mutableStateOf<Long?>(null) }
     var dragOffset by remember(noteId) { mutableStateOf(0f) }
     var dragTranslation by remember(noteId) { mutableStateOf(0f) }
@@ -485,6 +488,25 @@ private fun ChecklistDetailSection(
         dragStartItems = emptyList()
     }
 
+    fun persistChecklistState() {
+        val snapshot = toChecklistItems()
+        scope.launch {
+            onChecklistChange(snapshot)
+        }
+    }
+
+    fun normalizeCheckedItems(notifyChange: Boolean) {
+        val reordered = checklistState.filterNot { it.isChecked } + checklistState.filter { it.isChecked }
+        val changed = reordered.map { it.id } != checklistState.map { it.id }
+        if (changed) {
+            checklistState.clear()
+            checklistState.addAll(reordered)
+        }
+        if (notifyChange || changed) {
+            persistChecklistState()
+        }
+    }
+
     fun handleDrag(delta: Float) {
         val id = draggingItemId ?: return
         var currentIndex = checklistState.indexOfFirst { it.id == id }
@@ -496,11 +518,16 @@ private fun ChecklistDetailSection(
         var hasMoved = false
         while (currentIndex < checklistState.lastIndex) {
             val nextItem = checklistState[currentIndex + 1]
+            if (nextItem.isChecked != checklistState[currentIndex].isChecked) {
+                break
+            }
             val nextHeight = itemHeights[nextItem.id] ?: break
-            if (dragOffset > nextHeight.toFloat() / 2f) {
+            val dragThreshold = (nextHeight.toFloat() + itemSpacingPx) / 2f
+            val dragStep = nextHeight.toFloat() + itemSpacingPx
+            if (dragOffset > dragThreshold) {
                 checklistState.move(currentIndex, currentIndex + 1)
-                dragOffset -= nextHeight.toFloat()
-                dragTranslation -= nextHeight.toFloat()
+                dragOffset -= dragStep
+                dragTranslation -= dragStep
                 currentIndex += 1
                 hasMoved = true
             } else {
@@ -509,11 +536,16 @@ private fun ChecklistDetailSection(
         }
         while (currentIndex > 0) {
             val previousItem = checklistState[currentIndex - 1]
+            if (previousItem.isChecked != checklistState[currentIndex].isChecked) {
+                break
+            }
             val previousHeight = itemHeights[previousItem.id] ?: break
-            if (dragOffset < -previousHeight.toFloat() / 2f) {
+            val dragThreshold = (previousHeight.toFloat() + itemSpacingPx) / 2f
+            val dragStep = previousHeight.toFloat() + itemSpacingPx
+            if (dragOffset < -dragThreshold) {
                 checklistState.move(currentIndex, currentIndex - 1)
-                dragOffset += previousHeight.toFloat()
-                dragTranslation += previousHeight.toFloat()
+                dragOffset += dragStep
+                dragTranslation += dragStep
                 currentIndex -= 1
                 hasMoved = true
             } else {
@@ -552,7 +584,7 @@ private fun ChecklistDetailSection(
     }
 
     Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         checklistState.forEachIndexed { index, item ->
@@ -565,17 +597,29 @@ private fun ChecklistDetailSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .onSizeChanged { size -> itemHeights[item.id] = size.height }
-                        .offset { IntOffset(0, if (isDragging) dragTranslation.roundToInt() else 0) }
+                        .graphicsLayer {
+                            if (isDragging) {
+                                translationY = dragTranslation
+                                scaleX = 1.04f
+                                scaleY = 1.04f
+                                shadowElevation = 14.dp.toPx()
+                            } else {
+                                translationY = 0f
+                                scaleX = 1f
+                                scaleY = 1f
+                                shadowElevation = 0f
+                            }
+                        }
                         .zIndex(if (isDragging) 1f else 0f)
                 ) {
                     ChecklistDetailRow(
                         item = item,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         dragHandleModifier = Modifier
                             .padding(start = 4.dp)
-                            .size(24.dp)
+                            .size(28.dp)
                             .pointerInput(item.id) {
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = {
@@ -596,7 +640,7 @@ private fun ChecklistDetailSection(
                                     },
                                     onDragEnd = {
                                         if (draggingItemId != null && hasReordered) {
-                                            onChecklistChange(toChecklistItems())
+                                            normalizeCheckedItems(notifyChange = true)
                                         }
                                         resetDrag()
                                     },
@@ -610,7 +654,7 @@ private fun ChecklistDetailSection(
                         onCheckedChange = { checked ->
                             if (checklistState[index].isChecked != checked) {
                                 checklistState[index] = item.copy(isChecked = checked)
-                                onChecklistChange(toChecklistItems())
+                                normalizeCheckedItems(notifyChange = true)
                             }
                         }
                     )
