@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import android.widget.Toast
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.animateItemPlacement
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -73,6 +72,7 @@ fun EditChecklistScreen(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChecklistEditorScreen(
     topBarTitle: String,
@@ -293,7 +293,6 @@ private fun ChecklistEditorScreen(
                         requestFocus = pendingFocusId == item.id,
                         onFocusHandled = { pendingFocusId = null },
                         modifier = Modifier
-                            .animateItemPlacement()
                             .onSizeChanged { size -> itemHeights[item.id] = size.height }
                             .graphicsLayer {
                                 if (isDragging) {
