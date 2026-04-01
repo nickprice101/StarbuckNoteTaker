@@ -587,7 +587,7 @@ private fun ChecklistDetailSection(
     }
 
     Column(
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         checklistState.forEachIndexed { index, item ->
@@ -619,7 +619,7 @@ private fun ChecklistDetailSection(
                         item = item,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
                         dragHandleModifier = Modifier
                             .padding(start = 4.dp)
                             .size(28.dp)
