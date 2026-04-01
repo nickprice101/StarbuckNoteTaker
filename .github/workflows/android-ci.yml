@@ -91,6 +91,27 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk \
             "build-out/StarbuckNoteTaker-${VERSION_NAME}.apk"
 
+      - name: Configure SSH key for Unraid upload
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_B64 }}" | base64 --decode > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.SSH_IP }}" >> ~/.ssh/known_hosts
+
+      - name: Upload final APK to Unraid over SSH
+        run: |
+          set -euo pipefail
+          VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+          APK_NAME="StarbuckNoteTaker-${VERSION_NAME}.apk"
+          SOURCE_APK="build-out/${APK_NAME}"
+
+          ssh -i ~/.ssh/id_rsa "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}" \
+            "mkdir -p '${{ secrets.SSH_PATH }}'"
+
+          scp -i ~/.ssh/id_rsa "${SOURCE_APK}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}:${{ secrets.SSH_PATH }}/${APK_NAME}"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
