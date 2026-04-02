@@ -883,9 +883,10 @@ class NoteViewModel(
 
     private fun createSummarizerDebugNote(relatedTitle: String, source: String, trace: List<String>) {
         if (trace.isEmpty()) return
-        val reason = trace.firstOrNull { it.startsWith("fallback reason:") }
+        val rawReason = trace.firstOrNull { it.startsWith("fallback reason:") }
             ?.removePrefix("fallback reason:")
             ?.trim()
+        val reason = formatSummarizerFallbackReason(rawReason)
         val sanitizedRelatedTitle = relatedTitle
             .lines()
             .firstOrNull()
@@ -901,6 +902,9 @@ class NoteViewModel(
             appendLine("Summarizer fallback triggered for \"$referencedTitle\".")
             if (!reason.isNullOrBlank()) {
                 appendLine("Reason: $reason")
+            }
+            if (!rawReason.isNullOrBlank() && rawReason != reason) {
+                appendLine("Raw error: $rawReason")
             }
             if (source.isNotBlank()) {
                 appendLine()
@@ -921,6 +925,23 @@ class NoteViewModel(
         _notes.add(note)
         reorderNotes()
         pin?.let { store?.saveNotes(_notes, it) }
+    }
+
+    private fun formatSummarizerFallbackReason(rawReason: String?): String? {
+        if (rawReason.isNullOrBlank()) return null
+        val reason = rawReason.trim()
+        return when {
+            reason.contains("tokenizer_vocabulary_v2.txt", ignoreCase = true) ->
+                "Tokenizer vocabulary asset is missing or unreadable (tokenizer_vocabulary_v2.txt). " +
+                        "The AI model cannot tokenize text, so summarization switched to fallback mode."
+            reason.contains("category_mapping.json", ignoreCase = true) ->
+                "Category mapping asset is missing or unreadable (category_mapping.json). " +
+                        "The AI model cannot map predictions to labels, so summarization switched to fallback mode."
+            reason.contains("note_classifier.tflite", ignoreCase = true) ->
+                "Model asset is missing or unreadable (note_classifier.tflite). " +
+                        "The AI summarizer cannot run inference, so fallback mode was used."
+            else -> reason
+        }
     }
 
     private fun reorderNotes() {
