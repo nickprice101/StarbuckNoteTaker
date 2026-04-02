@@ -657,6 +657,7 @@ fun SketchPadDialog(
                                         },
                                     )
                                     Row(
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
@@ -666,7 +667,7 @@ fun SketchPadDialog(
                                             onValueChange = { eraserSizeDp = it },
                                             valueRange = 5f..80f,
                                             modifier = Modifier
-                                                .weight(1f)
+                                                .width(180.dp)
                                                 .semantics {
                                                     val label = "${eraserSizeDp.roundToInt()} dp"
                                                     contentDescription = "Eraser size slider, current size $label"
