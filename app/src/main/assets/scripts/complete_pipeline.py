@@ -159,9 +159,10 @@ def _extract_declared_min_runtime(model_content: bytes) -> str | None:
     for meta in model_t.metadata:
         if getattr(meta, "name", b"") == b"min_runtime_version":
             buffer = model_t.buffers[meta.buffer]
-            if buffer.data:
+            data = getattr(buffer, "data", None)
+            if data is not None and len(data) > 0:
                 try:
-                    return bytes(buffer.data).decode("utf-8")
+                    return bytes(data).decode("utf-8")
                 except UnicodeDecodeError:
                     return None
     return None
