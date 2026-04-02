@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 import json
 import re
+import hashlib
 from datetime import datetime
 
 import tensorflow as tf
@@ -21,6 +22,7 @@ from tensorflow.lite.python import schema_py_generated as schema_fb
 import flatbuffers
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
 
 # Initialize seeds
 random.seed(42)
@@ -196,6 +198,9 @@ NOTE_TYPES = [
 ]
 
 NUM_CATEGORIES = len(NOTE_TYPES)
+MAX_TOKENS = 12000
+SEQUENCE_LENGTH = 120
+BATCH_SIZE = 32
 
 all_notes = []
 all_labels = []
@@ -220,30 +225,42 @@ print(f"Train: {len(X_train)}, Val: {len(X_val)}")
 print("\n[3/5] Building and training model...")
 
 AUTOTUNE = tf.data.AUTOTUNE
-# Focus on better text representation rather than complex architecture
-vectorizer = tf.keras.layers.TextVectorization(max_tokens=10000, output_sequence_length=100)
-# Create TensorFlow dataset directly from the lists
+# V2: keep preprocessing outside the neural graph so converted TFLite model can
+# run with built-in ops (no SELECT_TF_OPS dependency).
+vectorizer = tf.keras.layers.TextVectorization(
+    max_tokens=MAX_TOKENS,
+    output_mode="int",
+    output_sequence_length=SEQUENCE_LENGTH,
+    standardize="lower_and_strip_punctuation",
+)
+vectorizer.adapt(tf.constant(X_train, dtype=tf.string))
+
+
+def vectorize_texts(texts: list[str]) -> np.ndarray:
+    tokens = vectorizer(tf.constant(texts, dtype=tf.string)).numpy()
+    return tokens.astype(np.int32)
+
+
+train_tokens = vectorize_texts(X_train)
+val_tokens = vectorize_texts(X_val)
+
+# Create TensorFlow datasets from token IDs.
 train_ds = tf.data.Dataset.from_tensor_slices(
-    (tf.constant(X_train, dtype=tf.string), tf.constant(y_train, dtype=tf.int32))
+    (tf.constant(train_tokens, dtype=tf.int32), tf.constant(y_train, dtype=tf.int32))
 )
 val_ds = tf.data.Dataset.from_tensor_slices(
-    (tf.constant(X_val, dtype=tf.string), tf.constant(y_val, dtype=tf.int32))
+    (tf.constant(val_tokens, dtype=tf.int32), tf.constant(y_val, dtype=tf.int32))
 )
-vectorizer.adapt(train_ds.map(lambda x, y: x))
 
-inputs = tf.keras.Input(shape=(1,), dtype=tf.string)
-x = vectorizer(inputs)
-# Simpler but effective architecture
-x = tf.keras.layers.Embedding(10000, 256, mask_zero=True)(x)
-# Triple pooling for richer features
+inputs = tf.keras.Input(shape=(SEQUENCE_LENGTH,), dtype=tf.int32)
+x = tf.keras.layers.Embedding(MAX_TOKENS, 128, mask_zero=True)(inputs)
+# Dual pooling for richer features
 avg_pool = tf.keras.layers.GlobalAveragePooling1D()(x)
 max_pool = tf.keras.layers.GlobalMaxPooling1D()(x)
 x = tf.keras.layers.Concatenate()([avg_pool, max_pool])
-# Simpler network - easier to train
-x = tf.keras.layers.Dense(512, 'relu')(x)
-x = tf.keras.layers.Dropout(0.5)(x)
+# Leaner network - faster and better suited for mobile deployment.
 x = tf.keras.layers.Dense(256, 'relu')(x)
-x = tf.keras.layers.Dropout(0.4)(x)
+x = tf.keras.layers.Dropout(0.35)(x)
 x = tf.keras.layers.Dense(128, 'relu')(x)
 x = tf.keras.layers.Dropout(0.3)(x)
 outputs = tf.keras.layers.Dense(NUM_CATEGORIES, 'softmax')(x)
@@ -254,31 +271,47 @@ model = tf.keras.Model(inputs, outputs)
 optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
 model.compile(
     optimizer=optimizer, 
-    loss='sparse_categorical_crossentropy', 
+    loss=tf.keras.losses.SparseCategoricalCrossentropy(label_smoothing=0.05),
     metrics=['accuracy'],
     run_eagerly=True
 )
 
-# Prepare datasets - more aggressive shuffling and larger batch
-train_ds_batched = train_ds.shuffle(2000).batch(32).cache().prefetch(AUTOTUNE)
-val_ds_batched = val_ds.batch(32).cache().prefetch(AUTOTUNE)
+# Prepare datasets - stronger shuffle and stable batching
+train_ds_batched = train_ds.shuffle(4000).batch(BATCH_SIZE).cache().prefetch(AUTOTUNE)
+val_ds_batched = val_ds.batch(BATCH_SIZE).cache().prefetch(AUTOTUNE)
 
 # Train for more epochs with very patient early stopping
 callbacks = [
-    tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', patience=30, restore_best_weights=True, mode='max'),
-    tf.keras.callbacks.ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=10, min_lr=1e-6, verbose=1, mode='max')
+    tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', patience=18, restore_best_weights=True, mode='max'),
+    tf.keras.callbacks.ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=6, min_lr=1e-6, verbose=1, mode='max')
 ]
 
 history = model.fit(
     train_ds_batched,
     validation_data=val_ds_batched,
-    epochs=200,
+    epochs=120,
     callbacks=callbacks,
     verbose=2
 )
 
 best_acc = max(history.history['val_accuracy'])
 print(f"\nBest validation accuracy: {best_acc*100:.2f}%")
+
+# Per-class diagnostics for targeted dataset improvements.
+val_probs = model.predict(val_tokens, verbose=0)
+val_pred = np.argmax(val_probs, axis=1)
+print("\nValidation classification report:")
+print(
+    classification_report(
+        y_val,
+        val_pred,
+        target_names=NOTE_TYPES,
+        digits=3,
+        zero_division=0,
+    )
+)
+print("Validation confusion matrix:")
+print(confusion_matrix(y_val, val_pred))
 
 # Step 4: Test Model
 print("\n[4/5] Testing model...")
@@ -302,7 +335,7 @@ tests = [
 
 correct = 0
 for note, expected in tests:
-    pred = model.predict(tf.constant([note]), verbose=0)
+    pred = model.predict(vectorize_texts([note]), verbose=0)
     category = NOTE_TYPES[np.argmax(pred[0])]
     status = "OK" if category == expected else "XX"
     print(f"[{status}] {expected:25s} -> {category}")
@@ -587,7 +620,7 @@ validation_examples = [
 
 for i, note in enumerate(validation_examples, 1):
     # Get classification
-    pred = model.predict(tf.constant([note]), verbose=0)
+    pred = model.predict(vectorize_texts([note]), verbose=0)
     pred_class = int(np.argmax(pred[0]))
     predicted_category = NOTE_TYPES[pred_class]
     
@@ -610,39 +643,39 @@ print("\n[5/5] Exporting to TFLite...")
 OUTPUT_DIR = SCRIPT_DIR
 print(f"Output directory: {OUTPUT_DIR}")
 
-# Save Keras model and exported SavedModel for conversion
+# Save Keras model and exported assets
 keras_path = OUTPUT_DIR / 'note_classifier_final.keras'
 model.save(str(keras_path))
 print(f"Saved: {keras_path}")
 
-saved_model_dir = OUTPUT_DIR / 'note_classifier_saved_model'
-if saved_model_dir.exists():
-    shutil.rmtree(saved_model_dir)
+# Persist vectorizer vocabulary for Android-side tokenization parity.
+vocab = vectorizer.get_vocabulary()
+vocab_path = OUTPUT_DIR / 'tokenizer_vocabulary_v2.txt'
+with open(vocab_path, 'w', encoding='utf-8') as f:
+    for token in vocab:
+        f.write(token + "\n")
+print(f"Saved: {vocab_path}")
+vocab_checksum = hashlib.sha256("\n".join(vocab).encode("utf-8")).hexdigest()
 
-tf.saved_model.save(model, str(saved_model_dir))
-print(f"Saved: {saved_model_dir}/ (SavedModel)")
-
-# Convert to TFLite from the SavedModel representation - requires SELECT_TF_OPS
-converter = tf.lite.TFLiteConverter.from_saved_model(str(saved_model_dir))
+# Convert to TFLite from Keras graph.
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
 # Enable optimizations for smaller model size
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
-# Use the legacy converter to maintain operator compatibility with older runtimes
-converter.experimental_new_converter = False
-
-# CRITICAL: Support SELECT_TF_OPS for text processing operations
-# TextVectorization uses StringLower, StaticRegexReplace, StringSplitV2, RaggedTensorToTensor
+# Prefer built-in ops and int8 kernels where possible.
 converter.target_spec.supported_ops = [
-    tf.lite.OpsSet.TFLITE_BUILTINS,  # Standard TFLite ops
-    tf.lite.OpsSet.SELECT_TF_OPS      # Required for text processing
+    tf.lite.OpsSet.TFLITE_BUILTINS_INT8,
+    tf.lite.OpsSet.TFLITE_BUILTINS,
 ]
 
-# Keep float32 precision
-converter.target_spec.supported_types = [tf.float32]
 
-# Preserve tensor list operations for text processing
-converter._experimental_lower_tensor_list_ops = False
+def representative_dataset():
+    sample_size = min(512, len(train_tokens))
+    for i in range(sample_size):
+        yield [np.expand_dims(train_tokens[i], axis=0)]
+
+
+converter.representative_dataset = representative_dataset
 
 # Convert model
 tflite_model = converter.convert()
@@ -677,15 +710,12 @@ with open(tflite_path, 'wb') as f:
 
 size_mb = len(tflite_model)/(1024*1024)
 print(f"Saved: {tflite_path} ({size_mb:.2f} MB)")
-print(f"Note: Model requires SELECT_TF_OPS runtime (text processing operations)")
+print("Note: V2 model expects pre-tokenized integer input (TextVectorization not embedded).")
 
 if ASSETS_DIR != OUTPUT_DIR:
     dest_path = ASSETS_DIR / 'note_classifier.tflite'
     shutil.copy2(tflite_path, dest_path)
     print(f"Copied: {dest_path}")
-
-shutil.rmtree(saved_model_dir)
-print(f"Cleaned: {saved_model_dir}/")
 
 # Create deployment files
 mapping_path = OUTPUT_DIR / 'category_mapping.json'
@@ -699,7 +729,12 @@ with open(metadata_path, 'w') as f:
         "validation_accuracy": f"{best_acc*100:.2f}%",
         "test_accuracy": f"{test_acc:.1f}%",
         "categories": NOTE_TYPES,
-        "model_size_mb": f"{size_mb:.2f}"
+        "model_size_mb": f"{size_mb:.2f}",
+        "pipeline_version": "v2",
+        "max_tokens": MAX_TOKENS,
+        "sequence_length": SEQUENCE_LENGTH,
+        "tokenizer_vocab_file": vocab_path.name,
+        "tokenizer_vocab_sha256": vocab_checksum,
     }, f, indent=2)
 
 if ASSETS_DIR != OUTPUT_DIR:
@@ -711,6 +746,10 @@ if ASSETS_DIR != OUTPUT_DIR:
     shutil.copy2(metadata_path, metadata_dest)
     print(f"Copied: {metadata_dest}")
 
+    vocab_dest = ASSETS_DIR / vocab_path.name
+    shutil.copy2(vocab_path, vocab_dest)
+    print(f"Copied: {vocab_dest}")
+
 readme = f"""# Note Classifier - Deployment Package
 
 ## Performance
@@ -719,16 +758,17 @@ readme = f"""# Note Classifier - Deployment Package
 - Model Size: {size_mb:.2f} MB
 
 ## Files␊
-1. note_classifier.tflite - TFLite model␊
+1. note_classifier.tflite - TFLite model (token IDs input)␊
 2. category_mapping.json - Category names␊
 3. deployment_metadata.json - Training results␊
-4. note_classifier_final.keras - Optional Keras checkpoint for reference (not bundled in app)
+4. tokenizer_vocabulary_v2.txt - Vocabulary for Android tokenization␊
+5. note_classifier_final.keras - Optional Keras checkpoint for reference (not bundled in app)
 
 ## Android Integration
 
 ```kotlin
 val interpreter = Interpreter(loadModelFile("note_classifier.tflite"))
-val input = arrayOf(noteText)
+val input: Array<IntArray> = arrayOf(tokenIds) // tokenIds length must be {SEQUENCE_LENGTH}
 val output = Array(1) {{ FloatArray({NUM_CATEGORIES}) }}
 interpreter.run(input, output)
 val categoryIndex = output[0].indices.maxByOrNull {{ output[0][it] }} ?: 0
