@@ -220,9 +220,14 @@ class Summarizer(
             val modelsDir = File(context.filesDir, MODELS_DIR_NAME).apply { mkdirs() }
             val modelFile = ensureAsset(modelsDir, MODEL_ASSET_NAME)
             val mappingFile = ensureAsset(modelsDir, CATEGORY_MAPPING_ASSET_NAME)
-            val tokenizerFile = ensureAsset(modelsDir, TOKENIZER_VOCAB_ASSET_NAME)
             categories = parseCategoryMapping(mappingFile)
-            tokenizerVocabulary = parseTokenizerVocabulary(tokenizerFile)
+            tokenizerVocabulary = ensureOptionalAsset(modelsDir, TOKENIZER_VOCAB_ASSET_NAME)
+                ?.let { parseTokenizerVocabulary(it) }
+                ?: TokenizerVocabulary.EMPTY.also {
+                    emitDebug(
+                        "tokenizer vocabulary missing; using [UNK]-only tokenization fallback"
+                    )
+                }
             interpreter = interpreterFactory(mapFile(modelFile))
             emitDebug("summarizer model ready with ${categories.size} categories")
             _state.emit(SummarizerState.Ready)
@@ -260,6 +265,14 @@ class Summarizer(
             }
         }
         return target
+    }
+
+    private fun ensureOptionalAsset(modelsDir: File, assetName: String): File? {
+        return runCatching { ensureAsset(modelsDir, assetName) }
+            .onFailure { error ->
+                logger("optional summarizer asset unavailable: $assetName", error)
+            }
+            .getOrNull()
     }
 
     private fun mapFile(file: File): MappedByteBuffer {
