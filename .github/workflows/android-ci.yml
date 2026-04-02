@@ -114,6 +114,9 @@ jobs:
           scp -i ~/.ssh/id_rsa "${SOURCE_APK}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}:${DEST_FILE}"
 
+          ssh -i ~/.ssh/id_rsa "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}" \
+            "chown nobody:users \"${DEST_FILE}\" && chmod 777 \"${DEST_FILE}\""
+
       - name: Verify APK on Unraid
         run: |
           set -euo pipefail
