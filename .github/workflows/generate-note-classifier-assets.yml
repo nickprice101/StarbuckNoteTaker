@@ -1,0 +1,47 @@
+name: Generate note classifier assets
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/src/main/assets/scripts/complete_pipeline.py'
+      - 'app/src/main/assets/scripts/training_data_large.py'
+      - '.github/workflows/generate-note-classifier-assets.yml'
+
+jobs:
+  generate-assets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pipeline dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install tensorflow==2.16.1 numpy scikit-learn
+
+      - name: Generate model + metadata
+        run: python3 app/src/main/assets/scripts/complete_pipeline.py
+
+      - name: Copy generated assets into Android app assets
+        run: |
+          cp app/src/main/assets/scripts/note_classifier.tflite app/src/main/assets/note_classifier.tflite
+          cp app/src/main/assets/scripts/tokenizer_vocabulary_v2.txt app/src/main/assets/tokenizer_vocabulary_v2.txt
+          cp app/src/main/assets/scripts/category_mapping.json app/src/main/assets/category_mapping.json
+          cp app/src/main/assets/scripts/deployment_metadata.json app/src/main/assets/deployment_metadata.json
+
+      - name: Upload generated assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: note-classifier-assets
+          path: |
+            app/src/main/assets/note_classifier.tflite
+            app/src/main/assets/tokenizer_vocabulary_v2.txt
+            app/src/main/assets/category_mapping.json
+            app/src/main/assets/deployment_metadata.json

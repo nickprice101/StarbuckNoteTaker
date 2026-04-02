@@ -24,7 +24,6 @@ interface LiteTensor {
 /** Default factory creating [LiteInterpreter] instances backed by TensorFlow Lite. */
 class TfLiteInterpreter private constructor(
     private val delegate: Interpreter,
-    private val flexDelegate: Any?,
 ) : LiteInterpreter {
     override val inputTensorCount: Int
         get() = delegate.inputTensorCount
@@ -43,37 +42,13 @@ class TfLiteInterpreter private constructor(
 
     override fun close() {
         delegate.close()
-        (flexDelegate as? AutoCloseable)?.close()
     }
 
     companion object {
         fun create(model: MappedByteBuffer): LiteInterpreter {
-            val flexDelegate = createFlexDelegate()
             val options = Interpreter.Options()
-            if (flexDelegate != null) {
-                addDelegate(options, flexDelegate)
-            }
             val interpreter = Interpreter(model, options)
-            return TfLiteInterpreter(interpreter, flexDelegate)
-        }
-
-        private fun createFlexDelegate(): Any? {
-            return try {
-                val clazz = Class.forName("org.tensorflow.lite.flex.FlexDelegate")
-                clazz.getDeclaredConstructor().newInstance()
-            } catch (error: Throwable) {
-                null
-            }
-        }
-
-        private fun addDelegate(options: Interpreter.Options, delegate: Any) {
-            try {
-                val delegateClass = Class.forName("org.tensorflow.lite.Delegate")
-                val method = Interpreter.Options::class.java.getMethod("addDelegate", delegateClass)
-                method.invoke(options, delegate)
-            } catch (_: Throwable) {
-                // Ignore when delegate APIs are unavailable.
-            }
+            return TfLiteInterpreter(interpreter)
         }
     }
 }

@@ -45,6 +45,7 @@ class Summarizer(
 
     private var interpreter: LiteInterpreter? = null
     private var categories: List<String> = emptyList()
+    private var tokenizerVocabulary: TokenizerVocabulary = TokenizerVocabulary.EMPTY
 
     private fun emitDebug(message: String) {
         debugTrace.get()?.add(message)
@@ -89,17 +90,8 @@ class Summarizer(
             }
 
             val output = Array(1) { FloatArray(categories.size) }
-            // The TensorFlow Lite model was exported with an input signature of
-            // shape [batch, 1] and dtype string (see complete_pipeline.py). When
-            // invoking Interpreter.run the input array must therefore match the
-            // 2-D structure `[ [ text ] ]` rather than a flattened 1-D array. The
-            // previous implementation used `arrayOf(trimmed)`, which produced a
-            // single-dimensional array and triggered `IllegalArgumentException`
-            // errors when the interpreter attempted to resolve the input tensor.
-            // Supplying the correctly nested array keeps the batch dimension
-            // intact and allows the summariser to run against the bundled
-            // `note_classifier.tflite` model.
-            val input = arrayOf(arrayOf(preparedInput))
+            val tokenizedInput = tokenizeForModelInput(preparedInput, tokenizerVocabulary)
+            val input = arrayOf(tokenizedInput)
             interpreter.run(input, output)
             val scores = output[0]
             val predictedIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
@@ -228,7 +220,9 @@ class Summarizer(
             val modelsDir = File(context.filesDir, MODELS_DIR_NAME).apply { mkdirs() }
             val modelFile = ensureAsset(modelsDir, MODEL_ASSET_NAME)
             val mappingFile = ensureAsset(modelsDir, CATEGORY_MAPPING_ASSET_NAME)
+            val tokenizerFile = ensureAsset(modelsDir, TOKENIZER_VOCAB_ASSET_NAME)
             categories = parseCategoryMapping(mappingFile)
+            tokenizerVocabulary = parseTokenizerVocabulary(tokenizerFile)
             interpreter = interpreterFactory(mapFile(modelFile))
             emitDebug("summarizer model ready with ${categories.size} categories")
             _state.emit(SummarizerState.Ready)
@@ -248,6 +242,13 @@ class Summarizer(
             result += array.optString(i)
         }
         return result
+    }
+
+    private fun parseTokenizerVocabulary(file: File): TokenizerVocabulary {
+        val lines = file.readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        return TokenizerVocabulary.from(lines)
     }
 
     private fun ensureAsset(modelsDir: File, assetName: String): File {
@@ -512,12 +513,15 @@ class Summarizer(
         interpreter?.close()
         interpreter = null
         categories = emptyList()
+        tokenizerVocabulary = TokenizerVocabulary.EMPTY
     }
 
     companion object {
         internal const val MODELS_DIR_NAME = "models"
         internal const val MODEL_ASSET_NAME = "note_classifier.tflite"
         internal const val CATEGORY_MAPPING_ASSET_NAME = "category_mapping.json"
+        internal const val TOKENIZER_VOCAB_ASSET_NAME = "tokenizer_vocabulary_v2.txt"
+        private const val MODEL_SEQUENCE_LENGTH = 120
         private const val MAX_SUMMARY_LENGTH = 140
         private const val MAX_PREVIEW_LENGTH = 160
         private const val FALLBACK_CHAR_LIMIT = 150
@@ -546,6 +550,8 @@ class Summarizer(
         private val TRAVEL_SUBJECT_EXCLUSIONS = setOf("Woke", "Packed", "Noted", "Explored", "Visited")
         private const val MODEL_CONFIDENCE_MIN = 0.45f
         private const val MODEL_CONFIDENCE_GAP_MIN = 0.15f
+        private val TOKEN_SPLIT_REGEX = Regex("\\s+")
+        private val STRIP_PUNCTUATION_REGEX = Regex("[\\p{Punct}]")
 
         internal fun normalizeForModelInput(text: String): String {
             val trimmed = text.trim()
@@ -599,5 +605,43 @@ class Summarizer(
         }
 
         private val SENTENCE_CAPTURE = Regex("([^.!?]+[.!?])")
+
+        internal fun tokenizeForModelInput(text: String, vocabulary: TokenizerVocabulary): IntArray {
+            val normalized = normalizeForModelInput(text).lowercase(Locale.US)
+            val stripped = STRIP_PUNCTUATION_REGEX.replace(normalized, " ")
+            val tokens = TOKEN_SPLIT_REGEX.split(stripped).filter { it.isNotBlank() }
+            val output = IntArray(MODEL_SEQUENCE_LENGTH)
+            var index = 0
+            for (token in tokens) {
+                if (index >= MODEL_SEQUENCE_LENGTH) break
+                output[index] = vocabulary.tokenToId(token)
+                index++
+            }
+            return output
+        }
+    }
+}
+
+internal class TokenizerVocabulary private constructor(
+    private val tokenToIndex: Map<String, Int>,
+    private val unknownTokenId: Int,
+) {
+    fun tokenToId(token: String): Int = tokenToIndex[token] ?: unknownTokenId
+
+    companion object {
+        val EMPTY: TokenizerVocabulary = from(emptyList())
+        private const val UNKNOWN_TOKEN = "[UNK]"
+
+        fun from(tokens: List<String>): TokenizerVocabulary {
+            val map = LinkedHashMap<String, Int>(tokens.size)
+            tokens.forEachIndexed { index, token ->
+                map.putIfAbsent(token, index)
+            }
+            val unknownId = map[UNKNOWN_TOKEN]
+                ?: map["[unk]"]
+                ?: map["UNK"]
+                ?: 1
+            return TokenizerVocabulary(map, unknownId)
+        }
     }
 }
