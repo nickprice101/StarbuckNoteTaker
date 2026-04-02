@@ -15,6 +15,7 @@ else:
     os.environ.pop('TF_USE_LEGACY_KERAS', None)
 
 import random
+import inspect
 import shutil
 from pathlib import Path
 import sys
@@ -276,9 +277,15 @@ model = tf.keras.Model(inputs, outputs)
 
 # Use standard settings
 optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+loss_kwargs = {}
+if 'label_smoothing' in inspect.signature(tf.keras.losses.SparseCategoricalCrossentropy).parameters:
+    loss_kwargs['label_smoothing'] = 0.05
+else:
+    print("SparseCategoricalCrossentropy.label_smoothing unavailable; training without label smoothing.")
+
 model.compile(
-    optimizer=optimizer, 
-    loss=tf.keras.losses.SparseCategoricalCrossentropy(label_smoothing=0.05),
+    optimizer=optimizer,
+    loss=tf.keras.losses.SparseCategoricalCrossentropy(**loss_kwargs),
     metrics=['accuracy'],
     run_eagerly=True
 )
