@@ -1,91 +1,87 @@
 ================================================================================
-NOTE CLASSIFIER - DEPLOYMENT FILES
-Generated: 2025-10-09 09:05:42
+NOTE CLASSIFIER - DEPLOYMENT FILES (V2 PIPELINE)
+Generated: 2026-04-02
 ================================================================================
-
-LOCATION: C:\Users\nickp\python-projects\
 
 OUTPUT FILES CREATED:
 ================================================================================
 
-1. note_classifier.tflite (11.1 MB) ⭐ PRIMARY MODEL FILE
-   - LiteRT/TensorFlow Lite model
-   - REQUIRES: SELECT_TF_OPS runtime for text processing
-   - Operations: StringLower, StaticRegexReplace, StringSplitV2, RaggedTensorToTensor
+1. note_classifier.tflite ⭐ PRIMARY MODEL FILE
+   - LiteRT/TensorFlow Lite model (v2 classifier)
+   - Input: int32 token IDs shaped [1, 120]
+   - Runtime: tensorflow-lite 2.16.1 (SELECT_TF_OPS not required)
    - Copy to: app/src/main/assets/
 
-2. category_mapping.json (347 bytes) ⭐ REQUIRED
-   - List of 14 category names
+2. tokenizer_vocabulary_v2.txt ⭐ REQUIRED
+   - Token vocabulary exported from training TextVectorization layer
+   - Use this vocabulary in Android tokenization to build token IDs
    - Copy to: app/src/main/assets/
 
-3. deployment_metadata.json (485 bytes) ⭐ RECOMMENDED
-   - Model version, accuracy, creation date
+3. category_mapping.json ⭐ REQUIRED
+   - List of 15 category names
    - Copy to: app/src/main/assets/
 
-4. DEPLOYMENT_README.md (760 bytes)
-   - Integration instructions and code examples
+4. deployment_metadata.json ⭐ RECOMMENDED
+   - Model version, metrics, sequence length, vocab checksum
+   - Copy to: app/src/main/assets/
+
+5. DEPLOYMENT_README.md
+   - Integration instructions and Kotlin snippets
    - Reference only
 
-5. note_classifier_final.keras (33.23 MB)
-   - Full Keras model (backup)
-   - NOT needed for Android deployment
+6. note_classifier_final.keras
+   - Full Keras checkpoint (optional backup)
+   - NOT needed in Android app
 
-MODEL PERFORMANCE:
+MODEL CHARACTERISTICS:
 ================================================================================
-Validation Accuracy: 96.33%
-Test Accuracy: 85.7% (12/14 correct)
-Categories: 14 total
+- Categories: 15 total
+- Max tokens: 12,000
+- Sequence length: 120
+- Quantization: Optimize.DEFAULT + representative dataset
+- Pipeline version: v2
 
 IMPORTANT: ANDROID GRADLE DEPENDENCIES
 ================================================================================
-This model requires SELECT_TF_OPS support. Add to build.gradle:
+Add to app/build.gradle:
 
 dependencies {
-    // Standard TFLite runtime
     implementation 'org.tensorflow:tensorflow-lite:2.16.1'
-    
-    // ⭐ REQUIRED: SELECT TF OPS for text processing
-    implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1'
 }
 
-WARNING: Adding SELECT_TF_OPS increases APK size by ~9MB
+(Unlike v1, tensorflow-lite-select-tf-ops is not required.)
 
-ALTERNATIVE (if file size is a concern):
-- Use custom preprocessing in Android (remove TextVectorization from model)
-- Retrain model without TextVectorization layer
-- Pre-tokenize text in Android before passing to model
-
-CATEGORIES (14 total):
+TRAINING + EXPORT COMMAND (from repository root)
 ================================================================================
- 1. FOOD_RECIPE
- 2. PERSONAL_DAILY_LIFE
- 3. FINANCE_LEGAL
- 4. SELF_IMPROVEMENT
- 5. HEALTH_WELLNESS
- 6. EDUCATION_LEARNING
- 7. HOME_FAMILY
- 8. WORK_PROJECT
- 9. MEETING_RECAP
-10. SHOPPING_LIST
-11. REMINDER
-12. TRAVEL_LOG
-13. CREATIVE_WRITING
-14. TECHNICAL_REFERENCE
+python3 app/src/main/assets/scripts/complete_pipeline.py
+
+If running Gradle during development, use:
+./gradlew <task> --console=plain
+
+ANDROID INFERENCE OVERVIEW
+================================================================================
+1. Normalize note text to lowercase and strip punctuation to match training standardization.
+2. Tokenize by whitespace.
+3. Map each token using tokenizer_vocabulary_v2.txt.
+   - 0 is padding/unknown fallback.
+4. Truncate/pad token list to exactly 120 ints.
+5. Run Interpreter on input shape [1, 120].
+6. Choose argmax index and map via category_mapping.json.
 
 FILES TO COPY TO ANDROID:
 ================================================================================
-1. note_classifier.tflite → app/src/main/assets/note_classifier.tflite
-2. category_mapping.json → app/src/main/assets/category_mapping.json
-3. deployment_metadata.json → app/src/main/assets/deployment_metadata.json (optional)
+1. note_classifier.tflite -> app/src/main/assets/note_classifier.tflite
+2. tokenizer_vocabulary_v2.txt -> app/src/main/assets/tokenizer_vocabulary_v2.txt
+3. category_mapping.json -> app/src/main/assets/category_mapping.json
+4. deployment_metadata.json -> app/src/main/assets/deployment_metadata.json (optional)
 
 NEXT STEPS:
 ================================================================================
-1. ✅ All files generated successfully
-2. [ ] Copy 3 files to Android project assets folder
-3. [ ] Update build.gradle with dependencies
-4. [ ] Implement Kotlin code (see DEPLOYMENT_README.md)
-5. [ ] Test on Android device
+1. [ ] Train/export with complete_pipeline.py
+2. [ ] Copy generated assets into Android project
+3. [ ] Implement Kotlin tokenization parity with exported vocabulary
+4. [ ] Validate predictions on a held-out note set
+5. [ ] Compare v1 vs v2 metrics and on-device latency
 
-Generated by: complete_pipeline.py
-Training Time: ~2 minutes
-Model Format: LiteRT (TensorFlow Lite) with SELECT_TF_OPS
+Generated by: complete_pipeline.py (v2)
+Model Format: LiteRT (TensorFlow Lite, builtins-only path)
