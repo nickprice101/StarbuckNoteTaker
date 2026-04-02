@@ -639,6 +639,7 @@ fun SketchPadDialog(
                             DropdownMenu(
                                 expanded = showEraserOptions,
                                 onDismissRequest = { showEraserOptions = false },
+                                modifier = Modifier.width(280.dp),
                             ) {
                                 Column(
                                     modifier = Modifier
