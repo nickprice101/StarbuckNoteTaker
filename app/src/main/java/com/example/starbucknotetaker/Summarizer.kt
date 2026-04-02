@@ -70,17 +70,22 @@ class Summarizer(
             lastDebugTrace.set(emptyList())
             return@withContext ""
         }
+        val preparedInput = normalizeForModelInput(trimmed)
+        if (preparedInput.isEmpty()) {
+            lastDebugTrace.set(emptyList())
+            return@withContext ""
+        }
 
         val trace = mutableListOf<String>()
         debugTrace.set(trace)
 
         try {
-            emitDebug("summarizing text of length ${trimmed.length}")
+            emitDebug("summarizing text of length ${preparedInput.length}")
             loadModelIfNeeded()
             val interpreter = interpreter
             val categories = categories
             if (interpreter == null || categories.isEmpty()) {
-                return@withContext fallbackFromSummarize("model unavailable", trimmed)
+                return@withContext fallbackFromSummarize("model unavailable", preparedInput)
             }
 
             val output = Array(1) { FloatArray(categories.size) }
@@ -94,25 +99,59 @@ class Summarizer(
             // Supplying the correctly nested array keeps the batch dimension
             // intact and allows the summariser to run against the bundled
             // `note_classifier.tflite` model.
-            val input = arrayOf(arrayOf(trimmed))
+            val input = arrayOf(arrayOf(preparedInput))
             interpreter.run(input, output)
             val scores = output[0]
             val predictedIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
-            val predictedCategory = categories.getOrNull(predictedIndex) ?: categories.first()
+            val modelCategory = categories.getOrNull(predictedIndex) ?: categories.first()
+            val confidence = scores.getOrElse(predictedIndex) { 0f }
+            val secondBest = scores.indices
+                .filterNot { it == predictedIndex }
+                .maxByOrNull { scores[it] }
+                ?.let { scores[it] }
+                ?: 0f
+            val confidenceGap = confidence - secondBest
+            val heuristicCategory = detectHeuristicCategory(preparedInput)
+            val predictedCategory = when {
+                heuristicCategory == null -> modelCategory
+                modelCategory == heuristicCategory -> modelCategory
+                confidence < MODEL_CONFIDENCE_MIN || confidenceGap < MODEL_CONFIDENCE_GAP_MIN -> heuristicCategory
+                else -> modelCategory
+            }
             emitDebug(
-                "predicted category=$predictedCategory score=${String.format(Locale.US, "%.3f", scores[predictedIndex])}"
+                "predicted category=$predictedCategory model=$modelCategory score=${String.format(Locale.US, "%.3f", confidence)} gap=${String.format(Locale.US, "%.3f", confidenceGap)} heuristic=${heuristicCategory ?: "none"}"
             )
 
-            val summary = generateEnhancedSummary(trimmed, predictedCategory)
+            val summary = generateEnhancedSummary(preparedInput, predictedCategory)
             emitDebug("generated enhanced summary: $summary")
             _state.emit(SummarizerState.Ready)
             summary
         } catch (t: Throwable) {
             logger("summarizer inference failed", t)
-            fallbackFromSummarize(t.message ?: "inference failure", trimmed)
+            fallbackFromSummarize(t.message ?: "inference failure", preparedInput)
         } finally {
             lastDebugTrace.set(debugTrace.get()?.toList() ?: emptyList())
             debugTrace.set(null)
+        }
+    }
+
+    private fun detectHeuristicCategory(text: String): String? {
+        val lower = text.lowercase(Locale.US)
+        val hasChecklistBullets = text.lineSequence()
+            .map { it.trimStart() }
+            .count { CHECKLIST_BULLET_LINE_REGEX.containsMatchIn(it) } >= 2
+
+        return when {
+            SHOPPING_KEYWORD_REGEX.containsMatchIn(lower) -> "SHOPPING_LIST"
+            CHECKLIST_KEYWORD_REGEX.containsMatchIn(lower) || hasChecklistBullets -> "GENERAL_CHECKLIST"
+            REMINDER_KEYWORD_REGEX.containsMatchIn(lower) -> "REMINDER"
+            RECIPE_KEYWORD_REGEX.containsMatchIn(lower) -> "FOOD_RECIPE"
+            MEETING_KEYWORD_REGEX.containsMatchIn(lower) -> "MEETING_RECAP"
+            TRAVEL_KEYWORD_REGEX.containsMatchIn(lower) -> "TRAVEL_LOG"
+            TECHNICAL_KEYWORD_REGEX.containsMatchIn(lower) -> "TECHNICAL_REFERENCE"
+            FINANCE_KEYWORD_REGEX.containsMatchIn(lower) -> "FINANCE_LEGAL"
+            HEALTH_KEYWORD_REGEX.containsMatchIn(lower) -> "HEALTH_WELLNESS"
+            else -> null
         }
     }
 
@@ -484,16 +523,53 @@ class Summarizer(
         private const val FALLBACK_CHAR_LIMIT = 150
         private const val FALLBACK_FIRST_LINE_TARGET = FALLBACK_CHAR_LIMIT / 2
         private val WHITESPACE_REGEX = Regex("\\s+")
+        private val TITLE_PREFIX_REGEX = Regex("^\\s*Title:\\s*", RegexOption.IGNORE_CASE)
         private val SHOPPING_SPLIT_REGEX = Regex(",| and ", RegexOption.IGNORE_CASE)
+        private val SHOPPING_KEYWORD_REGEX = Regex("\\b(grocery|groceries|shopping list|buy|cartons|jars|milk|bread|eggs)\\b")
         private val CHECKLIST_SPLIT_REGEX = Regex(",|;|\\band\\b|\\n", RegexOption.IGNORE_CASE)
+        private val CHECKLIST_KEYWORD_REGEX = Regex("\\b(checklist|todo|to-do|tasks?)\\b")
         private val CHECKLIST_BULLET_CLEANER = Regex("^[\\-•▪●■∎*]+\\s*")
+        private val CHECKLIST_BULLET_LINE_REGEX = Regex("^[\\-•▪●■∎*]\\s+")
         private val CHECKLIST_LABEL_STRIP_REGEX = Regex("\\b(checklist|list|tasks)\\b", RegexOption.IGNORE_CASE)
         private val SUBJECT_REGEX = Regex("\\b[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\\b")
         private val CURRENCY_REGEX = Regex("\\$[\\d,]+(?:\\.\\d{2})?")
+        private val FINANCE_KEYWORD_REGEX = Regex("\\b(budget|invoice|expense|deposit|tax|irs|payment|bank)\\b")
         private val HEALTH_METRIC_REGEX = Regex("\\d+(?:\\.\\d+)?\\s*(?:miles|minutes|hours|lbs|kg|calories)")
+        private val HEALTH_KEYWORD_REGEX = Regex("\\b(workout|exercise|run|jog|steps|calories|wellness|gym)\\b")
+        private val REMINDER_KEYWORD_REGEX = Regex("\\b(reminder|remember|tomorrow|by friday|call|schedule)\\b")
+        private val RECIPE_KEYWORD_REGEX = Regex("\\b(recipe|ingredients|boil|bake|simmer|tbsp|cups?)\\b")
+        private val MEETING_KEYWORD_REGEX = Regex("\\b(meeting|recap|standup|action items|agenda|follow-up)\\b")
+        private val TRAVEL_KEYWORD_REGEX = Regex("\\b(trip|travel|flight|hotel|itinerary|vacation|journey)\\b")
+        private val TECHNICAL_KEYWORD_REGEX = Regex("\\b(command|syntax|api|script|procedure|sop|debug|rebase|terminal)\\b")
         private val REMINDER_BREAKS = listOf(",", " and ", "; ")
         private val SHOPPING_STOP_WORDS = setOf("need", "get", "buy", "pick", "for", "the", "a", "an")
         private val TRAVEL_SUBJECT_EXCLUSIONS = setOf("Woke", "Packed", "Noted", "Explored", "Visited")
+        private const val MODEL_CONFIDENCE_MIN = 0.45f
+        private const val MODEL_CONFIDENCE_GAP_MIN = 0.15f
+
+        internal fun normalizeForModelInput(text: String): String {
+            val trimmed = text.trim()
+            if (trimmed.isEmpty()) return ""
+
+            val separatorIndex = trimmed.indexOf("\n\n")
+            if (separatorIndex >= 0) {
+                val header = trimmed.substring(0, separatorIndex).trim()
+                val body = trimmed.substring(separatorIndex + 2).trim()
+                if (header.startsWith("Title:", ignoreCase = true) && body.isNotEmpty()) {
+                    val title = TITLE_PREFIX_REGEX.replace(header, "").trim()
+                    if (title.isNotEmpty()) {
+                        return "$title: ${body.replace(WHITESPACE_REGEX, " ")}".trim()
+                    }
+                    return body.replace(WHITESPACE_REGEX, " ").trim()
+                }
+            }
+
+            if (trimmed.startsWith("Title:", ignoreCase = true)) {
+                return TITLE_PREFIX_REGEX.replace(trimmed, "").replace(WHITESPACE_REGEX, " ").trim()
+            }
+
+            return trimmed.replace(WHITESPACE_REGEX, " ").trim()
+        }
 
         internal fun lightweightPreview(text: String): String {
             val normalized = text.trim().replace(WHITESPACE_REGEX, " ")

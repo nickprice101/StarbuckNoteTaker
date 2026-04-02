@@ -44,6 +44,7 @@ class SummarizerModelRobolectricTest {
                 interpreter = RecordingInterpreter(
                     predictedIndex = predictedIndex,
                     score = 0.92f,
+                    baselineScore = 0.01f,
                     categories = categories,
                 )
                 interpreter
@@ -69,13 +70,45 @@ class SummarizerModelRobolectricTest {
         assertTrue("Enhanced summary should mention pasta", summary.contains("pasta", ignoreCase = true))
     }
 
+    @Test
+    fun summarizerNormalizesTitlePrefixedSourceBeforeInference() = runTest {
+        val mappingJson = appContext.assets.open("category_mapping.json").bufferedReader().use { it.readText() }
+        val categories = JSONObject(mappingJson).getJSONArray("categories")
+            .let { array -> List(array.length()) { array.getString(it) } }
+        val predictedIndex = categories.indexOf(categories.first())
+
+        val summarizer = Summarizer(
+            context = appContext,
+            interpreterFactory = { buffer ->
+                loadedModelBuffer = buffer
+                interpreter = RecordingInterpreter(
+                    predictedIndex = predictedIndex,
+                    score = 0.92f,
+                    baselineScore = 0.01f,
+                    categories = categories,
+                )
+                interpreter
+            },
+            assetLoader = { ctx, name -> ctx.assets.open(name) },
+            logger = { message, throwable -> throw AssertionError("Summarizer error: $message", throwable) },
+            debugSink = { }
+        )
+
+        summarizer.summarize("Title: Travel prep\n\nBook hotel and check train schedule")
+
+        assertEquals("Travel prep: Book hotel and check train schedule", interpreter.receivedInputText)
+    }
+
     private class RecordingInterpreter(
         private val predictedIndex: Int,
         private val score: Float,
+        private val baselineScore: Float,
         private val categories: List<String>,
     ) : LiteInterpreter {
 
         var received2dStringInput: Boolean = false
+            private set
+        var receivedInputText: String? = null
             private set
         var lastPredictedCategory: String? = null
         override val inputTensorCount: Int
@@ -93,9 +126,10 @@ class SummarizerModelRobolectricTest {
             @Suppress("UNCHECKED_CAST")
             val strings = input as? Array<Array<String>>
             received2dStringInput = strings?.size == 1 && strings[0].size == 1
+            receivedInputText = strings?.getOrNull(0)?.getOrNull(0)
             val scores = output as Array<FloatArray>
             for (i in scores[0].indices) {
-                scores[0][i] = if (i == predictedIndex) score else 0.01f
+                scores[0][i] = if (i == predictedIndex) score else baselineScore
             }
             lastPredictedCategory = categories.getOrNull(predictedIndex)
         }

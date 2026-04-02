@@ -42,4 +42,22 @@ class SummarizerFallbackTest {
         assertFalse(preview.startsWith(" "))
         assertEquals("Quick reminder about dentist appointment tomorrow morning.", preview)
     }
+
+    @Test
+    fun normalizeForModelInputFlattensTitleAndBody() {
+        val input = "Title: Weekend groceries\n\nBuy oat milk, spinach, and eggs"
+
+        val normalized = Summarizer.normalizeForModelInput(input)
+
+        assertEquals("Weekend groceries: Buy oat milk, spinach, and eggs", normalized)
+    }
+
+    @Test
+    fun normalizeForModelInputRemovesTitlePrefixWhenBodyMissing() {
+        val input = "Title: Machine maintenance SOP"
+
+        val normalized = Summarizer.normalizeForModelInput(input)
+
+        assertEquals("Machine maintenance SOP", normalized)
+    }
 }
