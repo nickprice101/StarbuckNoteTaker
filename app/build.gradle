@@ -183,16 +183,8 @@ packaging {
         }
         jniLibs {
             useLegacyPackaging true
-            // The TensorFlow Lite runtime, select TF ops, and flex delegate AARs
-            // all package identically named native libraries.  When Gradle merges
-            // the JNI folders without explicit guidance it surfaces duplicate file
-            // errors for libtensorflowlite_jni.so / libtensorflowlite_flex_jni.so on
-            // select build variants.  Prefer the copies that ship with the runtime
-            // dependency to avoid the merge failure that triggered the earlier
-            // rollback to 2.16.1.
+            // Keep deterministic JNI merging for TensorFlow Lite runtime binaries.
             pickFirst '**/libtensorflowlite_jni.so'
-            pickFirst '**/libtensorflowlite_flex_jni.so'
-            pickFirst '**/libtensorflowlite_select_tf_ops.so'
         }
     }
 
@@ -249,7 +241,7 @@ tasks.matching { it.name == "preBuild" }.configureEach {
 configurations.all { configuration ->
     configuration.resolutionStrategy.eachDependency { DependencyResolveDetails details ->
         if (details.requested.group == 'org.tensorflow' &&
-                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
+                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api']) {
             details.useVersion('2.16.1')
             details.because('Keep TensorFlow Lite artifacts aligned so builtin ops remain available and match the bundled model')
         }
@@ -280,10 +272,6 @@ dependencies {
     }
     implementation("org.tensorflow:tensorflow-lite-task-text:0.4.4") {
         exclude group: "org.tensorflow", module: "tensorflow-lite-support-api"
-        exclude group: "org.tensorflow", module: "tensorflow-lite-api"
-    }
-    implementation('org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1') {
-        exclude group: "org.tensorflow", module: "tensorflow-lite"
         exclude group: "org.tensorflow", module: "tensorflow-lite-api"
     }
     // Provide the TensorFlow Lite Java API at runtime so InterpreterImpl$Option is available.
@@ -433,7 +421,7 @@ tasks.withType(Test).configureEach { testTask ->
 configurations.configureEach { configuration ->
     configuration.resolutionStrategy.eachDependency { details ->
         if (details.requested.group == 'org.tensorflow' &&
-                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api', 'tensorflow-lite-select-tf-ops']) {
+                details.requested.name in ['tensorflow-lite', 'tensorflow-lite-api']) {
             details.useVersion '2.16.1'
         }
     }

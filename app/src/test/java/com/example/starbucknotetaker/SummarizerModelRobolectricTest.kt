@@ -26,7 +26,7 @@ class SummarizerModelRobolectricTest {
     }
 
     @Test
-    fun summarizerFeedsInterpreterWith2dStringInputAndGeneratesEnhancedSummary() = runTest {
+    fun summarizerFeedsInterpreterWithInt32SequenceInputAndGeneratesEnhancedSummary() = runTest {
         val mappingJson = appContext.assets.open("category_mapping.json").bufferedReader().use { it.readText() }
         val categories = JSONObject(mappingJson).getJSONArray("categories")
             .let { array -> List(array.length()) { array.getString(it) } }
@@ -49,7 +49,13 @@ class SummarizerModelRobolectricTest {
                 )
                 interpreter
             },
-            assetLoader = { ctx, name -> ctx.assets.open(name) },
+            assetLoader = { _, name ->
+                when (name) {
+                    Summarizer.TOKENIZER_VOCAB_ASSET_NAME ->
+                        "[PAD]\n[UNK]\nhomemade\npasta\nrecipe\nmix\ncups\nflour\nwith\neggs\nuntil\ndough\nforms\nknead\nfor\nminutes\nsmooth\nand\nelastic\nroll\nthin\nmachine\ncut\ninto\nfettuccine\nstrips\nboil\nin\nsalted\nwater".byteInputStream()
+                    else -> appContext.assets.open(name)
+                }
+            },
             logger = { message, throwable -> throw AssertionError("Summarizer error: $message", throwable) },
             debugSink = { }
         )
@@ -65,7 +71,7 @@ class SummarizerModelRobolectricTest {
             "Loaded model buffer should expose data",
             loadedModelBuffer.capacity() > 0
         )
-        assertTrue("Interpreter should receive a nested [batch, 1] string input", interpreter.received2dStringInput)
+        assertTrue("Interpreter should receive [1,120] int32 input", interpreter.receivedIntSequenceInput)
         assertEquals(expectedCategory, predictedCategory)
         assertTrue("Enhanced summary should mention pasta", summary.contains("pasta", ignoreCase = true))
     }
@@ -89,14 +95,21 @@ class SummarizerModelRobolectricTest {
                 )
                 interpreter
             },
-            assetLoader = { ctx, name -> ctx.assets.open(name) },
+            assetLoader = { _, name ->
+                when (name) {
+                    Summarizer.TOKENIZER_VOCAB_ASSET_NAME ->
+                        "[PAD]\n[UNK]\ntravel\nprep\nbook\nhotel\nand\ncheck\ntrain\nschedule".byteInputStream()
+                    else -> appContext.assets.open(name)
+                }
+            },
             logger = { message, throwable -> throw AssertionError("Summarizer error: $message", throwable) },
             debugSink = { }
         )
 
         summarizer.summarize("Title: Travel prep\n\nBook hotel and check train schedule")
 
-        assertEquals("Travel prep: Book hotel and check train schedule", interpreter.receivedInputText)
+        assertEquals(2, interpreter.receivedInputTokenIds.getOrNull(0))
+        assertEquals(3, interpreter.receivedInputTokenIds.getOrNull(1))
     }
 
     private class RecordingInterpreter(
@@ -106,9 +119,9 @@ class SummarizerModelRobolectricTest {
         private val categories: List<String>,
     ) : LiteInterpreter {
 
-        var received2dStringInput: Boolean = false
+        var receivedIntSequenceInput: Boolean = false
             private set
-        var receivedInputText: String? = null
+        var receivedInputTokenIds: IntArray = intArrayOf()
             private set
         var lastPredictedCategory: String? = null
         override val inputTensorCount: Int
@@ -123,10 +136,9 @@ class SummarizerModelRobolectricTest {
         }
 
         override fun run(input: Any, output: Any) {
-            @Suppress("UNCHECKED_CAST")
-            val strings = input as? Array<Array<String>>
-            received2dStringInput = strings?.size == 1 && strings[0].size == 1
-            receivedInputText = strings?.getOrNull(0)?.getOrNull(0)
+            val ids = (input as? Array<IntArray>)?.getOrNull(0)
+            receivedIntSequenceInput = ids?.size == 120
+            receivedInputTokenIds = ids ?: intArrayOf()
             val scores = output as Array<FloatArray>
             for (i in scores[0].indices) {
                 scores[0][i] = if (i == predictedIndex) score else baselineScore
