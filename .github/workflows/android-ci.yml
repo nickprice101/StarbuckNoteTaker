@@ -105,12 +105,26 @@ jobs:
           VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
           APK_NAME="StarbuckNoteTaker-${VERSION_NAME}.apk"
           SOURCE_APK="build-out/${APK_NAME}"
+          DEST_DIR="${{ secrets.SSH_PATH }}"
+          DEST_FILE="${DEST_DIR}/${APK_NAME}"
 
           ssh -i ~/.ssh/id_rsa "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}" \
-            "mkdir -p '${{ secrets.SSH_PATH }}'"
+            "mkdir -p \"${DEST_DIR}\""
 
           scp -i ~/.ssh/id_rsa "${SOURCE_APK}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}:${{ secrets.SSH_PATH }}/${APK_NAME}"
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}:${DEST_FILE}"
+
+      - name: Verify APK on Unraid
+        run: |
+          set -euo pipefail
+          VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+          APK_NAME="StarbuckNoteTaker-${VERSION_NAME}.apk"
+          DEST_DIR="${{ secrets.SSH_PATH }}"
+          DEST_FILE="${DEST_DIR}/${APK_NAME}"
+
+          echo "Verifying uploaded file exists on server..."
+          ssh -i ~/.ssh/id_rsa "${{ secrets.SSH_USER }}@${{ secrets.SSH_IP }}" \
+            "ls -lh \"${DEST_FILE}\" && echo 'Upload verified successfully.'"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
