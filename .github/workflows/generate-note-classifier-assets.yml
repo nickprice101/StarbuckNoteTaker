@@ -31,10 +31,42 @@ jobs:
 
       - name: Copy generated assets into Android app assets
         run: |
-          cp app/src/main/assets/scripts/note_classifier.tflite app/src/main/assets/note_classifier.tflite
-          cp app/src/main/assets/scripts/tokenizer_vocabulary_v2.txt app/src/main/assets/tokenizer_vocabulary_v2.txt
-          cp app/src/main/assets/scripts/category_mapping.json app/src/main/assets/category_mapping.json
-          cp app/src/main/assets/scripts/deployment_metadata.json app/src/main/assets/deployment_metadata.json
+          set -euo pipefail
+
+          SCRIPTS_DIR="app/src/main/assets/scripts"
+          ASSETS_DIR="app/src/main/assets"
+          mkdir -p "$ASSETS_DIR"
+
+          install -m 0644 "${SCRIPTS_DIR}/note_classifier.tflite" "${ASSETS_DIR}/note_classifier.tflite"
+          install -m 0644 "${SCRIPTS_DIR}/tokenizer_vocabulary_v2.txt" "${ASSETS_DIR}/tokenizer_vocabulary_v2.txt"
+          install -m 0644 "${SCRIPTS_DIR}/category_mapping.json" "${ASSETS_DIR}/category_mapping.json"
+          install -m 0644 "${SCRIPTS_DIR}/deployment_metadata.json" "${ASSETS_DIR}/deployment_metadata.json"
+
+      - name: Verify generated assets are present in app assets
+        run: |
+          set -euo pipefail
+
+          ASSETS_DIR="app/src/main/assets"
+          REQUIRED_FILES=(
+            "note_classifier.tflite"
+            "tokenizer_vocabulary_v2.txt"
+            "category_mapping.json"
+            "deployment_metadata.json"
+          )
+
+          missing=()
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -s "${ASSETS_DIR}/${file}" ]; then
+              missing+=("${file}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing generated assets in app/src/main/assets: ${missing[*]}"
+            exit 1
+          fi
+
+          echo "All generated classifier assets are present."
 
       - name: Upload generated assets
         uses: actions/upload-artifact@v4
