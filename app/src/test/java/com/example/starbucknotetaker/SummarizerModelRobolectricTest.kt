@@ -112,6 +112,50 @@ class SummarizerModelRobolectricTest {
         assertEquals(3, interpreter.receivedInputTokenIds.getOrNull(1))
     }
 
+
+    @Test
+    fun warmUpRefreshesCachedModelAssetBeforeCreatingInterpreter() = runTest {
+        val modelsDir = java.io.File(appContext.filesDir, Summarizer.MODELS_DIR_NAME).apply { mkdirs() }
+        val cachedModel = java.io.File(modelsDir, Summarizer.MODEL_ASSET_NAME)
+        cachedModel.writeBytes(byteArrayOf(7, 7, 7, 7))
+
+        val expectedModelBytes = byteArrayOf(1, 2, 3, 4, 5, 6)
+        val mappingJson = """{"categories":["REMINDER"]}"""
+        val vocab = "[PAD]\n[UNK]\nreminder"
+
+        var observedBytes = byteArrayOf()
+        val summarizer = Summarizer(
+            context = appContext,
+            interpreterFactory = { mappedBuffer ->
+                val duplicate = mappedBuffer.duplicate()
+                val bytes = ByteArray(duplicate.remaining())
+                duplicate.get(bytes)
+                observedBytes = bytes
+                RecordingInterpreter(
+                    predictedIndex = 0,
+                    score = 0.95f,
+                    baselineScore = 0.01f,
+                    categories = listOf("REMINDER"),
+                )
+            },
+            assetLoader = { _, name ->
+                when (name) {
+                    Summarizer.MODEL_ASSET_NAME -> expectedModelBytes.inputStream()
+                    Summarizer.CATEGORY_MAPPING_ASSET_NAME -> mappingJson.byteInputStream()
+                    Summarizer.TOKENIZER_VOCAB_ASSET_NAME -> vocab.byteInputStream()
+                    else -> error("Unexpected asset requested: $name")
+                }
+            },
+            logger = { message, throwable -> throw AssertionError("Summarizer error: $message", throwable) },
+            debugSink = { }
+        )
+
+        summarizer.warmUp()
+
+        assertTrue("Cached model should be overwritten with the bundled asset", cachedModel.readBytes().contentEquals(expectedModelBytes))
+        assertTrue("Interpreter should receive refreshed model bytes", observedBytes.contentEquals(expectedModelBytes))
+    }
+
     private class RecordingInterpreter(
         private val predictedIndex: Int,
         private val score: Float,

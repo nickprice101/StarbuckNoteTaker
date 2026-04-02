@@ -258,11 +258,14 @@ class Summarizer(
 
     private fun ensureAsset(modelsDir: File, assetName: String): File {
         val target = File(modelsDir, assetName)
-        if (target.exists() && target.length() > 0) return target
+        val previousLength = target.takeIf { it.exists() }?.length() ?: 0L
         assetLoader(context, assetName).use { input ->
-            FileOutputStream(target).use { output ->
+            FileOutputStream(target, false).use { output ->
                 input.copyTo(output)
             }
+        }
+        if (previousLength > 0L && previousLength != target.length()) {
+            emitDebug("refreshed cached asset $assetName (oldBytes=$previousLength newBytes=${target.length()})")
         }
         return target
     }
