@@ -1,4 +1,4 @@
-name: Android CI (StarbuckNoteTaker)
+name: Build APK and upload to server
 
 on:
   workflow_dispatch:
