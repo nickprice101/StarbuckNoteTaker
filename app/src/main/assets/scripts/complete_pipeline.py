@@ -3,10 +3,16 @@ Complete Note Classifier Training and Deployment
 Trains model, validates with examples, exports to TFLite
 Compatible with TensorFlow 2.16.1
 """
+import importlib.util
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-os.environ['TF_USE_LEGACY_KERAS'] = '1'  # Use tf-keras instead of Keras 3
 os.environ['TF_ENABLE_EAGER_CLIENT_STREAMING_ENQUEUE'] = 'False'
+
+# Use legacy tf.keras only when tf_keras is available.
+if importlib.util.find_spec('tf_keras') is not None:
+    os.environ['TF_USE_LEGACY_KERAS'] = '1'
+else:
+    os.environ.pop('TF_USE_LEGACY_KERAS', None)
 
 import random
 import shutil
