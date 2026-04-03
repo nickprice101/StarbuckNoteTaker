@@ -1,43 +1,39 @@
-# Note Classifier - Deployment Package (V2)
+# Note Classifier Deployment Package (Current)
 
-## Performance
-- Validation Accuracy: generated at training time
-- Test Accuracy: generated at training time
-- Model Size: generated at training time
+This document describes the model artifacts currently integrated into the Android app.
 
-## Files
-1. `note_classifier.tflite` - TFLite model that accepts token ID input (`int32[1,120]`).
-2. `tokenizer_vocabulary_v2.txt` - Required vocabulary for Android tokenization parity.
-3. `category_mapping.json` - Category names and output index mapping.
-4. `deployment_metadata.json` - Metrics + pipeline metadata (recommended).
-5. `note_classifier_final.keras` - Optional backup checkpoint (not bundled in APK).
+## Runtime expectations
 
-## Android Integration (Kotlin)
+- Model is loaded from app assets and executed on-device via TensorFlow Lite.
+- The app expects integer-token input and category-probability output.
+- Build-time verification enforces compatibility constraints (including operator version checks).
 
-```kotlin
-val interpreter = Interpreter(loadModelFile("note_classifier.tflite"))
-val tokenIds: IntArray = tokenizeToIds(noteText, vocabulary, sequenceLength = 120)
-val input: Array<IntArray> = arrayOf(tokenIds)
-val output = Array(1) { FloatArray(15) }
-interpreter.run(input, output)
-val categoryIndex = output[0].indices.maxByOrNull { output[0][it] } ?: 0
-val category = categories[categoryIndex]
+## Artifact list
+
+1. `note_classifier.tflite` - required runtime model.
+2. `tokenizer_vocabulary_v2.txt` - required tokenizer vocabulary.
+3. `category_mapping.json` - required class index mapping.
+4. `deployment_metadata.json` - required deployment metadata.
+5. `note_classifier_final.keras` - optional training checkpoint; not required in APK.
+
+## Compatibility checks
+
+The Android Gradle build invokes:
+
+```bash
+./gradlew verifyNoteClassifierModel --console=plain
 ```
 
-## Tokenization parity requirements
-- lowercase input text
-- strip punctuation
-- split by whitespace
-- map tokens using `tokenizer_vocabulary_v2.txt`
-- unknown/padding -> `0`
-- truncate or right-pad to exactly 120 tokens
+The verifier script checks for:
+- valid TFLite flatbuffer,
+- FULLY_CONNECTED operator compatibility,
+- category mapping sanity,
+- optional inference smoke test when local TensorFlow/NumPy runtime is available.
 
-## Regenerate model
+## Regeneration flow
+
 ```bash
 python3 app/src/main/assets/scripts/complete_pipeline.py
 ```
 
-If running Gradle while validating Android integration, use plain console output:
-```bash
-./gradlew <task> --console=plain
-```
+After retraining, copy updated artifacts into `app/src/main/assets/` and rerun verification.
