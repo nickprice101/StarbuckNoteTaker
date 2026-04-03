@@ -6,6 +6,10 @@ Contains the following files:
 * The actual TensorFlow Lite model
 * This is what the Android app loads
 
+### tokenizer_vocabulary_v2.txt
+* Vocabulary exported from the training TextVectorization layer
+* Used by Android-side tokenization when the model expects integer token IDs
+
 ### category_mapping.json  
 * Maps model output indices to category names
 * The app needs this to interpret predictions

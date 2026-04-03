@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -156,16 +157,51 @@ class SummarizerModelRobolectricTest {
         assertTrue("Interpreter should receive refreshed model bytes", observedBytes.contentEquals(expectedModelBytes))
     }
 
+    @Test
+    fun summarizerRetriesInferenceWithStringInputWhenModelRejectsIntTokens() = runTest {
+        val summarizer = Summarizer(
+            context = appContext,
+            interpreterFactory = {
+                RecordingInterpreter(
+                    predictedIndex = 0,
+                    score = 0.93f,
+                    baselineScore = 0.01f,
+                    categories = listOf("REMINDER"),
+                    rejectIntInput = true,
+                ).also { interpreter = it }
+            },
+            assetLoader = { _, name ->
+                when (name) {
+                    Summarizer.MODEL_ASSET_NAME -> byteArrayOf(1, 2, 3).inputStream()
+                    Summarizer.CATEGORY_MAPPING_ASSET_NAME -> """{"categories":["REMINDER"]}""".byteInputStream()
+                    Summarizer.TOKENIZER_VOCAB_ASSET_NAME -> "[PAD]\n[UNK]\nreminder".byteInputStream()
+                    else -> error("Unexpected asset requested: $name")
+                }
+            },
+            logger = { message, throwable -> throw AssertionError("Summarizer error: $message", throwable) },
+            debugSink = { }
+        )
+
+        val summary = summarizer.summarize("Reminder: call dentist tomorrow")
+
+        assertTrue("Interpreter should receive fallback string input", interpreter.receivedStringInput)
+        assertFalse("Int sequence should be rejected first for this model", interpreter.receivedIntSequenceInput)
+        assertTrue("Summary should still be produced after retry", summary.contains("Reminder", ignoreCase = true))
+    }
+
     private class RecordingInterpreter(
         private val predictedIndex: Int,
         private val score: Float,
         private val baselineScore: Float,
         private val categories: List<String>,
+        private val rejectIntInput: Boolean = false,
     ) : LiteInterpreter {
 
         var receivedIntSequenceInput: Boolean = false
             private set
         var receivedInputTokenIds: IntArray = intArrayOf()
+            private set
+        var receivedStringInput: Boolean = false
             private set
         var lastPredictedCategory: String? = null
         override val inputTensorCount: Int
@@ -180,9 +216,16 @@ class SummarizerModelRobolectricTest {
         }
 
         override fun run(input: Any, output: Any) {
+            if (rejectIntInput && input is Array<*> && input.firstOrNull() is IntArray) {
+                throw IllegalArgumentException(
+                    "Cannot convert between a TensorFlowLite tensor with type STRING and a Java object of type [[I (which is compatible with the TensorFlowLite type INT32)."
+                )
+            }
             val ids = (input as? Array<IntArray>)?.getOrNull(0)
             receivedIntSequenceInput = ids?.size == 120
             receivedInputTokenIds = ids ?: intArrayOf()
+            val stringInput = (input as? Array<String>)?.getOrNull(0)
+            receivedStringInput = !stringInput.isNullOrBlank()
             val scores = output as Array<FloatArray>
             for (i in scores[0].indices) {
                 scores[0][i] = if (i == predictedIndex) score else baselineScore

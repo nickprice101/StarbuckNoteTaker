@@ -209,9 +209,11 @@ tasks.register("verifyNoteClassifierModel") {
     notCompatibleWithConfigurationCache("Invokes a Python helper outside of Gradle's configuration cache semantics.")
 
     def modelFile = project.layout.projectDirectory.file("src/main/assets/note_classifier.tflite")
+    def tokenizerFile = project.layout.projectDirectory.file("src/main/assets/tokenizer_vocabulary_v2.txt")
     def scriptFile = project.rootProject.layout.projectDirectory.file("app/src/main/assets/scripts/verify_note_classifier_model.py")
 
     inputs.file(modelFile)
+    inputs.file(tokenizerFile)
     inputs.file(scriptFile)
     outputs.upToDateWhen { false }
 
@@ -219,12 +221,16 @@ tasks.register("verifyNoteClassifierModel") {
         def pythonExecutable = System.getenv("PYTHON") ?: "python3"
         File verifier = scriptFile.asFile
         File bundledModel = modelFile.asFile
+        File bundledTokenizer = tokenizerFile.asFile
 
         if (!verifier.exists()) {
             throw new GradleException("Unable to find TensorFlow Lite verifier script at ${verifier}")
         }
         if (!bundledModel.exists()) {
             throw new GradleException("Expected bundled model is missing: ${bundledModel}")
+        }
+        if (!bundledTokenizer.exists()) {
+            throw new GradleException("Expected tokenizer vocabulary is missing: ${bundledTokenizer}")
         }
 
         exec { ExecSpec spec ->

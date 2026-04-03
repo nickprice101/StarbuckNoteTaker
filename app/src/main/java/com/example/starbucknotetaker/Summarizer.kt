@@ -90,9 +90,7 @@ class Summarizer(
             }
 
             val output = Array(1) { FloatArray(categories.size) }
-            val tokenizedInput = tokenizeForModelInput(preparedInput, tokenizerVocabulary)
-            val input = arrayOf(tokenizedInput)
-            interpreter.run(input, output)
+            runClassifier(interpreter, preparedInput, tokenizerVocabulary, output)
             val scores = output[0]
             val predictedIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
             val modelCategory = categories.getOrNull(predictedIndex) ?: categories.first()
@@ -282,6 +280,34 @@ class Summarizer(
         RandomAccessFile(file, "r").use { raf ->
             return raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
         }
+    }
+
+    private fun runClassifier(
+        interpreter: LiteInterpreter,
+        preparedInput: String,
+        vocabulary: TokenizerVocabulary,
+        output: Array<FloatArray>,
+    ) {
+        val tokenizedInput = tokenizeForModelInput(preparedInput, vocabulary)
+        val intInput = arrayOf(tokenizedInput)
+        try {
+            interpreter.run(intInput, output)
+            return
+        } catch (error: IllegalArgumentException) {
+            if (!shouldRetryWithStringInput(error)) {
+                throw error
+            }
+            emitDebug("model expects STRING input; retrying classifier inference with raw text")
+        }
+
+        val stringInput = arrayOf(preparedInput)
+        interpreter.run(stringInput, output)
+    }
+
+    private fun shouldRetryWithStringInput(error: IllegalArgumentException): Boolean {
+        val message = error.message ?: return false
+        return message.contains("TensorFlowLite tensor with type STRING", ignoreCase = true) &&
+            message.contains("[[I", ignoreCase = true)
     }
 
     private fun generateEnhancedSummary(noteText: String, rawCategory: String): String {

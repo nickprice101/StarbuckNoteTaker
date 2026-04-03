@@ -38,6 +38,7 @@ For a repeatable developer workstation, `setup_persist.sh` can install the Andro
 The summariser expects the following files inside `app/src/main/assets/`:
 
 - `note_classifier.tflite` – the TensorFlow Lite model that predicts note categories.
+- `tokenizer_vocabulary_v2.txt` – token vocabulary required for Android tokenization parity.
 - `category_mapping.json` – label index mapping used by the interpreter.
 - `deployment_metadata.json` – build metadata (version, accuracy metrics, model size).
 
@@ -47,7 +48,7 @@ To regenerate the classifier:
 
 1. Edit the labelled examples in `app/src/main/assets/scripts/training_data_large.py` if you need additional coverage.
 2. Execute `app/src/main/assets/scripts/complete_pipeline.py` to train the model, export the TFLite file, and print enhanced summary examples for validation.
-3. Copy the generated artifacts (`note_classifier.tflite`, `category_mapping.json`, `deployment_metadata.json`) into `app/src/main/assets/` before building the app.
+3. Copy the generated artifacts (`note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, `deployment_metadata.json`) into `app/src/main/assets/` before building the app.
 
 ## Contributing
 
