@@ -1,55 +1,65 @@
 # Starbuck Note Taker
 
-Starbuck Note Taker is an offline-first Android app for capturing rich, encrypted notes with AI assistance. It is built with Kotlin and Jetpack Compose, stores content locally, and runs its summarisation and classification models entirely on-device.
+Starbuck Note Taker is an Android note-taking app built with Kotlin + Jetpack Compose. It is designed to keep core note functionality available offline while storing note data locally in encrypted form.
 
-## Core features
+## What the current app does
 
-- **Compose-first editing experience.** Create notes with rich text formatting, inline checklists, event metadata, and optional reminders while staying inside a single Compose-powered workflow.
-- **Attachments and link previews.** Add images, upload arbitrary files, and generate cached link previews that stay available offline after the first fetch.
-- **AI summaries and note classification.** Each note is condensed on-device by a TensorFlow Lite classifier (`note_classifier.tflite`) that predicts the intent of the note and produces an enhanced, human-readable summary with graceful fallbacks when the model is unavailable.
-- **End-to-end encryption.** Notes, attachments, and exported archives are encrypted with a user PIN, with optional biometric unlock for convenience.
-- **Import/export without the cloud.** Users can back up or restore their encrypted notes via `.snarchive` files that continue to require the original PIN when imported.
+- Create and edit notes with:
+  - plain text and rich text formatting
+  - checklist notes
+  - optional event metadata (start/end, timezone, location)
+- Attach images and files to notes.
+- Generate note summaries on-device with TensorFlow Lite (`note_classifier.tflite`) and local fallback logic when ML is unavailable.
+- Add URL link previews (metadata fetch requires internet once; cached preview data remains local afterward).
+- Protect notes with PIN-based encryption, with optional biometric unlock support.
+- Schedule event reminders and full-screen alarm flows.
+- Accept shared content from other apps via Android share intents (`SEND`, `SEND_MULTIPLE`).
+- Support in-app audio transcription using Android `SpeechRecognizer` (availability/quality depends on device speech services and permissions).
 
-Link previews fetch metadata over HTTPS; all other functionality continues to operate without a network connection.
+## Security and storage model
+
+- Notes are saved in encrypted local storage (`notes.enc`) using AES/GCM with a key derived from the user PIN.
+- Attachments are stored locally and referenced from note records.
+- Locked notes remain hidden until unlocked with the configured PIN/biometric flow.
+
+## Offline behavior
+
+The app is offline-first for note creation, editing, storage, reminders, and summarization.
+
+Network may still be used for:
+- fetching new link-preview metadata,
+- speech recognition depending on the device’s speech engine configuration.
 
 ## Project structure
 
+```text
+app/
+  src/main/java/...                Android app source
+  src/main/assets/                 Bundled ML assets + deployment docs
+  src/main/assets/scripts/         Offline model training + verification scripts
+scripts/                           Repository helper scripts
 ```
-app/                             # Android application module (Compose UI, ViewModel, services)
-app/src/main/assets/             # Bundled summariser model, metadata, and category mapping
-app/src/main/assets/scripts/     # Offline training pipeline and enhanced summary examples
-scripts/                         # Helper scripts for validating required assets
+
+## Build and test
+
+> During Codex development, run Gradle with `--console=plain`.
+
+```bash
+./gradlew test --console=plain
+./gradlew assembleDebug --console=plain
 ```
 
-## Getting started
+The build runs `verifyNoteClassifierModel` before `preBuild` to validate the bundled model contract.
 
-1. Install Android Studio Giraffe (or newer) and ensure JDK 17 is available.
-2. Clone the repository and accept Android SDK licenses.
-3. Use the Gradle wrapper for builds and tests:
-   ```bash
-   ./gradlew build    # compile the application
-   ./gradlew test     # run unit tests
-   ```
+## ML assets required in `app/src/main/assets/`
 
-For a repeatable developer workstation, `setup_persist.sh` can install the Android SDK, Gradle, and verify that required native libraries and assets are present.
+- `note_classifier.tflite`
+- `tokenizer_vocabulary_v2.txt`
+- `category_mapping.json`
+- `deployment_metadata.json`
 
-## On-device ML assets
+To retrain/regenerate these artifacts, use:
 
-The summariser expects the following files inside `app/src/main/assets/`:
-
-- `note_classifier.tflite` – the TensorFlow Lite model that predicts note categories.
-- `tokenizer_vocabulary_v2.txt` – token vocabulary required for Android tokenization parity.
-- `category_mapping.json` – label index mapping used by the interpreter.
-- `deployment_metadata.json` – build metadata (version, accuracy metrics, model size).
-
-Large binaries remain untracked; run `scripts/generate_summarizer_assets.py` to verify that required assets are present on your workstation.
-
-To regenerate the classifier:
-
-1. Edit the labelled examples in `app/src/main/assets/scripts/training_data_large.py` if you need additional coverage.
-2. Execute `app/src/main/assets/scripts/complete_pipeline.py` to train the model, export the TFLite file, and print enhanced summary examples for validation.
-3. Copy the generated artifacts (`note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, `deployment_metadata.json`) into `app/src/main/assets/` before building the app.
-
-## Contributing
-
-Pull requests and bug reports are welcome. Please open an issue to discuss substantial changes before submitting a PR.
+```bash
+python3 app/src/main/assets/scripts/complete_pipeline.py
+```

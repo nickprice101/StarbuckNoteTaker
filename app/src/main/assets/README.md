@@ -1,19 +1,27 @@
-# AI sumamry model files  
+# AI summary model assets
 
-Contains the following files:
+This directory contains the runtime artifacts bundled into the APK for on-device note summarization/classification.
 
-### note_classifier.tflite  
-* The actual TensorFlow Lite model
-* This is what the Android app loads
+## Files currently expected by the app
 
-### tokenizer_vocabulary_v2.txt
-* Vocabulary exported from the training TextVectorization layer
-* Used by Android-side tokenization when the model expects integer token IDs
+### `note_classifier.tflite`
+- TensorFlow Lite classifier model loaded by the Android `Summarizer`.
+- Input contract: token IDs (`int32[1,120]`).
 
-### category_mapping.json  
-* Maps model output indices to category names
-* The app needs this to interpret predictions
+### `tokenizer_vocabulary_v2.txt`
+- Vocabulary exported from the training pipeline.
+- Used to reproduce training-time tokenization behavior on Android.
 
-### deployment_metadata.json  
-* Contains model version info and accuracy metrics
-* Useful for tracking the model version we're using
+### `category_mapping.json`
+- Maps output indices to category labels used by enhanced-summary generation.
+
+### `deployment_metadata.json`
+- Training/deployment metadata (version and quality indicators).
+
+### `note_classifier_smoke_test_output.txt`
+- Captured sample output from verification/smoke checks for the bundled model.
+
+## Notes
+
+- These files are consumed entirely locally by the app at runtime.
+- If any required artifact is missing or incompatible, the app falls back to non-ML summary generation.

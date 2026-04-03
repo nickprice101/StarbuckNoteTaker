@@ -1,20 +1,19 @@
 # Third-Party Licenses
 
-The files under this `_vendor` directory include source code from the following
-projects. They are bundled to allow TensorFlow Lite FlatBuffer inspection
-without requiring additional pip installations.
+The vendored modules under this `_vendor` directory are checked in so the model-verification tooling can run without extra external package installs.
 
 ## FlatBuffers (Python runtime)
 
 - **Source:** https://github.com/google/flatbuffers
 - **License:** Apache License 2.0
-- **Notes:** Provides the FlatBuffer reader utilities used by the generated
-  TensorFlow Lite schema bindings.
+- **Usage in this repo:** FlatBuffer table/utility support for reading `.tflite` model structure.
 
-## TensorFlow Lite schema (Python bindings)
+## TensorFlow Lite schema bindings (Python)
 
-- **Source:** https://github.com/tensorflow/tensorflow (package `tflite` on PyPI)
+- **Source:** https://github.com/tensorflow/tensorflow (TFLite schema-generated Python package)
 - **License:** Apache License 2.0
-- **Notes:** Only the minimal subset of generated bindings required for operator
-  inspection (`Model`, `OperatorCode`, `Operator`, `SubGraph`, `Metadata`,
-  `Buffer`, and `BuiltinOperator`) is vendored.
+- **Usage in this repo:** Parsing operator codes and metadata for `verify_note_classifier_model.py`.
+
+## Scope note
+
+Only the minimal subset needed by repository verification scripts is vendored.

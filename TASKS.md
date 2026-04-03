@@ -1,8 +1,15 @@
 # Follow-up Tasks
 
-## Fix unit tests referencing `PreparedAttachment`
-- **Context:** Running `./gradlew test --console=plain` fails because `NoteDetailScreenTest` cannot access the `PreparedAttachment` type (it's private and lacks a companion object).
-- **Proposed actions:**
-  - Expose a factory or test fixture helper that constructs `PreparedAttachment` instances for tests, or adjust the test to use the public API.
-  - Ensure both debug and release unit test compilations succeed.
-- **Blocking status:** Prevents running the unit test suite successfully.
+_Last reviewed: April 3, 2026_
+
+## Documentation alignment
+- [x] Refresh repository Markdown docs so they match implemented app behavior and current ML pipeline artifacts.
+
+## Engineering backlog (current)
+- [ ] Add a deterministic instrumentation smoke test for share-intent flows (`SEND`/`SEND_MULTIPLE`) covering text, single image, and mixed attachments.
+- [ ] Expand reminder/alarm UX tests to include exact-alarm permission denied paths on newer Android versions.
+- [ ] Add explicit regression tests for summarizer enhanced-summary formatting against saved golden samples.
+- [ ] Reduce unchecked-cast warnings in `SummarizerModelRobolectricTest` by introducing typed test helper wrappers.
+
+## Nice-to-have
+- [ ] Add a concise architecture diagram in the root `README.md` for onboarding.
