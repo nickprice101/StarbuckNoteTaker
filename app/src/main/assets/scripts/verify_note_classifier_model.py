@@ -43,6 +43,13 @@ SAMPLE_NOTE_TEXT = (
     "cut into fettuccine strips, boil in salted water for 3 minutes."
 )
 EXPECTED_SAMPLE_CATEGORY = "FOOD_RECIPE"
+SEQUENCE_LENGTH = 120
+TOKENIZER_MIN_KNOWN_RATIO = 0.60
+TOKENIZER_SAMPLE_NOTES = [
+    SAMPLE_NOTE_TEXT,
+    "Project standup recap: discussed blockers, assigned follow-up tasks, and scheduled Tuesday review.",
+    "Grocery list for the week: whole milk, eggs, bread, spinach, and coffee beans.",
+]
 
 
 def _decode_optional_string(value: str | bytes | None) -> str | None:
@@ -62,6 +69,52 @@ def _load_model(buffer: bytes) -> Model:
     if not Model.ModelBufferHasIdentifier(buffer, 0):
         raise ValueError("The provided buffer does not contain a valid TFL3 FlatBuffer.")
     return Model.GetRootAs(buffer, 0)
+
+
+def _load_tokenizer(path: Path) -> list[str]:
+    if not path.exists():
+        raise FileNotFoundError(f"Tokenizer vocabulary file not found: {path}")
+    with path.open("r", encoding="utf-8") as handle:
+        return [line.strip() for line in handle if line.strip()]
+
+
+def _tokenize_for_model_input(text: str, token_to_id: dict[str, int], unknown_id: int) -> list[int]:
+    normalized = text.strip().lower()
+    normalized = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in normalized)
+    tokens = [token for token in normalized.split() if token]
+    output = [0] * SEQUENCE_LENGTH
+    for idx, token in enumerate(tokens[:SEQUENCE_LENGTH]):
+        output[idx] = token_to_id.get(token, unknown_id)
+    return output
+
+
+def _evaluate_tokenizer_coverage(vocab_tokens: list[str]) -> None:
+    token_to_id = {token: idx for idx, token in enumerate(vocab_tokens)}
+    unknown_id = token_to_id.get("[UNK]", token_to_id.get("[unk]", 1))
+    known_count = 0
+    total_count = 0
+
+    for note in TOKENIZER_SAMPLE_NOTES:
+        normalized = "".join(
+            ch if ch.isalnum() or ch.isspace() else " " for ch in note.strip().lower()
+        )
+        note_tokens = [token for token in normalized.split() if token]
+        total_count += len(note_tokens)
+        known_count += sum(1 for token in note_tokens if token in token_to_id)
+
+    if total_count == 0:
+        raise RuntimeError("Tokenizer coverage benchmark has zero tokens; cannot validate vocabulary quality.")
+
+    known_ratio = known_count / total_count
+    print(
+        f"Tokenizer coverage check: {known_count}/{total_count} known tokens "
+        f"({known_ratio * 100:.1f}% known)."
+    )
+    if known_ratio < TOKENIZER_MIN_KNOWN_RATIO:
+        raise RuntimeError(
+            "Tokenizer vocabulary appears low-quality for benchmark notes "
+            f"(known ratio {known_ratio:.2f} < {TOKENIZER_MIN_KNOWN_RATIO:.2f})."
+        )
 
 
 def _collect_fully_connected_codes(model: Model) -> dict[int, int]:
@@ -131,7 +184,7 @@ def _extract_min_runtime_version(model: Model) -> str | None:
     return None
 
 
-def verify_model(path: Path) -> int:
+def verify_model(path: Path, tokenizer_path: Path | None = None) -> int:
     buffer = path.read_bytes()
     model = _load_model(buffer)
 
@@ -165,7 +218,17 @@ def verify_model(path: Path) -> int:
             f"v{MAX_FULLY_CONNECTED_VERSION}: {detail}"
         )
 
-    _run_inference_smoke_test(path)
+    tokenizer_tokens: list[str] | None = None
+    if tokenizer_path is not None:
+        tokenizer_tokens = _load_tokenizer(tokenizer_path)
+        if len(tokenizer_tokens) < 500:
+            raise RuntimeError(
+                "Tokenizer vocabulary is unexpectedly small "
+                f"({len(tokenizer_tokens)} entries)."
+            )
+        _evaluate_tokenizer_coverage(tokenizer_tokens)
+
+    _run_inference_smoke_test(path, tokenizer_tokens)
 
     return 0
 
@@ -236,7 +299,7 @@ def _create_interpreter(model_path: Path):
     )
 
 
-def _run_inference_smoke_test(model_path: Path) -> None:
+def _run_inference_smoke_test(model_path: Path, tokenizer_tokens: list[str] | None) -> None:
     if np is None:
         print("NumPy not available; skipping inference smoke test.")
         return
@@ -268,26 +331,47 @@ def _run_inference_smoke_test(model_path: Path) -> None:
         input_index = input_info["index"]
         input_dtype = input_info["dtype"]
 
-        supported_dtypes = {np.object_}
-        bytes_dtype = getattr(np, "bytes_", None)
-        str_dtype = getattr(np, "str_", None)
-        if bytes_dtype is not None:
-            supported_dtypes.add(bytes_dtype)
-        if str_dtype is not None:
-            supported_dtypes.add(str_dtype)
-
-        if input_dtype not in supported_dtypes:
-            raise RuntimeError(
-                "TensorFlow Lite model input dtype mismatch: expected a string-compatible "
-                f"dtype but received {input_dtype!r}."
-            )
-
-        if bytes_dtype is not None and input_dtype == bytes_dtype:
-            input_value = np.array([[SAMPLE_NOTE_TEXT.encode("utf-8")]], dtype=bytes_dtype)
-        elif str_dtype is not None and input_dtype == str_dtype:
-            input_value = np.array([[SAMPLE_NOTE_TEXT]], dtype=str_dtype)
+        int_dtypes = {np.int32, np.int64}
+        if input_dtype in int_dtypes:
+            if not tokenizer_tokens:
+                raise RuntimeError(
+                    "Model expects integer token IDs but tokenizer vocabulary was not provided."
+                )
+            token_to_id = {token: idx for idx, token in enumerate(tokenizer_tokens)}
+            unknown_id = token_to_id.get("[UNK]", token_to_id.get("[unk]", 1))
+            token_ids = _tokenize_for_model_input(SAMPLE_NOTE_TEXT, token_to_id, unknown_id)
+            if all(token_id == unknown_id for token_id in token_ids[:20]):
+                raise RuntimeError(
+                    "Tokenizer is not mapping benchmark tokens to known IDs; "
+                    "the expanded vocabulary is not being used effectively."
+                )
+            input_value = np.array([token_ids], dtype=input_dtype)
+            print("Inference smoke test input mode: integer token IDs (tokenizer-backed).")
         else:
-            input_value = np.array([[SAMPLE_NOTE_TEXT]], dtype=np.object_)
+            supported_dtypes = {np.object_}
+            bytes_dtype = getattr(np, "bytes_", None)
+            str_dtype = getattr(np, "str_", None)
+            if bytes_dtype is not None:
+                supported_dtypes.add(bytes_dtype)
+            if str_dtype is not None:
+                supported_dtypes.add(str_dtype)
+
+            if input_dtype not in supported_dtypes:
+                raise RuntimeError(
+                    "TensorFlow Lite model input dtype mismatch: expected either integer token IDs "
+                    f"or string-compatible dtype, but received {input_dtype!r}."
+                )
+
+            if bytes_dtype is not None and input_dtype == bytes_dtype:
+                input_value = np.array([[SAMPLE_NOTE_TEXT.encode("utf-8")]], dtype=bytes_dtype)
+            elif str_dtype is not None and input_dtype == str_dtype:
+                input_value = np.array([[SAMPLE_NOTE_TEXT]], dtype=str_dtype)
+            else:
+                input_value = np.array([[SAMPLE_NOTE_TEXT]], dtype=np.object_)
+            print(
+                "Inference smoke test input mode: raw string tensor "
+                "(tokenizer vocabulary quality checked separately)."
+            )
 
         interpreter.set_tensor(input_index, input_value)
 
@@ -341,6 +425,12 @@ def main() -> None:
         default=SCRIPT_DIR.parent / "note_classifier.tflite",
         help="Path to the TensorFlow Lite model to inspect (defaults to the bundled asset).",
     )
+    parser.add_argument(
+        "--tokenizer",
+        type=Path,
+        default=SCRIPT_DIR.parent / "tokenizer_vocabulary_v2.txt",
+        help="Path to tokenizer vocabulary used for integer-input model verification.",
+    )
     args = parser.parse_args()
 
     model_path = args.model
@@ -348,7 +438,7 @@ def main() -> None:
         raise SystemExit(f"Unable to locate TensorFlow Lite model: {model_path}")
 
     try:
-        exit_code = verify_model(model_path)
+        exit_code = verify_model(model_path, args.tokenizer)
     except OSError as exc:
         raise SystemExit(f"Failed to read model '{model_path}': {exc}") from exc
 
