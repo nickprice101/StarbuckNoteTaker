@@ -6,6 +6,7 @@ from pathlib import Path
 
 REQUIRED_ASSET_RELATIVE_PATHS = [
     Path("app/src/main/assets/note_classifier.tflite"),
+    Path("app/src/main/assets/tokenizer_vocabulary_v2.txt"),
     Path("app/src/main/assets/category_mapping.json"),
     Path("app/src/main/assets/deployment_metadata.json"),
 ]
