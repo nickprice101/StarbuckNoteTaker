@@ -210,6 +210,7 @@ tasks.register("verifyNoteClassifierModel") {
 
     def modelFile = project.layout.projectDirectory.file("src/main/assets/note_classifier.tflite")
     def tokenizerFile = project.layout.projectDirectory.file("src/main/assets/tokenizer_vocabulary_v2.txt")
+    def scriptsTokenizerFile = project.layout.projectDirectory.file("src/main/assets/scripts/tokenizer_vocabulary_v2.txt")
     def scriptFile = project.rootProject.layout.projectDirectory.file("app/src/main/assets/scripts/verify_note_classifier_model.py")
 
     inputs.file(modelFile)
@@ -222,6 +223,7 @@ tasks.register("verifyNoteClassifierModel") {
         File verifier = scriptFile.asFile
         File bundledModel = modelFile.asFile
         File bundledTokenizer = tokenizerFile.asFile
+        File pipelineTokenizer = scriptsTokenizerFile.asFile
 
         if (!verifier.exists()) {
             throw new GradleException("Unable to find TensorFlow Lite verifier script at ${verifier}")
@@ -241,11 +243,39 @@ tasks.register("verifyNoteClassifierModel") {
                             "Re-run app/src/main/assets/scripts/complete_pipeline.py to export a full vocabulary."
             )
         }
+        if (pipelineTokenizer.exists()) {
+            if (pipelineTokenizer.text != bundledTokenizer.text) {
+                throw new GradleException(
+                        "Bundled tokenizer vocabulary in assets is out-of-sync with the pipeline output under assets/scripts. " +
+                                "Run ./gradlew syncNoteClassifierAssetsFromScripts --console=plain."
+                )
+            }
+        }
 
         exec { ExecSpec spec ->
             spec.executable = pythonExecutable
-            spec.args = [verifier.absolutePath, "--model", bundledModel.absolutePath]
+            spec.args = [
+                    verifier.absolutePath,
+                    "--model", bundledModel.absolutePath,
+                    "--tokenizer", bundledTokenizer.absolutePath
+            ]
         }
+    }
+}
+
+tasks.register("syncNoteClassifierAssetsFromScripts", Sync) {
+    group = "verification"
+    description = "Copies generated note-classifier artifacts from assets/scripts into app runtime assets."
+
+    from("src/main/assets/scripts") {
+        include "note_classifier.tflite"
+        include "category_mapping.json"
+        include "deployment_metadata.json"
+        include "tokenizer_vocabulary_v2.txt"
+    }
+    into("src/main/assets")
+    doFirst {
+        logger.lifecycle("Syncing note-classifier artifacts from assets/scripts to assets")
     }
 }
 
