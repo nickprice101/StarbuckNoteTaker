@@ -18,4 +18,10 @@ interface IQspmService {
     int getSummarizerState();
     int warmUpSummarizer();
     void summarize(String text, IQspmSummaryCallback callback);
+
+    /** Rewrites the given text in a clean, professional style via Llama 3.1 8B. */
+    void rewrite(String text, IQspmSummaryCallback callback);
+
+    /** Answers the given question, optionally grounded in the provided context. */
+    void ask(String question, String context, IQspmSummaryCallback callback);
 }

@@ -15,21 +15,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // MLC LLM Android SDK — provides MLCEngine for on-device Llama 3.1 8B inference
         maven {
-            name = "TensorFlow"
-            url = uri('https://storage.googleapis.com/download.tensorflow.org/maven')
-            // The TensorFlow hosted repository does not support Gradle module metadata
-            // lookups and rejects the HEAD requests that Gradle issues when probing for
-            // *.module descriptors. Restrict the metadata sources so that Gradle only
-            // requests the Maven POM and artifacts, which prevents the 403 responses
-            // seen when resolving tensorflow-lite-select-tf-ops 2.16.1.
-            metadataSources {
-                mavenPom()
-                artifact()
-            }
-            content {
-                includeGroup('org.tensorflow')
-            }
+            name = "MlcLlm"
+            url = uri('https://repo.mlc.ai/repository/maven-releases/')
         }
     }
 }

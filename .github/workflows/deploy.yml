@@ -37,7 +37,7 @@ jobs:
           fi
           echo "sdk.dir=$SDK_PATH" > local.properties
 
-      - name: Verify summarizer model assets
+      - name: Verify MLC model configuration assets
         run: |
 
           set -euo pipefail
@@ -45,10 +45,10 @@ jobs:
           ASSETS_DIR="app/src/main/assets"
           mkdir -p "$ASSETS_DIR"
 
+          # category_mapping.json is retained for fallback heuristics.
+          # The Llama 3.1 8B model weights are downloaded at runtime (not bundled).
           REQUIRED_FILES=(
-            "note_classifier.tflite"
             "category_mapping.json"
-            "deployment_metadata.json"
           )
 
           missing=()
@@ -59,9 +59,9 @@ jobs:
           done
 
           if [ "${#missing[@]}" -eq 0 ]; then
-            echo "All summarizer assets already present."
+            echo "All required configuration assets present."
           else
-            echo "::error::Missing summarizer assets: ${missing[*]}"
+            echo "::error::Missing configuration assets: ${missing[*]}"
             exit 1
           fi
 

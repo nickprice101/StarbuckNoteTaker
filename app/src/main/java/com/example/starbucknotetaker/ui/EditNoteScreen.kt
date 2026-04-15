@@ -32,9 +32,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
@@ -60,6 +62,7 @@ import com.example.starbucknotetaker.LinkPreviewResult
 import com.example.starbucknotetaker.NoteLinkPreview
 import com.example.starbucknotetaker.normalizeUrl
 import com.example.starbucknotetaker.NoteAlarmScheduler
+import com.example.starbucknotetaker.LlamaEngine
 import com.example.starbucknotetaker.Summarizer
 import com.example.starbucknotetaker.UrlDetection
 import com.example.starbucknotetaker.extractUrls
@@ -92,6 +95,9 @@ fun EditNoteScreen(
     onEnablePinCheck: () -> Unit,
     summarizerState: Summarizer.SummarizerState,
     openAttachment: suspend (String) -> ByteArray?,
+    onRewriteNote: ((Long) -> Unit)? = null,
+    onAskQuestion: ((Long, String) -> Unit)? = null,
+    inferenceProgress: LlamaEngine.InferenceProgress = LlamaEngine.InferenceProgress.Idle,
 ) {
     var title by remember { mutableStateOf(note.title) }
     val blocks = remember {
@@ -581,6 +587,51 @@ fun EditNoteScreen(
                         }
                     },
                     actions = {
+                        // ---- AI toolbar buttons ----
+                        if (onRewriteNote != null) {
+                            IconButton(onClick = { onRewriteNote(note.id) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Autorenew,
+                                    contentDescription = "Rewrite with AI ♻",
+                                )
+                            }
+                        }
+                        if (onAskQuestion != null) {
+                            var showAskDialog by remember { mutableStateOf(false) }
+                            var question by remember { mutableStateOf("") }
+                            IconButton(onClick = { showAskDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.QuestionAnswer,
+                                    contentDescription = "Ask AI ❓",
+                                )
+                            }
+                            if (showAskDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showAskDialog = false },
+                                    title = { Text("Ask the AI") },
+                                    text = {
+                                        OutlinedTextField(
+                                            value = question,
+                                            onValueChange = { question = it },
+                                            label = { Text("Your question") },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            if (question.isNotBlank()) {
+                                                onAskQuestion(note.id, question)
+                                            }
+                                            showAskDialog = false
+                                            question = ""
+                                        }) { Text("Ask") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showAskDialog = false }) { Text("Cancel") }
+                                    },
+                                )
+                            }
+                        }
                         IconButton(onClick = {
                             var idx = 0
                             while (idx < blocks.size) {
@@ -705,6 +756,15 @@ fun EditNoteScreen(
             ).coerceAtLeast(0.dp)
         val imeBottomPx = WindowInsets.ime.getBottom(density)
         val contextPadding = if (imeBottomPx > 0) 96.dp else 0.dp
+
+        // AI in-progress overlay
+        AiProgressOverlay(
+            progress = inferenceProgress,
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxWidth(),
+        )
+
         LazyColumn(
             modifier = Modifier
                 .padding(padding)

@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.dp
+import com.example.starbucknotetaker.LlamaModelManager
 import com.example.starbucknotetaker.PinManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,6 +36,9 @@ fun SettingsScreen(
     onBiometricChanged: (Boolean) -> Unit,
     summarizerEnabled: Boolean,
     onSummarizerChanged: (Boolean) -> Unit,
+    modelStatus: LlamaModelManager.ModelStatus = LlamaModelManager.ModelStatus.Missing,
+    onDownloadModel: () -> Unit = {},
+    onDeleteModel: () -> Unit = {},
     onBack: () -> Unit,
     onImport: (Uri, String, Boolean) -> Boolean,
     onExport: (Uri) -> Unit,
@@ -310,6 +314,13 @@ fun SettingsScreen(
                 )
             }
             Divider()
+            // ---- AI model (Llama 3.1 8B) download section ----
+            AiModelDownloadSection(
+                modelStatus = modelStatus,
+                onDownload = onDownloadModel,
+                onDelete = onDeleteModel,
+            )
+            Divider()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -518,3 +529,86 @@ fun SettingsScreen(
     }
 }
 
+
+@Composable
+private fun AiModelDownloadSection(
+    modelStatus: LlamaModelManager.ModelStatus,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("AI Model (Llama 3.1 8B)", style = MaterialTheme.typography.h6)
+        Text(
+            "Download the Llama 3.1 8B Instruct model to enable summarisation, " +
+                "rewriting, and Q&A without internet access.",
+            style = MaterialTheme.typography.body2,
+        )
+        when (modelStatus) {
+            is LlamaModelManager.ModelStatus.Missing -> {
+                Text(
+                    "Model not downloaded. Required size: ${LlamaModelManager.MODEL_SIZE_LABEL}.",
+                    style = MaterialTheme.typography.caption,
+                )
+                Button(onClick = onDownload) { Text("Download AI model") }
+            }
+            is LlamaModelManager.ModelStatus.Downloading -> {
+                val pct = modelStatus.progressPercent
+                val label = modelStatus.label
+                Text(label, style = MaterialTheme.typography.caption)
+                LinearProgressIndicator(
+                    progress = pct / 100f,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                )
+                Text("$pct%", style = MaterialTheme.typography.caption)
+            }
+            is LlamaModelManager.ModelStatus.Present -> {
+                Text(
+                    "✅ Model ready — Llama 3.1 8B",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.primary,
+                )
+                OutlinedButton(
+                    onClick = { showDeleteConfirm = true },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colors.error,
+                    ),
+                ) { Text("Delete model (free storage)") }
+            }
+            is LlamaModelManager.ModelStatus.Error -> {
+                Text(
+                    "Download error: ${modelStatus.message}",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.error,
+                )
+                Button(onClick = onDownload) { Text("Retry download") }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete AI model?") },
+            text = {
+                Text(
+                    "This will remove the Llama 3.1 8B model (~4.5 GB) from your device. " +
+                        "AI features will fall back to simple rule-based previews until you " +
+                        "re-download the model."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDelete()
+                }) { Text("Delete", color = MaterialTheme.colors.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
