@@ -516,7 +516,10 @@ fun AppContent(
                     onDisablePinCheck = {},
                     onEnablePinCheck = {},
                     summarizerState = summarizerState,
-                    openAttachment = { id -> noteViewModel.openAttachment(id) }
+                    openAttachment = { id -> noteViewModel.openAttachment(id) },
+                    onRewriteNote = { id -> noteViewModel.rewriteNote(id) },
+                    onAskQuestion = { id, q -> noteViewModel.askQuestion(id, q) },
+                    inferenceProgress = noteViewModel.inferenceProgress.collectAsState().value,
                 )
             } else {
                 navController.popBackStack()
@@ -557,6 +560,9 @@ fun AppContent(
                 onBiometricChanged = { enabled -> biometricsEnabled = enabled },
                 summarizerEnabled = summarizerEnabled,
                 onSummarizerChanged = { enabled -> noteViewModel.setSummarizerEnabled(enabled) },
+                modelStatus = noteViewModel.modelStatus.collectAsState().value,
+                onDownloadModel = { noteViewModel.downloadAiModel() },
+                onDeleteModel = { noteViewModel.deleteAiModel() },
                 onBack = { navController.popBackStack() },
                 onImport = { uri, pin, overwrite -> noteViewModel.importNotes(context, uri, pin, overwrite) },
                 onExport = { uri -> noteViewModel.exportNotes(context, uri) },

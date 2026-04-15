@@ -186,13 +186,6 @@ packaging {
         }
     }
 
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1+"
-        }
-    }
-
     testOptions {
         unitTests.includeAndroidResources = true
         unitTests.all { unitTest ->
@@ -243,9 +236,10 @@ dependencies {
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     implementation 'ai.djl.android:tokenizer-native:0.33.0'
     implementation 'ai.djl.huggingface:tokenizers:0.33.0'
-    implementation 'com.getkeepsafe.relinker:relinker:1.4.5'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
+    // MLC LLM Android SDK — provides MLCEngine with OpenAI-compatible API for Llama 3.1 8B
+    implementation 'ai.mlc.mlcllm:android:0.1.0'
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 

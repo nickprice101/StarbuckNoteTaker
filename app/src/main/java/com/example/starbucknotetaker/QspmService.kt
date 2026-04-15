@@ -134,6 +134,62 @@ class QspmService : Service() {
                 Binder.restoreCallingIdentity(identity)
             }
         }
+
+        override fun rewrite(text: String?, callback: IQspmSummaryCallback?) {
+            enforceCaller()
+            if (callback == null) {
+                Log.w(TAG, "rewrite called without callback")
+                return
+            }
+            val input = text?.takeIf { it.isNotBlank() }
+            if (input == null) {
+                deliverError(callback, "Text must not be empty")
+                return
+            }
+            val summarizer = obtainSummarizer()
+            val identity = Binder.clearCallingIdentity()
+            try {
+                serviceScope.launch {
+                    try {
+                        val result = summarizer.rewrite(input)
+                        deliverSuccess(callback, result, fallback = false)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Rewrite failed", t)
+                        deliverError(callback, t.message ?: "Failed to rewrite text")
+                    }
+                }
+            } finally {
+                Binder.restoreCallingIdentity(identity)
+            }
+        }
+
+        override fun ask(question: String?, context: String?, callback: IQspmSummaryCallback?) {
+            enforceCaller()
+            if (callback == null) {
+                Log.w(TAG, "ask called without callback")
+                return
+            }
+            val q = question?.takeIf { it.isNotBlank() }
+            if (q == null) {
+                deliverError(callback, "Question must not be empty")
+                return
+            }
+            val summarizer = obtainSummarizer()
+            val identity = Binder.clearCallingIdentity()
+            try {
+                serviceScope.launch {
+                    try {
+                        val result = summarizer.answer(q, context?.takeIf { it.isNotBlank() })
+                        deliverSuccess(callback, result, fallback = false)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Ask failed", t)
+                        deliverError(callback, t.message ?: "Failed to answer question")
+                    }
+                }
+            } finally {
+                Binder.restoreCallingIdentity(identity)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? {

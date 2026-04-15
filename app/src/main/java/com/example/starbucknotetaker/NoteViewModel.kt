@@ -89,6 +89,12 @@ class NoteViewModel(
     val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress> = _inferenceProgress
 
     private var llamaBroadcastReceiver: BroadcastReceiver? = null
+    private var llamaModelManager: LlamaModelManager? = null
+
+    /** Download/presence status of the Llama 3.1 8B MLC model weights. */
+    val modelStatus: StateFlow<LlamaModelManager.ModelStatus>
+        get() = llamaModelManager?.modelStatus
+            ?: MutableStateFlow(LlamaModelManager.ModelStatus.Missing)
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -109,8 +115,8 @@ class NoteViewModel(
         val summarizerEnabled = appSettings?.isSummarizerEnabled() ?: true
         _summarizerEnabled.value = summarizerEnabled
         configureSummarizer(summarizerEnabled)
+        llamaModelManager = LlamaModelManager(appContext)
         registerLlamaBroadcastReceiver(appContext)
-    }
     }
 
     fun setSummarizerEnabled(enabled: Boolean) {
@@ -773,8 +779,12 @@ class NoteViewModel(
         if (source.isBlank()) return
         if (!isSummarizerEnabled()) return
         val sum = summarizer ?: return
+        val ctx = context ?: return
+
         viewModelScope.launch {
             if (!isSummarizerEnabled()) return@launch
+
+            // Immediate rule-based placeholder while LLM warms up
             runCatching {
                 sum.fallbackSummary(source, event)
             }.onSuccess { fallback ->
@@ -784,19 +794,155 @@ class NoteViewModel(
                 Log.e("NoteViewModel", "fallback summary failed", it)
             }
 
-            runCatching {
-                sum.summarize(source)
-            }.onSuccess { summary ->
-                if (!isSummarizerEnabled()) return@launch
-                val trace = sum.consumeDebugTrace()
-                val updated = updateNoteSummary(noteId, summary)
-                if (updated && shouldCreateDebugNote(trace)) {
-                    createSummarizerDebugNote(noteTitle, source, trace)
-                }
-            }.onFailure {
-                Log.e("NoteViewModel", "summarizer inference failed", it)
+            // Start foreground service for full LLM summarisation
+            val requestId = java.util.UUID.randomUUID().toString()
+            val intent = LlamaForegroundService.buildIntent(
+                context = ctx,
+                mode = LlamaEngine.Mode.SUMMARISE,
+                text = source,
+                noteId = noteId,
+                requestId = requestId,
+            )
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                ctx.startForegroundService(intent)
+            } else {
+                ctx.startService(intent)
             }
         }
+    }
+
+    /**
+     * Rewrites the content of note [noteId] via the LLM foreground service.
+     * The rewritten text is delivered back via the [LlamaForegroundService.ACTION_RESULT]
+     * broadcast and applied to the note automatically.
+     */
+    fun rewriteNote(noteId: Long) {
+        val ctx = context ?: return
+        val note = getNoteById(noteId) ?: return
+        val text = note.content.trim()
+        if (text.isBlank()) return
+
+        val requestId = java.util.UUID.randomUUID().toString()
+        val intent = LlamaForegroundService.buildIntent(
+            context = ctx,
+            mode = LlamaEngine.Mode.REWRITE,
+            text = text,
+            noteId = noteId,
+            requestId = requestId,
+        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            ctx.startForegroundService(intent)
+        } else {
+            ctx.startService(intent)
+        }
+    }
+
+    /**
+     * Sends [question] to the LLM foreground service with the content of note [noteId]
+     * as grounding context.  The answer is delivered via [LlamaForegroundService.ACTION_RESULT]
+     * and stored as a new child note.
+     */
+    fun askQuestion(noteId: Long, question: String) {
+        val ctx = context ?: return
+        val note = getNoteById(noteId) ?: return
+        if (question.isBlank()) return
+
+        val requestId = java.util.UUID.randomUUID().toString()
+        val intent = LlamaForegroundService.buildIntent(
+            context = ctx,
+            mode = LlamaEngine.Mode.QUESTION,
+            text = question,
+            noteId = noteId,
+            requestId = requestId,
+            contextText = note.content.take(3000),
+        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            ctx.startForegroundService(intent)
+        } else {
+            ctx.startService(intent)
+        }
+    }
+
+    /**
+     * Downloads the Llama 3.1 8B MLC model weights (~4.5 GB) from HuggingFace.
+     * Progress is reflected in [modelStatus].
+     */
+    fun downloadAiModel() {
+        val manager = llamaModelManager ?: return
+        viewModelScope.launch {
+            manager.downloadModel()
+        }
+    }
+
+    /** Deletes the downloaded model weights to reclaim storage. */
+    fun deleteAiModel() {
+        llamaModelManager?.deleteModel()
+    }
+
+    private fun registerLlamaBroadcastReceiver(ctx: Context) {
+        if (llamaBroadcastReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                intent ?: return
+                val noteId    = intent.getLongExtra(LlamaForegroundService.EXTRA_NOTE_ID, -1L)
+                val mode      = intent.getStringExtra(LlamaForegroundService.EXTRA_MODE)
+                    ?.let { runCatching { LlamaEngine.Mode.valueOf(it) }.getOrNull() }
+                val result    = intent.getStringExtra(LlamaForegroundService.EXTRA_RESULT) ?: return
+                val isError   = intent.getBooleanExtra(LlamaForegroundService.EXTRA_IS_ERROR, false)
+                val requestId = intent.getStringExtra(LlamaForegroundService.EXTRA_REQUEST_ID) ?: ""
+
+                if (isError) {
+                    Log.e("NoteViewModel", "LLM error for requestId=$requestId: $result")
+                    _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, result)
+                    return
+                }
+
+                _inferenceProgress.value = LlamaEngine.InferenceProgress.Done(requestId, result)
+
+                when (mode) {
+                    LlamaEngine.Mode.SUMMARISE -> {
+                        if (noteId != -1L) updateNoteSummary(noteId, result)
+                    }
+                    LlamaEngine.Mode.REWRITE -> {
+                        if (noteId != -1L) applyRewriteToNote(noteId, result)
+                    }
+                    LlamaEngine.Mode.QUESTION -> {
+                        if (noteId != -1L) createAnswerNote(noteId, result)
+                    }
+                    null -> Unit
+                }
+            }
+        }
+        val filter = IntentFilter(LlamaForegroundService.ACTION_RESULT)
+        androidx.localbroadcastmanager.content.LocalBroadcastManager
+            .getInstance(ctx)
+            .registerReceiver(receiver, filter)
+        llamaBroadcastReceiver = receiver
+    }
+
+    private fun applyRewriteToNote(noteId: Long, rewrittenContent: String) {
+        val index = _notes.indexOfFirst { it.id == noteId }
+        if (index == -1) return
+        val note = _notes[index]
+        val styled = com.example.starbucknotetaker.richtext.RichTextDocument.fromPlainText(rewrittenContent)
+        _notes[index] = note.copy(
+            content = rewrittenContent.trim(),
+            styledContent = styled.trimmed(),
+        )
+        pin?.let { store?.saveNotes(_notes, it) }
+    }
+
+    private fun createAnswerNote(sourceNoteId: Long, answer: String) {
+        val sourceNote = getNoteById(sourceNoteId) ?: return
+        val answerTitle = "Answer — ${sourceNote.title.take(40)}"
+        addNote(
+            title = answerTitle,
+            content = answer,
+            styledContent = com.example.starbucknotetaker.richtext.RichTextDocument.fromPlainText(answer),
+            images = emptyList(),
+            files = emptyList(),
+            linkPreviews = emptyList(),
+        )
     }
 
     private fun updateNoteSummary(noteId: Long, summary: String): Boolean {
@@ -881,6 +1027,20 @@ class NoteViewModel(
         summarizerStateJob?.cancel()
         summarizerStateJob = null
         summarizer?.close()
+        val ctx = context
+        val receiver = llamaBroadcastReceiver
+        if (ctx != null && receiver != null) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    ctx.unregisterReceiver(receiver)
+                } else {
+                    androidx.localbroadcastmanager.content.LocalBroadcastManager
+                        .getInstance(ctx)
+                        .unregisterReceiver(receiver)
+                }
+            }
+            llamaBroadcastReceiver = null
+        }
         super.onCleared()
     }
     private fun isImageUrl(url: String): Boolean {
