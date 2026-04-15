@@ -29,15 +29,16 @@ import java.util.concurrent.TimeUnit
  *   - `params_shard_*.bin`     — actual model weights (many shards)
  *
  * The compiled model library (`.so`) must be placed in the APK's
- * `jniLibs/arm64-v8a/` directory before building.  Extract it from the MLC
- * prebuilt release APK published at:
- * https://github.com/mlc-ai/binary-mlc-llm-libs/releases/tag/Android-09262024
+ * `jniLibs/arm64-v8a/` directory before building. There is no prebuilt Android
+ * `.so` for this model in the public MLC release artifacts, so it must be
+ * compiled locally from the HuggingFace weights with `mlc_llm compile`.
  *
  * Steps:
- *   1. Download `mlc-chat.apk` from the release above.
- *   2. Unzip: `unzip mlc-chat.apk "lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so"`
- *   3. Copy the extracted `.so` to `app/src/main/jniLibs/arm64-v8a/`.
- *   4. Rebuild the project — Gradle will package the library automatically.
+ *   1. Install `mlc-llm` and configure `ANDROID_NDK` / `TVM_NDK_CC`.
+ *   2. Clone `https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC`.
+ *   3. Run `mlc_llm compile ... --target android --device android:arm64-v8a`.
+ *   4. Copy the resulting `.so` to `app/src/main/jniLibs/arm64-v8a/`.
+ *   5. Rebuild the project — Gradle will package the library automatically.
  *
  * Usage:
  * ```
@@ -85,7 +86,7 @@ class LlamaModelManager(private val context: Context) {
     }
 
     /**
-     * Downloads all required Llama 3.1 8B MLC weight files from HuggingFace.
+     * Downloads all required Llama 3.2 3B MLC weight files from HuggingFace.
      *
      * Queries the HuggingFace tree API to get the full file listing (shard count
      * varies by quantisation), then fetches each file sequentially, reporting
@@ -284,7 +285,7 @@ class LlamaModelManager(private val context: Context) {
         /**
          * The model-library name passed to [ai.mlc.mlcllm.MLCEngine.reload].
          * This corresponds to the compiled `.so` bundled in the APK's `jniLibs/arm64-v8a/`.
-         * See the class KDoc for instructions on obtaining the prebuilt library.
+         * See the class KDoc for instructions on compiling and placing the library.
          */
         const val MODEL_LIB_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
 

@@ -19,7 +19,7 @@ interface IQspmService {
     int warmUpSummarizer();
     void summarize(String text, IQspmSummaryCallback callback);
 
-    /** Rewrites the given text in a clean, professional style via Llama 3.1 8B. */
+    /** Rewrites the given text in a clean, professional style via Llama 3.2 3B. */
     void rewrite(String text, IQspmSummaryCallback callback);
 
     /** Answers the given question, optionally grounded in the provided context. */

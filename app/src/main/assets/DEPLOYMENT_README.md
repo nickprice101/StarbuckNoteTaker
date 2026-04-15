@@ -25,22 +25,25 @@ app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
 > generic TVM Java runtime (`libtvm4j_runtime_packed.so`), not this model library.
 > You must compile it yourself.
 
-**Prerequisites:** Python 3.10+, Android NDK r27+, and the `mlc-llm` Python package
-(`pip install mlc-llm`). Set `ANDROID_NDK` and `TVM_NDK_CC` as described at
+**Prerequisites:** Python 3.10+, Android NDK r27+, and the `mlc-llm` Python package.
+Set `ANDROID_NDK` and `TVM_NDK_CC` as described at
 <https://llm.mlc.ai/docs/install/index.html>.
 
 ```bash
-# 1. Download quantised weights
+# 1. Install MLC-LLM
+pip install mlc-llm
+
+# 2. Download quantised weights
 git clone https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC
 
-# 2. Compile the model library for Android arm64
+# 3. Compile the model library for Android arm64
 mlc_llm compile \
   ./Llama-3.2-3B-Instruct-q4f16_0-MLC \
   --target android \
   --device android:arm64-v8a \
   -o Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so
 
-# 3. Copy into the project (note the required "lib" prefix)
+# 4. Copy into the project (note the required "lib" prefix)
 cp Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so \
    app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
 ```
@@ -81,4 +84,3 @@ When the model is unavailable (weights not yet downloaded, `.so` missing, or ins
 ## Legacy TFLite assets
 
 The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, and `deployment_metadata.json` are retained in `app/src/main/assets/` as legacy artifacts from the previous TFLite classification path. They are no longer used at runtime.
-

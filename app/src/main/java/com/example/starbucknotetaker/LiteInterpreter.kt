@@ -4,8 +4,8 @@ import java.nio.MappedByteBuffer
 
 /**
  * Retained as a compatibility stub so that any existing test code referencing
- * [LiteInterpreter] continues to compile.  The TFLite inference path has been
- * replaced by [LlamaEngine] (MLC LLM + Llama 3.1 8B); this interface is no
+ * [LiteInterpreter] continues to compile. The TFLite inference path has been
+ * replaced by [LlamaEngine] (MLC LLM + Llama 3.2 3B); this interface is no
  * longer used at runtime.
  */
 interface LiteInterpreter {
