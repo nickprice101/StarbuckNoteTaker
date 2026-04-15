@@ -1,7 +1,11 @@
 package com.example.starbucknotetaker
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import android.util.Log
 import android.util.Patterns
@@ -28,6 +32,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collect
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.asChecklistContent
 import com.example.starbucknotetaker.richtext.StyleRange
@@ -79,6 +84,12 @@ class NoteViewModel(
     val pendingUnlockNavigationNoteId: StateFlow<Long?> =
         savedStateHandle.getStateFlow(PENDING_UNLOCK_NAVIGATION_NOTE_ID_KEY, null)
 
+    /** Live streaming progress from the on-device AI engine. */
+    private val _inferenceProgress = MutableStateFlow<LlamaEngine.InferenceProgress>(LlamaEngine.InferenceProgress.Idle)
+    val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress> = _inferenceProgress
+
+    private var llamaBroadcastReceiver: BroadcastReceiver? = null
+
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
         val appContext = context.applicationContext
@@ -98,6 +109,8 @@ class NoteViewModel(
         val summarizerEnabled = appSettings?.isSummarizerEnabled() ?: true
         _summarizerEnabled.value = summarizerEnabled
         configureSummarizer(summarizerEnabled)
+        registerLlamaBroadcastReceiver(appContext)
+    }
     }
 
     fun setSummarizerEnabled(enabled: Boolean) {

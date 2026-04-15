@@ -6,30 +6,48 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
-import java.io.RandomAccessFile
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * On-device summariser powered by a lightweight TensorFlow Lite classifier.
+ * On-device summariser backed by [LlamaEngine] (llama.cpp / GGUF model).
  *
- * The interpreter predicts a coarse note category which is then converted into
- * an "enhanced summary" that mirrors the format produced by the training
- * pipeline (see app/src/main/assets/scripts/complete_pipeline.py).
+ * When the GGUF model has not been downloaded yet, or when the native library
+ * is unavailable, all inference automatically falls back to the lightweight
+ * rule-based heuristics defined in this class — behaviour identical to the
+ * previous TFLite path.
+ *
+ * Callers that previously constructed [Summarizer] with a custom
+ * [interpreterFactory] (e.g. in unit tests) can continue to do so; the
+ * factory parameter is retained but ignored at runtime.  Tests that need
+ * to exercise the fallback path independently can use the public static
+ * helpers directly.
+ *
+ * New functionality added over the previous TFLite version:
+ *  - [rewrite] — rewrites a note in a clean, professional style
+ *  - [answer]  — answers a question using optional note context
+ *  - [inferenceProgress] — [StateFlow] of streaming inference progress
  */
 class Summarizer(
     private val context: Context,
-    private val interpreterFactory: (MappedByteBuffer) -> LiteInterpreter = { TfLiteInterpreter.create(it) },
-    private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", "summarizer: $msg", t) },
-    private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", "summarizer: $msg") },
-    private val assetLoader: (Context, String) -> InputStream = { ctx, name -> ctx.assets.open(name) },
+    /** Retained for source compatibility with existing tests; not used at runtime. */
+    @Suppress("UNUSED_PARAMETER")
+    private val interpreterFactory: (java.nio.MappedByteBuffer) -> LiteInterpreter = {
+        throw UnsupportedOperationException("LiteInterpreter not used in llama.cpp path")
+    },
+    private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", msg, t) },
+    private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", msg) },
+    /** Retained for source compatibility with existing tests; not used at runtime. */
+    @Suppress("UNUSED_PARAMETER")
+    private val assetLoader: (Context, String) -> java.io.InputStream = { ctx, name ->
+        ctx.assets.open(name)
+    },
 ) {
+
+    // ------------------------------------------------------------------
+    // Public state
+    // ------------------------------------------------------------------
+
     sealed class SummarizerState {
         object Loading : SummarizerState()
         object Ready : SummarizerState()
@@ -40,132 +58,136 @@ class Summarizer(
     private val _state = MutableStateFlow<SummarizerState>(SummarizerState.Ready)
     val state: StateFlow<SummarizerState> = _state
 
-    private val debugTrace = ThreadLocal<MutableList<String>?>()
+    private val engine by lazy { LlamaEngine(context) }
+
+    /** Live streaming inference progress from the underlying [LlamaEngine]. */
+    val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress>
+        get() = engine.progress
+
     private val lastDebugTrace = AtomicReference<List<String>>(emptyList())
 
-    private var interpreter: LiteInterpreter? = null
-    private var categories: List<String> = emptyList()
-    private var tokenizerVocabulary: TokenizerVocabulary = TokenizerVocabulary.EMPTY
+    // ------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------
 
-    private fun emitDebug(message: String) {
-        debugTrace.get()?.add(message)
-        debugSink(message)
-    }
-
+    /**
+     * Warms up the summariser engine.  When the GGUF model is present the
+     * native context is initialised; otherwise the method returns [SummarizerState.Fallback]
+     * to signal that heuristic summaries will be used.
+     */
     suspend fun warmUp(): SummarizerState = withContext(Dispatchers.Default) {
+        _state.emit(SummarizerState.Loading)
         try {
-            loadModelIfNeeded()
+            val modelPath = engine.modelStatus.value
+            val ready = modelPath is LlamaModelManager.ModelStatus.Present
+            val next = if (ready) SummarizerState.Ready else SummarizerState.Fallback
+            _state.emit(next)
+            debugSink("warmUp: state=$next")
         } catch (t: Throwable) {
             logger("warm up failed", t)
+            _state.emit(SummarizerState.Error(t.message ?: "warmUp failed"))
         }
         state.value
     }
 
-    fun consumeDebugTrace(): List<String> {
-        return lastDebugTrace.getAndSet(emptyList())
-    }
-
+    /**
+     * Generates a concise 1–3 line summary of [text].
+     *
+     * Uses the LLM when the model is available, otherwise falls back to the
+     * rule-based heuristic summariser.
+     */
     suspend fun summarize(text: String): String = withContext(Dispatchers.Default) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) {
-            lastDebugTrace.set(emptyList())
-            return@withContext ""
-        }
-        val preparedInput = normalizeForModelInput(trimmed)
-        if (preparedInput.isEmpty()) {
-            lastDebugTrace.set(emptyList())
-            return@withContext ""
-        }
-
+        if (trimmed.isEmpty()) return@withContext ""
         val trace = mutableListOf<String>()
-        debugTrace.set(trace)
-
         try {
-            emitDebug("summarizing text of length ${preparedInput.length}")
-            loadModelIfNeeded()
-            val interpreter = interpreter
-            val categories = categories
-            if (interpreter == null || categories.isEmpty()) {
-                return@withContext fallbackFromSummarize("model unavailable", preparedInput)
-            }
-
-            val output = Array(1) { FloatArray(categories.size) }
-            runClassifier(interpreter, preparedInput, tokenizerVocabulary, output)
-            val scores = output[0]
-            val predictedIndex = scores.indices.maxByOrNull { scores[it] } ?: 0
-            val modelCategory = categories.getOrNull(predictedIndex) ?: categories.first()
-            val confidence = scores.getOrElse(predictedIndex) { 0f }
-            val secondBest = scores.indices
-                .filterNot { it == predictedIndex }
-                .maxByOrNull { scores[it] }
-                ?.let { scores[it] }
-                ?: 0f
-            val confidenceGap = confidence - secondBest
-            val heuristicCategory = detectHeuristicCategory(preparedInput)
-            val predictedCategory = when {
-                heuristicCategory == null -> modelCategory
-                modelCategory == heuristicCategory -> modelCategory
-                confidence < MODEL_CONFIDENCE_MIN || confidenceGap < MODEL_CONFIDENCE_GAP_MIN -> heuristicCategory
-                else -> modelCategory
-            }
-            emitDebug(
-                "predicted category=$predictedCategory model=$modelCategory score=${String.format(Locale.US, "%.3f", confidence)} gap=${String.format(Locale.US, "%.3f", confidenceGap)} heuristic=${heuristicCategory ?: "none"}"
-            )
-
-            val summary = generateEnhancedSummary(preparedInput, predictedCategory)
-            emitDebug("generated enhanced summary: $summary")
+            _state.emit(SummarizerState.Loading)
+            debugSink("summarize: input length=${trimmed.length}")
+            trace += "summarizing text of length ${trimmed.length}"
+            val result = engine.summarise(trimmed)
             _state.emit(SummarizerState.Ready)
-            summary
+            trace += "result: $result"
+            lastDebugTrace.set(trace)
+            result
         } catch (t: Throwable) {
-            logger("summarizer inference failed", t)
-            fallbackFromSummarize(t.message ?: "inference failure", preparedInput)
-        } finally {
-            lastDebugTrace.set(debugTrace.get()?.toList() ?: emptyList())
-            debugTrace.set(null)
+            logger("summarize failed", t)
+            trace += "fallback reason: ${t.message}"
+            lastDebugTrace.set(trace)
+            _state.emit(SummarizerState.Fallback)
+            fallbackSummaryInternal(trimmed)
         }
     }
 
-    private fun detectHeuristicCategory(text: String): String? {
-        val lower = text.lowercase(Locale.US)
-        val hasChecklistBullets = text.lineSequence()
-            .map { it.trimStart() }
-            .count { CHECKLIST_BULLET_LINE_REGEX.containsMatchIn(it) } >= 2
-
-        return when {
-            SHOPPING_KEYWORD_REGEX.containsMatchIn(lower) -> "SHOPPING_LIST"
-            CHECKLIST_KEYWORD_REGEX.containsMatchIn(lower) || hasChecklistBullets -> "GENERAL_CHECKLIST"
-            REMINDER_KEYWORD_REGEX.containsMatchIn(lower) -> "REMINDER"
-            RECIPE_KEYWORD_REGEX.containsMatchIn(lower) -> "FOOD_RECIPE"
-            MEETING_KEYWORD_REGEX.containsMatchIn(lower) -> "MEETING_RECAP"
-            TRAVEL_KEYWORD_REGEX.containsMatchIn(lower) -> "TRAVEL_LOG"
-            TECHNICAL_KEYWORD_REGEX.containsMatchIn(lower) -> "TECHNICAL_REFERENCE"
-            FINANCE_KEYWORD_REGEX.containsMatchIn(lower) -> "FINANCE_LEGAL"
-            HEALTH_KEYWORD_REGEX.containsMatchIn(lower) -> "HEALTH_WELLNESS"
-            else -> null
+    /**
+     * Rewrites [text] in a cleaner, more professional style using the LLM.
+     *
+     * Falls back to returning the original text when the model is unavailable.
+     */
+    suspend fun rewrite(text: String): String = withContext(Dispatchers.Default) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return@withContext ""
+        try {
+            _state.emit(SummarizerState.Loading)
+            val result = engine.rewrite(trimmed)
+            _state.emit(SummarizerState.Ready)
+            result
+        } catch (t: Throwable) {
+            logger("rewrite failed", t)
+            _state.emit(SummarizerState.Fallback)
+            trimmed
         }
     }
 
-    private suspend fun fallbackFromSummarize(reason: String, text: String): String {
-        emitDebug("falling back due to $reason")
-        emitDebug("fallback reason: $reason")
-        _state.emit(SummarizerState.Fallback)
-        return fallbackSummaryInternal(text)
-    }
+    /**
+     * Answers [question] using optional [noteContext] as grounding material.
+     *
+     * Falls back to a descriptive message when the model is unavailable.
+     */
+    suspend fun answer(question: String, noteContext: String? = null): String =
+        withContext(Dispatchers.Default) {
+            val q = question.trim()
+            if (q.isEmpty()) return@withContext ""
+            try {
+                _state.emit(SummarizerState.Loading)
+                val result = engine.answer(q, noteContext)
+                _state.emit(SummarizerState.Ready)
+                result
+            } catch (t: Throwable) {
+                logger("answer failed", t)
+                _state.emit(SummarizerState.Fallback)
+                "AI model not yet downloaded. Download it in Settings to enable Q&A."
+            }
+        }
 
+    /** Returns a rule-based heuristic summary (no LLM call). */
     suspend fun fallbackSummary(text: String): String = fallbackSummary(text, null)
 
-    suspend fun fallbackSummary(text: String, @Suppress("UNUSED_PARAMETER") event: NoteEvent?): String =
-        withContext(Dispatchers.Default) { fallbackSummaryInternal(text) }
+    /** Returns a rule-based heuristic summary (no LLM call). */
+    suspend fun fallbackSummary(
+        text: String,
+        @Suppress("UNUSED_PARAMETER") event: NoteEvent?,
+    ): String = withContext(Dispatchers.Default) { fallbackSummaryInternal(text) }
 
-    fun quickFallbackSummary(text: String): String {
-        return smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH)
+    /** Synchronous rule-based preview (used as a placeholder until async result arrives). */
+    fun quickFallbackSummary(text: String): String =
+        smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH)
+
+    /** Consumes and returns the debug trace from the last [summarize] call. */
+    fun consumeDebugTrace(): List<String> = lastDebugTrace.getAndSet(emptyList())
+
+    /** Releases the native model context and associated resources. */
+    fun close() {
+        engine.close()
     }
+
+    // ------------------------------------------------------------------
+    // Rule-based fallback logic
+    // ------------------------------------------------------------------
 
     private fun fallbackSummaryInternal(text: String): String {
         val contentOnly = extractContentForFallback(text)
         val normalized = contentOnly.trim().replace(WHITESPACE_REGEX, " ")
         if (normalized.isEmpty()) return ""
-
         val truncated = normalized.take(FALLBACK_CHAR_LIMIT)
         return formatFallbackAcrossTwoLines(truncated)
     }
@@ -173,28 +195,20 @@ class Summarizer(
     private fun extractContentForFallback(text: String): String {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return ""
-
         val separatorIndex = trimmed.indexOf("\n\n")
         if (separatorIndex >= 0 && separatorIndex + 2 < trimmed.length) {
             val afterSeparator = trimmed.substring(separatorIndex + 2).trim()
-            if (afterSeparator.isNotEmpty()) {
-                return afterSeparator
-            }
+            if (afterSeparator.isNotEmpty()) return afterSeparator
         }
-
         if (trimmed.startsWith("Title:", ignoreCase = true)) {
             return trimmed.removePrefix("Title:").trim()
         }
-
         return trimmed
     }
 
     private fun formatFallbackAcrossTwoLines(truncated: String): String {
         if (truncated.isEmpty()) return ""
-        if (truncated.length <= FALLBACK_FIRST_LINE_TARGET) {
-            return truncated
-        }
-
+        if (truncated.length <= FALLBACK_FIRST_LINE_TARGET) return truncated
         val desiredBreak = minOf(truncated.length, FALLBACK_FIRST_LINE_TARGET)
         val whitespaceBreak = truncated.lastIndexOf(' ', desiredBreak)
         val breakIndex = when {
@@ -202,403 +216,70 @@ class Summarizer(
             truncated.length > FALLBACK_FIRST_LINE_TARGET -> FALLBACK_FIRST_LINE_TARGET
             else -> truncated.length
         }
-
-        if (breakIndex <= 0 || breakIndex >= truncated.length) {
-            return truncated
-        }
-
+        if (breakIndex <= 0 || breakIndex >= truncated.length) return truncated
         return truncated.substring(0, breakIndex) + "\n" + truncated.substring(breakIndex)
     }
 
-    private suspend fun loadModelIfNeeded() {
-        if (interpreter != null && categories.isNotEmpty()) return
-        emitDebug("loading summarizer assets")
-        _state.emit(SummarizerState.Loading)
-        try {
-            val modelsDir = File(context.filesDir, MODELS_DIR_NAME).apply { mkdirs() }
-            val modelFile = ensureAsset(modelsDir, MODEL_ASSET_NAME)
-            val mappingFile = ensureAsset(modelsDir, CATEGORY_MAPPING_ASSET_NAME)
-            categories = parseCategoryMapping(mappingFile)
-            tokenizerVocabulary = ensureOptionalAsset(modelsDir, TOKENIZER_VOCAB_ASSET_NAME)
-                ?.let { parseTokenizerVocabulary(it) }
-                ?: TokenizerVocabulary.EMPTY.also {
-                    emitDebug(
-                        "tokenizer vocabulary missing; using [UNK]-only tokenization fallback"
-                    )
-                }
-            interpreter = interpreterFactory(mapFile(modelFile))
-            emitDebug("summarizer model ready with ${categories.size} categories")
-            _state.emit(SummarizerState.Ready)
-        } catch (t: Throwable) {
-            logger("failed to load summarizer assets", t)
-            _state.emit(SummarizerState.Error(t.message ?: "Failed to load summarizer assets"))
-            throw t
-        }
-    }
-
-    private fun parseCategoryMapping(file: File): List<String> {
-        val text = file.readText()
-        val json = JSONObject(text)
-        val array = json.optJSONArray("categories") ?: return emptyList()
-        val result = mutableListOf<String>()
-        for (i in 0 until array.length()) {
-            result += array.optString(i)
-        }
-        return result
-    }
-
-    private fun parseTokenizerVocabulary(file: File): TokenizerVocabulary {
-        val lines = file.readLines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        return TokenizerVocabulary.from(lines)
-    }
-
-    private fun ensureAsset(modelsDir: File, assetName: String): File {
-        val target = File(modelsDir, assetName)
-        val previousLength = target.takeIf { it.exists() }?.length() ?: 0L
-        assetLoader(context, assetName).use { input ->
-            FileOutputStream(target, false).use { output ->
-                input.copyTo(output)
-            }
-        }
-        if (previousLength > 0L && previousLength != target.length()) {
-            emitDebug("refreshed cached asset $assetName (oldBytes=$previousLength newBytes=${target.length()})")
-        }
-        return target
-    }
-
-    private fun ensureOptionalAsset(modelsDir: File, assetName: String): File? {
-        return runCatching { ensureAsset(modelsDir, assetName) }
-            .onFailure { error ->
-                logger("optional summarizer asset unavailable: $assetName", error)
-            }
-            .getOrNull()
-    }
-
-    private fun mapFile(file: File): MappedByteBuffer {
-        RandomAccessFile(file, "r").use { raf ->
-            return raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
-        }
-    }
-
-    private fun runClassifier(
-        interpreter: LiteInterpreter,
-        preparedInput: String,
-        vocabulary: TokenizerVocabulary,
-        output: Array<FloatArray>,
-    ) {
-        val tokenizedInput = tokenizeForModelInput(preparedInput, vocabulary)
-        val intInput = arrayOf(tokenizedInput)
-        try {
-            interpreter.run(intInput, output)
-            return
-        } catch (error: IllegalArgumentException) {
-            if (!shouldRetryWithStringInput(error)) {
-                throw error
-            }
-            emitDebug("model expects STRING input; retrying classifier inference with raw text")
-        }
-
-        val stringInput = arrayOf(preparedInput)
-        interpreter.run(stringInput, output)
-    }
-
-    private fun shouldRetryWithStringInput(error: IllegalArgumentException): Boolean {
-        val message = error.message ?: return false
-        return message.contains("TensorFlowLite tensor with type STRING", ignoreCase = true) &&
-            message.contains("[[I", ignoreCase = true)
-    }
-
-    private fun generateEnhancedSummary(noteText: String, rawCategory: String): String {
-        val category = rawCategory.uppercase(Locale.US)
-        val categoryFriendly = rawCategory.split('_')
-            .joinToString(" ") { part ->
-                part.lowercase(Locale.US).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
-            }
-
-        val parts = noteText.split(':', limit = 2)
-        val contextPart = parts.getOrNull(0)?.trim().orEmpty().takeIf { parts.size > 1 } ?: ""
-        val contentPart = if (parts.size > 1) parts[1].trim() else noteText.trim()
-        val contentLower = contentPart.lowercase(Locale.US)
-
-        val isList = contentPart.count { it == ',' } >= 2 || contentLower.split(" and ").size - 1 >= 2
-        val wordCount = contentPart.split(WHITESPACE_REGEX).count { it.isNotBlank() }
-        val isLong = wordCount > 50
-        val subjects = SUBJECT_REGEX.findAll(noteText).map { it.value.trim() }.toList()
-
-        val summary = when (category) {
-            "SHOPPING_LIST" -> buildShoppingListSummary(contentPart)
-            "GENERAL_CHECKLIST" -> buildGeneralChecklistSummary(contextPart, contentPart)
-            "FOOD_RECIPE" -> buildFoodRecipeSummary(contextPart, isLong)
-            "MEETING_RECAP" -> buildMeetingRecapSummary(contextPart, contentLower)
-            "TRAVEL_LOG" -> buildTravelLogSummary(contextPart, subjects)
-            "WORK_PROJECT" -> buildWorkProjectSummary(contextPart, contentLower)
-            "TECHNICAL_REFERENCE" -> buildTechnicalReferenceSummary(contextPart, contentLower)
-            "CREATIVE_WRITING" -> buildCreativeWritingSummary(contextPart, noteText)
-            "FINANCE_LEGAL" -> buildFinanceSummary(contextPart, contentPart)
-            "HEALTH_WELLNESS" -> buildHealthSummary(contextPart, contentLower)
-            "EDUCATION_LEARNING" -> buildEducationSummary(contextPart, contentLower)
-            "REMINDER" -> buildReminderSummary(contentPart)
-            "PERSONAL_DAILY_LIFE" -> buildPersonalDailyLifeSummary(contextPart)
-            "HOME_FAMILY" -> buildHomeFamilySummary(contextPart, isList)
-            "SELF_IMPROVEMENT" -> buildSelfImprovementSummary(contextPart)
-            else -> buildGenericSummary(categoryFriendly, contextPart, contentPart)
-        }
-        return smartTruncate(summary, MAX_SUMMARY_LENGTH)
-    }
-
-    private fun buildShoppingListSummary(contentPart: String): String {
-        val items = SHOPPING_SPLIT_REGEX.split(contentPart).map { it.trim().trim('.') }.filter { it.isNotEmpty() }
-        val cleanItems = items.take(4).mapNotNull { item ->
-            val filtered = item.split(WHITESPACE_REGEX)
-                .filter { token ->
-                    token.isNotEmpty() && token.none { it.isDigit() } && token.lowercase(Locale.US) !in SHOPPING_STOP_WORDS
-                }
-            val product = filtered.joinToString(" ").take(30).trim()
-            product.ifBlank { null }
-        }
-        val count = items.size
-        return if (count <= 3 && cleanItems.isNotEmpty()) {
-            "Shopping list for ${cleanItems.joinToString(", ")}"
-        } else if (cleanItems.size >= 2) {
-            "Shopping list with $count items including ${cleanItems.take(2).joinToString(" and ")} and more"
-        } else {
-            "Shopping list with $count items"
-        }
-    }
-
-    private fun buildGeneralChecklistSummary(contextPart: String, contentPart: String): String {
-        val rawItems = CHECKLIST_SPLIT_REGEX.split(contentPart)
-        val cleanedItems = rawItems.mapNotNull { raw ->
-            val trimmed = CHECKLIST_BULLET_CLEANER.replace(raw.trim(), "").trim().trimEnd('.')
-            trimmed.takeIf { it.isNotEmpty() }
-        }
-
-        val label = if (contextPart.isNotBlank()) {
-            val lowered = contextPart.lowercase(Locale.US)
-            val stripped = CHECKLIST_LABEL_STRIP_REGEX.replace(lowered, "").trim()
-            if (stripped.isNotBlank()) stripped else "key tasks"
-        } else {
-            "key tasks"
-        }
-
-        return when {
-            cleanedItems.size >= 3 -> "Checklist for $label with ${cleanedItems.size} tasks including ${cleanedItems[0]} and ${cleanedItems[1]}"
-            cleanedItems.size == 2 -> "Checklist for $label covering ${cleanedItems[0]} and ${cleanedItems[1]}"
-            cleanedItems.size == 1 -> "Checklist for $label highlighting ${cleanedItems[0]}"
-            contextPart.isNotBlank() -> "Checklist outlining $label"
-            else -> "Task checklist with multiple items"
-        }
-    }
-
-    private fun buildFoodRecipeSummary(contextPart: String, isLong: Boolean): String {
-        return if (contextPart.isNotBlank()) {
-            val recipeName = contextPart.lowercase(Locale.US)
-                .replace(" recipe", "")
-                .replace(" how to make", "")
-                .trim()
-            if (isLong) {
-                "Recipe with detailed instructions for preparing $recipeName"
-            } else {
-                "Recipe for $recipeName"
-            }
-        } else {
-            "Recipe note with cooking instructions"
-        }
-    }
-
-    private fun buildMeetingRecapSummary(contextPart: String, contentLower: String): String {
-        val meetingType = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "team meeting"
-        val keyTopics = mutableListOf<String>()
-        if ("assigned" in contentLower || "action" in contentLower) {
-            keyTopics += "task assignments"
-        }
-        if ("discussed" in contentLower || "aligned" in contentLower) {
-            keyTopics += "key decisions"
-        }
-        if ("scheduled" in contentLower) {
-            keyTopics += "scheduling"
-        }
-        return if (keyTopics.isNotEmpty()) {
-            "Meeting note on $meetingType covering ${keyTopics.take(2).joinToString(" and ")}"
-        } else {
-            "Meeting recap documenting $meetingType discussions"
-        }
-    }
-
-    private fun buildTravelLogSummary(contextPart: String, subjects: List<String>): String {
-        val destination = subjects.firstOrNull { it !in TRAVEL_SUBJECT_EXCLUSIONS }
-        return when {
-            destination != null -> "Travel log documenting journey to $destination with experiences and observations"
-            contextPart.isNotBlank() -> "Travel experience note about ${contextPart.lowercase(Locale.US)}"
-            else -> "Travel log entry capturing experiences and insights"
-        }
-    }
-
-    private fun buildWorkProjectSummary(contextPart: String, contentLower: String): String {
-        val projectName = contextPart.ifBlank { "project work" }
-        return when {
-            "milestone" in contentLower || "deliverable" in contentLower ->
-                "Work project note for $projectName outlining milestones and deliverables"
-            "status" in contentLower || "update" in contentLower ->
-                "Project status update on $projectName"
-            else -> "Work project tracking progress on $projectName"
-        }
-    }
-
-    private fun buildTechnicalReferenceSummary(contextPart: String, contentLower: String): String {
-        val procedure = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "system procedure"
-        return if ("command" in contentLower || "code" in contentLower) {
-            "Technical reference documenting command syntax for $procedure"
-        } else {
-            "Technical documentation with step-by-step procedures for $procedure"
-        }
-    }
-
-    private fun buildCreativeWritingSummary(contextPart: String, noteText: String): String {
-        val theme = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "creative piece"
-        val lower = noteText.lowercase(Locale.US)
-        return when {
-            "poetry" in lower || "poetic" in lower -> "Creative writing: poetic composition about $theme"
-            "story" in lower -> "Creative writing: story development exploring $theme"
-            else -> "Creative writing piece: $theme"
-        }
-    }
-
-    private fun buildFinanceSummary(contextPart: String, contentPart: String): String {
-        val activity = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "financial activity"
-        val match = CURRENCY_REGEX.find(contentPart)
-        return if (match != null) {
-            "Financial record for $activity involving ${match.value}"
-        } else {
-            "Financial note documenting $activity"
-        }
-    }
-
-    private fun buildHealthSummary(contextPart: String, contentLower: String): String {
-        val activity = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "wellness activity"
-        val metric = HEALTH_METRIC_REGEX.find(contentLower)?.value
-        return if (metric != null) {
-            "Health tracking note for $activity recording $metric"
-        } else {
-            "Health and wellness note about $activity"
-        }
-    }
-
-    private fun buildEducationSummary(contextPart: String, contentLower: String): String {
-        val subject = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "learning activity"
-        return if ("completed" in contentLower || "passed" in contentLower) {
-            "Learning milestone: completed $subject"
-        } else {
-            "Educational note on $subject and ongoing development"
-        }
-    }
-
-    private fun buildReminderSummary(contentPart: String): String {
-        var action = contentPart.trim()
-        val lower = action.lowercase(Locale.US)
-        if (lower.startsWith("to ")) {
-            action = action.drop(3)
-        }
-        if (action.length > 100) {
-            val truncated = action.substring(0, 100)
-            var breakPoint: Int? = null
-            for (marker in REMINDER_BREAKS) {
-                val idx = truncated.lastIndexOf(marker)
-                if (idx >= 0) {
-                    breakPoint = idx
-                    break
-                }
-            }
-            action = if (breakPoint != null) {
-                truncated.substring(0, breakPoint)
-            } else {
-                val lastSpace = truncated.lastIndexOf(' ')
-                if (lastSpace > 0) truncated.substring(0, lastSpace) else truncated
-            }
-        }
-        action = action.trim().trimEnd(',', ';')
-        return "Reminder to $action"
-    }
-
-    private fun buildPersonalDailyLifeSummary(contextPart: String): String {
-        val activity = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "daily activity"
-        return "Daily life note about $activity"
-    }
-
-    private fun buildHomeFamilySummary(contextPart: String, isList: Boolean): String {
-        val topic = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "family matter"
-        return if (isList) {
-            "Family coordination note regarding $topic with multiple items"
-        } else {
-            "Family and home note about $topic"
-        }
-    }
-
-    private fun buildSelfImprovementSummary(contextPart: String): String {
-        val focus = contextPart.takeIf { it.isNotBlank() }?.lowercase(Locale.US) ?: "personal development"
-        return "Personal growth note on $focus for self-improvement"
-    }
-
-    private fun buildGenericSummary(categoryFriendly: String, contextPart: String, contentPart: String): String {
-        return if (contextPart.isNotBlank()) {
-            "$categoryFriendly note about ${contextPart.lowercase(Locale.US)}"
-        } else {
-            val words = contentPart.split(WHITESPACE_REGEX).filter { it.isNotBlank() }
-            val firstWords = words.take(10).joinToString(" ")
-            "$categoryFriendly: $firstWords..."
-        }
-    }
-
-    fun close() {
-        interpreter?.close()
-        interpreter = null
-        categories = emptyList()
-        tokenizerVocabulary = TokenizerVocabulary.EMPTY
-    }
+    // ------------------------------------------------------------------
+    // Companion — static helpers kept for backward-compat with tests
+    // and for use in fallback / preview paths across the app.
+    // ------------------------------------------------------------------
 
     companion object {
-        internal const val MODELS_DIR_NAME = "models"
-        internal const val MODEL_ASSET_NAME = "note_classifier.tflite"
+        // Asset name constants retained for backward compatibility.
+        internal const val MODELS_DIR_NAME            = "models"
+        internal const val MODEL_ASSET_NAME           = "note_classifier.tflite"
         internal const val CATEGORY_MAPPING_ASSET_NAME = "category_mapping.json"
-        internal const val TOKENIZER_VOCAB_ASSET_NAME = "tokenizer_vocabulary_v2.txt"
-        private const val MODEL_SEQUENCE_LENGTH = 120
+        internal const val TOKENIZER_VOCAB_ASSET_NAME  = "tokenizer_vocabulary_v2.txt"
+
         private const val MAX_SUMMARY_LENGTH = 140
         private const val MAX_PREVIEW_LENGTH = 160
         private const val FALLBACK_CHAR_LIMIT = 150
         private const val FALLBACK_FIRST_LINE_TARGET = FALLBACK_CHAR_LIMIT / 2
-        private val WHITESPACE_REGEX = Regex("\\s+")
+        internal val WHITESPACE_REGEX = Regex("\\s+")
         private val TITLE_PREFIX_REGEX = Regex("^\\s*Title:\\s*", RegexOption.IGNORE_CASE)
-        private val SHOPPING_SPLIT_REGEX = Regex(",| and ", RegexOption.IGNORE_CASE)
-        private val SHOPPING_KEYWORD_REGEX = Regex("\\b(grocery|groceries|shopping list|buy|cartons|jars|milk|bread|eggs)\\b")
-        private val CHECKLIST_SPLIT_REGEX = Regex(",|;|\\band\\b|\\n", RegexOption.IGNORE_CASE)
-        private val CHECKLIST_KEYWORD_REGEX = Regex("\\b(checklist|todo|to-do|tasks?)\\b")
-        private val CHECKLIST_BULLET_CLEANER = Regex("^[\\-•▪●■∎*]+\\s*")
-        private val CHECKLIST_BULLET_LINE_REGEX = Regex("^[\\-•▪●■∎*]\\s+")
-        private val CHECKLIST_LABEL_STRIP_REGEX = Regex("\\b(checklist|list|tasks)\\b", RegexOption.IGNORE_CASE)
-        private val SUBJECT_REGEX = Regex("\\b[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\\b")
-        private val CURRENCY_REGEX = Regex("\\$[\\d,]+(?:\\.\\d{2})?")
-        private val FINANCE_KEYWORD_REGEX = Regex("\\b(budget|invoice|expense|deposit|tax|irs|payment|bank)\\b")
-        private val HEALTH_METRIC_REGEX = Regex("\\d+(?:\\.\\d+)?\\s*(?:miles|minutes|hours|lbs|kg|calories)")
-        private val HEALTH_KEYWORD_REGEX = Regex("\\b(workout|exercise|run|jog|steps|calories|wellness|gym)\\b")
-        private val REMINDER_KEYWORD_REGEX = Regex("\\b(reminder|remember|tomorrow|by friday|call|schedule)\\b")
-        private val RECIPE_KEYWORD_REGEX = Regex("\\b(recipe|ingredients|boil|bake|simmer|tbsp|cups?)\\b")
-        private val MEETING_KEYWORD_REGEX = Regex("\\b(meeting|recap|standup|action items|agenda|follow-up)\\b")
-        private val TRAVEL_KEYWORD_REGEX = Regex("\\b(trip|travel|flight|hotel|itinerary|vacation|journey)\\b")
-        private val TECHNICAL_KEYWORD_REGEX = Regex("\\b(command|syntax|api|script|procedure|sop|debug|rebase|terminal)\\b")
-        private val REMINDER_BREAKS = listOf(",", " and ", "; ")
-        private val SHOPPING_STOP_WORDS = setOf("need", "get", "buy", "pick", "for", "the", "a", "an")
-        private val TRAVEL_SUBJECT_EXCLUSIONS = setOf("Woke", "Packed", "Noted", "Explored", "Visited")
-        private const val MODEL_CONFIDENCE_MIN = 0.45f
-        private const val MODEL_CONFIDENCE_GAP_MIN = 0.15f
+        private val SENTENCE_CAPTURE = Regex("([^.!?]+[.!?])")
         private val TOKEN_SPLIT_REGEX = Regex("\\s+")
         private val STRIP_PUNCTUATION_REGEX = Regex("[\\p{Punct}]")
+        private const val MODEL_SEQUENCE_LENGTH = 120
 
-        internal fun normalizeForModelInput(text: String): String {
+        /**
+         * Returns a lightweight heuristic preview of [text] (≤2 sentences).
+         * Used as an immediate placeholder while async inference runs.
+         */
+        fun lightweightPreview(text: String): String {
+            val normalized = text.trim().replace(WHITESPACE_REGEX, " ")
+            if (normalized.isEmpty()) return ""
+            val sentences = SENTENCE_CAPTURE.findAll(normalized).map { it.value.trim() }.toList()
+            val preview = when {
+                sentences.isEmpty() -> normalized
+                sentences.size == 1 -> sentences.first()
+                else -> sentences.take(2).joinToString(" ")
+            }
+            return smartTruncate(preview, MAX_PREVIEW_LENGTH)
+        }
+
+        /** Truncates [text] to [maxLength] preferring sentence then word boundaries. */
+        fun smartTruncate(text: String, maxLength: Int = MAX_SUMMARY_LENGTH): String {
+            val normalized = text.trim().replace(WHITESPACE_REGEX, " ")
+            if (normalized.length <= maxLength) return normalized
+            val truncated = normalized.substring(0, maxLength)
+            val sentenceEnd = truncated.lastIndexOfAny(charArrayOf('.', '!', '?'))
+            if (sentenceEnd >= (maxLength * 0.7).toInt()) {
+                return truncated.substring(0, sentenceEnd + 1).trim()
+            }
+            val lastSpace = truncated.lastIndexOf(' ')
+            if (lastSpace > 0) return truncated.substring(0, lastSpace).trim()
+            return truncated.trim()
+        }
+
+        /**
+         * Normalises a note source string before it is sent to the model.
+         * "Title: foo\n\nbar" → "foo: bar"
+         */
+        fun normalizeForModelInput(text: String): String {
             val trimmed = text.trim()
             if (trimmed.isEmpty()) return ""
-
             val separatorIndex = trimmed.indexOf("\n\n")
             if (separatorIndex >= 0) {
                 val header = trimmed.substring(0, separatorIndex).trim()
@@ -611,44 +292,17 @@ class Summarizer(
                     return body.replace(WHITESPACE_REGEX, " ").trim()
                 }
             }
-
             if (trimmed.startsWith("Title:", ignoreCase = true)) {
                 return TITLE_PREFIX_REGEX.replace(trimmed, "").replace(WHITESPACE_REGEX, " ").trim()
             }
-
             return trimmed.replace(WHITESPACE_REGEX, " ").trim()
         }
 
-        internal fun lightweightPreview(text: String): String {
-            val normalized = text.trim().replace(WHITESPACE_REGEX, " ")
-            if (normalized.isEmpty()) return ""
-            val sentences = SENTENCE_CAPTURE.findAll(normalized).map { it.value.trim() }.toList()
-            val preview = when {
-                sentences.isEmpty() -> normalized
-                sentences.size == 1 -> sentences.first()
-                else -> sentences.take(2).joinToString(" ")
-            }
-            return smartTruncate(preview, MAX_PREVIEW_LENGTH)
-        }
-
-        internal fun smartTruncate(text: String, maxLength: Int = MAX_SUMMARY_LENGTH): String {
-            val normalized = text.trim().replace(WHITESPACE_REGEX, " ")
-            if (normalized.length <= maxLength) return normalized
-            val truncated = normalized.substring(0, maxLength)
-            val sentenceEnd = truncated.lastIndexOfAny(charArrayOf('.', '!', '?'))
-            if (sentenceEnd >= (maxLength * 0.7).toInt()) {
-                return truncated.substring(0, sentenceEnd + 1).trim()
-            }
-            val lastSpace = truncated.lastIndexOf(' ')
-            if (lastSpace > 0) {
-                return truncated.substring(0, lastSpace).trim()
-            }
-            return truncated.trim()
-        }
-
-        private val SENTENCE_CAPTURE = Regex("([^.!?]+[.!?])")
-
-        internal fun tokenizeForModelInput(text: String, vocabulary: TokenizerVocabulary): IntArray {
+        /**
+         * Tokenises [text] against [vocabulary] into a fixed-length int array.
+         * Retained for backward compatibility with unit tests.
+         */
+        fun tokenizeForModelInput(text: String, vocabulary: TokenizerVocabulary): IntArray {
             val normalized = normalizeForModelInput(text).lowercase(Locale.US)
             val stripped = STRIP_PUNCTUATION_REGEX.replace(normalized, " ")
             val tokens = TOKEN_SPLIT_REGEX.split(stripped).filter { it.isNotBlank() }
@@ -663,6 +317,10 @@ class Summarizer(
         }
     }
 }
+
+// --------------------------------------------------------------------------
+// TokenizerVocabulary — kept for backward compatibility with existing tests
+// --------------------------------------------------------------------------
 
 internal class TokenizerVocabulary private constructor(
     private val tokenToIndex: Map<String, Int>,

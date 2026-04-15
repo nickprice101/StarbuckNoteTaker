@@ -86,6 +86,11 @@
             tools:node="merge" />
 
         <service
+            android:name=".LlamaForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".ReminderAlarmService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
