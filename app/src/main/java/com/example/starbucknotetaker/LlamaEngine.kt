@@ -230,8 +230,8 @@ class LlamaEngine(private val context: Context) {
                 }
         }
 
-        val userContent = when (mode) {
-            Mode.QUESTION if secondary != null ->
+        val userContent = when {
+            mode == Mode.QUESTION && secondary != null ->
                 "Context:\n${secondary.take(MAX_CONTEXT_CHARS)}\n\nQuestion: ${primary.take(MAX_QUESTION_CHARS)}"
             else -> primary.take(MAX_CONTEXT_CHARS)
         }
