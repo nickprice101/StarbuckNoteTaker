@@ -1,32 +1,68 @@
-# Place the MLC prebuilt `.so` here
+# Place the MLC compiled `.so` here
 
 The Llama 3.2 3B Instruct model library (`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`)
 must be placed in this directory before building the APK.
 
+> **Note:** There is no prebuilt download available for this file. The
+> `mlc-ai/binary-mlc-llm-libs` repo does not contain a Llama-3.2-3B Android `.so`,
+> and the `mlc-chat.apk` from that release only contains the generic TVM runtime
+> (`libtvm4j_runtime_packed.so`), not a model-specific library. You must compile it
+> yourself using the MLC-LLM toolchain.
+
 ## Steps
 
-1. Download the prebuilt APK from the MLC binary release:
-   https://github.com/mlc-ai/binary-mlc-llm-libs/releases/tag/Android-09262024
+### Prerequisites
 
-2. Extract the `.so` from the APK (APKs are ZIP archives):
-   ```bash
-   unzip mlc-chat.apk "lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so" -d extracted/
-   ```
+- Python 3.10+
+- Android NDK r27+ (install via Android Studio → SDK Manager → NDK)
+- Set environment variables:
+  ```bash
+  export ANDROID_NDK=~/Android/Sdk/ndk/<version>
+  export TVM_NDK_CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+  ```
 
-3. Copy the file into this directory:
-   ```bash
-   cp extracted/lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so \
-      app/src/main/jniLibs/arm64-v8a/
-   ```
+### 1. Install MLC-LLM
 
-4. Rebuild the project — Gradle packages the `.so` automatically into the APK.
+```bash
+pip install mlc-llm
+```
+
+See https://llm.mlc.ai/docs/install/index.html for full installation instructions.
+
+### 2. Download the quantised weights from HuggingFace
+
+```bash
+git clone https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC
+```
+
+### 3. Compile the model library for Android
+
+```bash
+mlc_llm compile \
+  ./Llama-3.2-3B-Instruct-q4f16_0-MLC \
+  --target android \
+  --device android:arm64-v8a \
+  -o Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so
+```
+
+### 4. Place the output file here
+
+```bash
+cp Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so \
+   app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
+```
+
+Note the `lib` prefix — Android requires JNI `.so` files to be named with a `lib` prefix.
+
+### 5. Rebuild the project
+
+Gradle packages the `.so` automatically into the APK.
 
 ## Notes
 
 - The `.so` is the **compiled model library** (a few MB). It is separate from the
   model **weights** (~2 GB), which are downloaded at runtime by `LlamaModelManager`.
-- Only `arm64-v8a` is required for modern Android devices (all phones since ~2014
-  that can realistically run this model are arm64).
+- Only `arm64-v8a` is required for modern Android devices.
 - This file is intentionally excluded from the repository (`.gitignore`) because
   binary files should not be committed to source control. Each developer or CI
-  environment must obtain and place it locally before building.
+  environment must compile and place it locally before building.

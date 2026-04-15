@@ -19,16 +19,33 @@ The MLC-compiled model library must be placed in the APK before building:
 app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
 ```
 
-Obtain it from the MLC prebuilt release:
-<https://github.com/mlc-ai/binary-mlc-llm-libs/releases/tag/Android-09262024>
+> **There is no prebuilt download available for this file.** The
+> `mlc-ai/binary-mlc-llm-libs` release `Android-09262024` does not contain a
+> Llama-3.2-3B Android `.so`. The `mlc-chat.apk` from that release only bundles the
+> generic TVM Java runtime (`libtvm4j_runtime_packed.so`), not this model library.
+> You must compile it yourself.
+
+**Prerequisites:** Python 3.10+, Android NDK r27+, and the `mlc-llm` Python package
+(`pip install mlc-llm`). Set `ANDROID_NDK` and `TVM_NDK_CC` as described at
+<https://llm.mlc.ai/docs/install/index.html>.
 
 ```bash
-unzip mlc-chat.apk "lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so" -d extracted/
-cp extracted/lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so \
-   app/src/main/jniLibs/arm64-v8a/
+# 1. Download quantised weights
+git clone https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC
+
+# 2. Compile the model library for Android arm64
+mlc_llm compile \
+  ./Llama-3.2-3B-Instruct-q4f16_0-MLC \
+  --target android \
+  --device android:arm64-v8a \
+  -o Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so
+
+# 3. Copy into the project (note the required "lib" prefix)
+cp Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so \
+   app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
 ```
 
-The `.so` is excluded from the repository via `.gitignore`. Each developer and CI environment must obtain and place it locally before building.
+The `.so` is excluded from the repository via `.gitignore`. Each developer and CI environment must compile and place it locally before building.
 
 ## Runtime weight download
 
