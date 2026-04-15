@@ -17,10 +17,14 @@ import kotlinx.coroutines.withContext
  * On-device LLM inference engine backed by MLC LLM ([MLCEngine]) running
  * Llama 3.2 3B Instruct (q4f16_0 quantisation).
  *
- * The MLC-compiled model library (`.so`) must be bundled in the APK's
- * `jniLibs/arm64-v8a/` folder. There is no prebuilt Android `.so` for this
- * model in the public MLC release artifacts, so it must be compiled locally
- * from `mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC` and copied into the app.
+ * **Model library (`.tar` flow):**
+ * The compiled model library is distributed as a `.tar` asset bundled inside the APK
+ * (`assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar`).  The archive contains
+ * the MLC system-library object files that the TVM runtime links at runtime.
+ * On the first inference attempt [LlamaModelManager.extractModelLibIfNeeded] extracts
+ * the archive to `filesDir/lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android/`.  The
+ * resulting absolute directory path is then passed to [MLCEngine.reload] as `modelLib`
+ * instead of a JNI library name.
  *
  * The model weights (~2 GB) are not bundled in the APK; they are downloaded
  * to `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/` via [LlamaModelManager].
@@ -149,8 +153,10 @@ class LlamaEngine(private val context: Context) {
 
     private fun ensureEngineLoaded(modelPath: String) {
         if (engineLoaded) return
-        Log.i(TAG, "Loading MLCEngine: lib=${LlamaModelManager.MODEL_LIB_NAME} path=$modelPath")
-        mlcEngine.reload(LlamaModelManager.MODEL_LIB_NAME, modelPath)
+        val modelLibPath = modelManager.extractModelLibIfNeeded()
+            ?: throw IllegalStateException("Failed to extract model library from APK assets")
+        Log.i(TAG, "Loading MLCEngine: lib=$modelLibPath path=$modelPath")
+        mlcEngine.reload(modelLibPath, modelPath)
         engineLoaded = true
         Log.i(TAG, "MLCEngine loaded successfully")
     }

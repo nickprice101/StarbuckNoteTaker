@@ -28,22 +28,19 @@ import java.util.concurrent.TimeUnit
  *   - `tokenizer_config.json`  — tokenizer hyper-parameters
  *   - `params_shard_*.bin`     — actual model weights (many shards)
  *
- * The compiled model library (`.so`) must be placed in the APK's
- * `jniLibs/arm64-v8a/` directory before building. There is no prebuilt Android
- * `.so` for this model in the public MLC release artifacts, so it must be
- * compiled locally from the HuggingFace weights with `mlc_llm compile`.
- *
- * Steps:
- *   1. Install `mlc-llm` and configure `ANDROID_NDK` / `TVM_NDK_CC`.
- *   2. Clone `https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC`.
- *   3. Run `mlc_llm compile ... --target android --device android:arm64-v8a`.
- *   4. Copy the resulting `.so` to `app/src/main/jniLibs/arm64-v8a/`.
- *   5. Rebuild the project — Gradle will package the library automatically.
+ * **Modern `.tar` flow:**
+ * The compiled model library is distributed as [TAR_ASSET_NAME], bundled inside
+ * the APK's `assets/` directory.  The `.tar` contains the MLC system-library object
+ * files (`lib0.o`, `llama_q4f16_0_devc.o`) that the TVM runtime links at runtime.
+ * On the first call to [extractModelLibIfNeeded] the archive is extracted to
+ * `filesDir/[MODEL_LIB_EXTRACT_SUBDIR]/` and that directory path is passed to
+ * [ai.mlc.mlcllm.MLCEngine.reload] as `modelLib` instead of a JNI library name.
  *
  * Usage:
  * ```
  * val manager = LlamaModelManager(context)
  * manager.modelStatus.collect { status -> … }
+ * val libPath = manager.extractModelLibIfNeeded()   // extract .tar on first launch
  * manager.downloadModel { pct -> updateProgress(pct) }
  * ```
  */
@@ -170,6 +167,40 @@ class LlamaModelManager(private val context: Context) {
         _modelStatus.value = ModelStatus.Missing
     }
 
+    /**
+     * Extracts the bundled model library `.tar` from APK assets into internal storage
+     * if it has not already been extracted.
+     *
+     * The `.tar` (see [TAR_ASSET_NAME]) is packaged inside the APK's `assets/`
+     * directory and contains the compiled MLC system-library object files
+     * (`lib0.o`, `llama_q4f16_0_devc.o`).  Extraction is skipped when the
+     * sentinel file `[MODEL_LIB_EXTRACT_SUBDIR]/.extracted` already exists.
+     *
+     * @return The absolute path to the extracted library directory, or `null` on failure.
+     */
+    fun extractModelLibIfNeeded(): String? {
+        val libDir = File(context.filesDir, MODEL_LIB_EXTRACT_SUBDIR)
+        val sentinel = File(libDir, ".extracted")
+        if (sentinel.exists()) {
+            Log.d(TAG, "Model lib already extracted at ${libDir.absolutePath}")
+            return libDir.absolutePath
+        }
+        return try {
+            Log.i(TAG, "Extracting model lib from asset $TAR_ASSET_NAME → ${libDir.absolutePath}")
+            libDir.deleteRecursively()
+            libDir.mkdirs()
+            context.assets.open(TAR_ASSET_NAME).use { input ->
+                TarExtractor.extract(input, libDir)
+            }
+            sentinel.createNewFile()
+            Log.i(TAG, "Model lib extraction complete")
+            libDir.absolutePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract model lib", e)
+            null
+        }
+    }
+
     /** Approximate size of downloaded model in GB, or `null` if not present. */
     fun modelSizeGb(): Float? {
         val dir = modelDir
@@ -268,6 +299,20 @@ class LlamaModelManager(private val context: Context) {
 
     companion object {
         private const val TAG = "LlamaModelManager"
+
+        /**
+         * Asset file name of the `.tar` that bundles the compiled MLC model library.
+         * The archive is packaged in `assets/` and extracted at runtime by
+         * [extractModelLibIfNeeded].
+         */
+        const val TAR_ASSET_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar"
+
+        /**
+         * Sub-directory inside `filesDir` where the model library `.tar` is extracted.
+         * The absolute path to this directory is passed to [ai.mlc.mlcllm.MLCEngine.reload]
+         * as `modelLib` in the modern `.tar` flow.
+         */
+        const val MODEL_LIB_EXTRACT_SUBDIR = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android"
 
         /** HuggingFace model repository identifier. */
         const val HF_REPO_ID = "mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
