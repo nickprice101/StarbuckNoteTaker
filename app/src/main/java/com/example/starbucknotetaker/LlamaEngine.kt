@@ -15,16 +15,20 @@ import kotlinx.coroutines.withContext
 
 /**
  * On-device LLM inference engine backed by MLC LLM ([MLCEngine]) running
- * Llama 3.1 8B Instruct (q4f16_1 quantisation).
+ * Llama 3.2 3B Instruct (q4f16_0 quantisation).
  *
  * The MLC-compiled model library (`.so`) must be bundled in the APK's
- * `jniLibs/<abi>/` folder.  Prebuilt libraries for Android are published at:
- * https://github.com/mlc-ai/binary-mlc-llm-libs/tree/main/android/
+ * `jniLibs/arm64-v8a/` folder.  Prebuilt libraries for Android are published at:
+ * https://github.com/mlc-ai/binary-mlc-llm-libs/releases/tag/Android-09262024
  *
- * The model weights (~4.5 GB) are not bundled in the APK; they are downloaded
- * to `filesDir/models/Llama-3.1-8B-Instruct-q4f16_1-MLC/` via [LlamaModelManager].
+ * The model weights (~2 GB) are not bundled in the APK; they are downloaded
+ * to `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/` via [LlamaModelManager].
  * Until the weights are present, every inference call falls back to the
  * rule-based heuristics in [Summarizer].
+ *
+ * Devices with less than [DeviceCapabilityChecker.MIN_RAM_BYTES] (4 GB) total RAM are
+ * considered incapable and will always receive the rule-based fallback without
+ * attempting to load the model.
  *
  * Supported modes:
  *  - [Mode.SUMMARISE] — concise 1–3 line note preview
@@ -118,6 +122,11 @@ class LlamaEngine(private val context: Context) {
         taskId: String,
     ): String = withContext(Dispatchers.Default) {
         inferenceMutex.withLock {
+            // Skip the model entirely on devices that do not meet the RAM threshold
+            if (!DeviceCapabilityChecker.isAiCapable(context)) {
+                return@withLock fallback(mode, primaryText)
+            }
+
             val modelPath = modelManager.getModelPath()
             if (modelPath == null) {
                 // Model weights not yet downloaded — use rule-based fallback
@@ -179,7 +188,7 @@ class LlamaEngine(private val context: Context) {
         Mode.SUMMARISE -> Summarizer.lightweightPreview(text)
         Mode.REWRITE   -> text.trim()
         Mode.QUESTION  ->
-            "Llama 3.1 8B not yet downloaded (~4.5 GB). " +
+            "Llama 3.2 3B not yet downloaded (~2 GB). " +
             "Download it in Settings → AI model to enable question answering."
     }
 

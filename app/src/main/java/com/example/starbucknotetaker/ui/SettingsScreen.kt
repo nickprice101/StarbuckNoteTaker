@@ -39,6 +39,7 @@ fun SettingsScreen(
     modelStatus: LlamaModelManager.ModelStatus = LlamaModelManager.ModelStatus.Missing,
     onDownloadModel: () -> Unit = {},
     onDeleteModel: () -> Unit = {},
+    isAiCapable: Boolean = true,
     onBack: () -> Unit,
     onImport: (Uri, String, Boolean) -> Boolean,
     onExport: (Uri) -> Unit,
@@ -314,11 +315,12 @@ fun SettingsScreen(
                 )
             }
             Divider()
-            // ---- AI model (Llama 3.1 8B) download section ----
+            // ---- AI model (Llama 3.2 3B) download section ----
             AiModelDownloadSection(
                 modelStatus = modelStatus,
                 onDownload = onDownloadModel,
                 onDelete = onDeleteModel,
+                isAiCapable = isAiCapable,
             )
             Divider()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -535,13 +537,23 @@ private fun AiModelDownloadSection(
     modelStatus: LlamaModelManager.ModelStatus,
     onDownload: () -> Unit,
     onDelete: () -> Unit,
+    isAiCapable: Boolean = true,
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("AI Model (Llama 3.1 8B)", style = MaterialTheme.typography.h6)
+        Text("AI Model (Llama 3.2 3B)", style = MaterialTheme.typography.h6)
+        if (!isAiCapable) {
+            Text(
+                "AI features are not available on this device. A minimum of 4 GB RAM " +
+                    "is required to run the on-device model.",
+                style = MaterialTheme.typography.body2,
+                color = MaterialTheme.colors.error,
+            )
+            return@Column
+        }
         Text(
-            "Download the Llama 3.1 8B Instruct model to enable summarisation, " +
+            "Download the Llama 3.2 3B Instruct model to enable summarisation, " +
                 "rewriting, and Q&A without internet access.",
             style = MaterialTheme.typography.body2,
         )
@@ -567,7 +579,7 @@ private fun AiModelDownloadSection(
             }
             is LlamaModelManager.ModelStatus.Present -> {
                 Text(
-                    "✅ Model ready — Llama 3.1 8B",
+                    "✅ Model ready — Llama 3.2 3B",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.primary,
                 )
@@ -595,7 +607,7 @@ private fun AiModelDownloadSection(
             title = { Text("Delete AI model?") },
             text = {
                 Text(
-                    "This will remove the Llama 3.1 8B model (~4.5 GB) from your device. " +
+                    "This will remove the Llama 3.2 3B model (~2 GB) from your device. " +
                         "AI features will fall back to simple rule-based previews until you " +
                         "re-download the model."
                 )

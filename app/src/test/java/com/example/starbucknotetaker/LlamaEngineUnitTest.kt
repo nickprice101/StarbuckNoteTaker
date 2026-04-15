@@ -19,7 +19,7 @@ import org.robolectric.RobolectricTestRunner
  *
  * All tests exercise the rule-based fallback path, prompt-construction helpers,
  * and the public API surface that callers depend on.  They do not require the
- * ~4.5 GB Llama 3.1 8B model to be present on disk.
+ * ~2.0 GB Llama 3.2 3B model to be present on disk.
  */
 @RunWith(RobolectricTestRunner::class)
 class LlamaEngineUnitTest {
@@ -168,22 +168,22 @@ class LlamaEngineUnitTest {
 
     @Test
     fun modelManager_modelSizeLabel_isCorrect() {
-        assertEquals("~4.5 GB", LlamaModelManager.MODEL_SIZE_LABEL)
+        assertEquals("~2.0 GB", LlamaModelManager.MODEL_SIZE_LABEL)
     }
 
     @Test
-    fun modelManager_hfRepoId_targetsLlama31_8B() {
+    fun modelManager_hfRepoId_targetsLlama32_3B() {
         assertTrue(
-            "HuggingFace repo should reference Llama-3.1-8B",
-            LlamaModelManager.HF_REPO_ID.contains("Llama-3.1-8B", ignoreCase = true),
+            "HuggingFace repo should reference Llama-3.2-3B",
+            LlamaModelManager.HF_REPO_ID.contains("Llama-3.2-3B", ignoreCase = true),
         )
     }
 
     @Test
-    fun modelManager_modelLibName_targetsLlama31_8B() {
+    fun modelManager_modelLibName_targetsLlama32_3B() {
         assertTrue(
-            "Model lib name should reference Llama-3.1-8B",
-            LlamaModelManager.MODEL_LIB_NAME.contains("Llama-3.1-8B", ignoreCase = true),
+            "Model lib name should reference Llama-3.2-3B",
+            LlamaModelManager.MODEL_LIB_NAME.contains("Llama-3.2-3B", ignoreCase = true),
         )
     }
 }
