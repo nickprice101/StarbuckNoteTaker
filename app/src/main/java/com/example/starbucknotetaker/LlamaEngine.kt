@@ -154,7 +154,11 @@ class LlamaEngine(private val context: Context) {
     private fun ensureEngineLoaded(modelPath: String) {
         if (engineLoaded) return
         val modelLibPath = modelManager.extractModelLibIfNeeded()
-            ?: throw IllegalStateException("Failed to extract model library from APK assets")
+            ?: throw IllegalStateException(
+                "Failed to extract model library from APK assets " +
+                "(${LlamaModelManager.TAR_ASSET_NAME}). " +
+                "Reinstalling the app may fix this."
+            )
         Log.i(TAG, "Loading MLCEngine: lib=$modelLibPath path=$modelPath")
         mlcEngine.reload(modelLibPath, modelPath)
         engineLoaded = true

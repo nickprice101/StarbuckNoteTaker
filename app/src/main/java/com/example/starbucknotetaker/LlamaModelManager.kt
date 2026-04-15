@@ -181,7 +181,9 @@ class LlamaModelManager(private val context: Context) {
     fun extractModelLibIfNeeded(): String? {
         val libDir = File(context.filesDir, MODEL_LIB_EXTRACT_SUBDIR)
         val sentinel = File(libDir, ".extracted")
-        if (sentinel.exists()) {
+        // Only skip extraction when the sentinel exists AND the expected object files are present,
+        // so a partial or corrupt previous extraction is always retried.
+        if (sentinel.exists() && REQUIRED_LIB_FILES.all { File(libDir, it).exists() }) {
             Log.d(TAG, "Model lib already extracted at ${libDir.absolutePath}")
             return libDir.absolutePath
         }
@@ -191,6 +193,12 @@ class LlamaModelManager(private val context: Context) {
             libDir.mkdirs()
             context.assets.open(TAR_ASSET_NAME).use { input ->
                 TarExtractor.extract(input, libDir)
+            }
+            // Verify extraction before writing the sentinel so a corrupt archive is retried.
+            val missing = REQUIRED_LIB_FILES.filterNot { File(libDir, it).exists() }
+            if (missing.isNotEmpty()) {
+                Log.e(TAG, "Model lib extraction incomplete — missing: $missing")
+                return null
             }
             sentinel.createNewFile()
             Log.i(TAG, "Model lib extraction complete")
@@ -346,6 +354,12 @@ class LlamaModelManager(private val context: Context) {
             "ndarray-cache.json",
             "tokenizer.json",
         )
+
+        /**
+         * Object files that must be present after extracting [TAR_ASSET_NAME].
+         * Used to verify extraction was complete before writing the sentinel.
+         */
+        private val REQUIRED_LIB_FILES = listOf("lib0.o", "llama_q4f16_0_devc.o")
 
         private const val BUFFER_SIZE = 64 * 1024
     }

@@ -21,11 +21,11 @@ object TarExtractor {
     private const val BLOCK = 512
 
     /**
-     * Extracts all entries from the gzip-compressed tar stream [input] into [destDir].
+     * Extracts all entries from the gzip-compressed (or uncompressed) tar stream [input]
+     * into [destDir].
      *
-     * @param input   Raw (compressed) input stream for the `.tar.gz`/`.tar` file.
-     *                May be gzip-compressed; the function detects the magic bytes
-     *                automatically.
+     * @param input   Raw input stream for the `.tar` or `.tar.gz` file.
+     *                The function auto-detects GZIP compression from the magic bytes.
      * @param destDir Destination directory.  Created if it does not exist.
      */
     fun extract(input: InputStream, destDir: File) {
@@ -57,8 +57,9 @@ object TarExtractor {
                 val size = if (sizeOct.isEmpty()) 0L else sizeOct.toLong(8)
                 val paddedSize = if (size == 0L) 0L else ((size + BLOCK - 1) / BLOCK) * BLOCK
 
-                // ustar prefix for long paths (bytes 157–256 in some implementations
-                // are at offset 345 in ustar).  We support both plain and ustar.
+                // ustar long-path prefix field (bytes 345–499 in the 512-byte header).
+                // Present only when the combined "prefix/name" form is needed for paths
+                // longer than 100 characters.  We support both plain GNU tar and ustar.
                 val prefix = header.cStr(345, 155).trim('/')
                 val fullName = if (prefix.isEmpty()) name else "$prefix/$name"
 
