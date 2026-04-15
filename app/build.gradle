@@ -238,7 +238,7 @@ dependencies {
     implementation 'ai.djl.huggingface:tokenizers:0.33.0'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
-    // MLC LLM Android SDK — provides MLCEngine with OpenAI-compatible API for Llama 3.1 8B
+    // MLC LLM Android SDK with OpenAI-compatible API for Llama 3.2 3B
     implementation 'ai.mlc.mlcllm:android:0.1.0'
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
@@ -374,4 +374,3 @@ tasks.withType(Test).configureEach { testTask ->
     testTask.systemProperty 'robolectric.dependency.dir', depsDir
     testTask.environment 'ROBOLECTRIC_DEPENDENCY_DIR', depsDir
 }
-

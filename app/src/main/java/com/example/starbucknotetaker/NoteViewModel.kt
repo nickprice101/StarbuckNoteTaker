@@ -874,7 +874,7 @@ class NoteViewModel(
     }
 
     /**
-     * Downloads the Llama 3.1 8B MLC model weights (~4.5 GB) from HuggingFace.
+     * Downloads the Llama 3.2 3B MLC model weights (~2 GB) from HuggingFace.
      * Progress is reflected in [modelStatus].
      */
     fun downloadAiModel() {

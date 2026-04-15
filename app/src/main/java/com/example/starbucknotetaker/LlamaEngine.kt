@@ -18,8 +18,9 @@ import kotlinx.coroutines.withContext
  * Llama 3.2 3B Instruct (q4f16_0 quantisation).
  *
  * The MLC-compiled model library (`.so`) must be bundled in the APK's
- * `jniLibs/arm64-v8a/` folder.  Prebuilt libraries for Android are published at:
- * https://github.com/mlc-ai/binary-mlc-llm-libs/releases/tag/Android-09262024
+ * `jniLibs/arm64-v8a/` folder. There is no prebuilt Android `.so` for this
+ * model in the public MLC release artifacts, so it must be compiled locally
+ * from `mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC` and copied into the app.
  *
  * The model weights (~2 GB) are not bundled in the APK; they are downloaded
  * to `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/` via [LlamaModelManager].
@@ -193,7 +194,7 @@ class LlamaEngine(private val context: Context) {
     }
 
     // ------------------------------------------------------------------
-    // Message construction (Llama 3.1 Instruct chat template)
+    // Message construction for the Llama 3.2 Instruct workflow
     // ------------------------------------------------------------------
 
     private fun buildMessages(
