@@ -238,8 +238,8 @@ dependencies {
     implementation 'ai.djl.huggingface:tokenizers:0.33.0'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
-    // MLC LLM Android SDK with OpenAI-compatible API for Llama 3.2 3B
-    implementation 'ai.mlc.mlcllm:android:0.1.0'
+    // MLC LLM Android SDK (local module) for on-device Llama 3.2 3B inference
+    implementation project(':mlc4j')
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 

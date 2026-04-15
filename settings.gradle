@@ -15,13 +15,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // MLC LLM Android SDK for on-device Llama 3.2 3B inference
-        maven {
-            name = "MlcLlm"
-            url = uri('https://repo.mlc.ai/repository/maven-releases/')
-        }
     }
 }
 
 rootProject.name = 'StarbuckNoteTaker'
 include ':app'
+include ':mlc4j'
