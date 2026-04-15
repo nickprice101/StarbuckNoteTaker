@@ -5,7 +5,7 @@ package ai.mlc.mlcllm
  *
  * Only the fields referenced by the app's [LlamaEngine] are included here.
  * The naming follows the conventions used in that file (camelCase for Kotlin
- * idiomatic style; the upstream library uses snake_case in its serialised JSON).
+ * idiomatic style; the upstream library uses snake_case in its serialized JSON).
  *
  * Source reference: https://github.com/mlc-ai/mlc-llm/tree/main/android/mlc4j
  */

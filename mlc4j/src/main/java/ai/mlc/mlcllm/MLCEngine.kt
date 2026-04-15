@@ -16,8 +16,10 @@ class MLCEngine {
 
     /**
      * Loads the model.
+     *
      * @param modelLib  path to (or name of) the compiled model library
      * @param modelPath path to the model weights directory
+     * @throws UnsupportedOperationException always — native TVM libraries are not present
      */
     fun reload(modelLib: String, modelPath: String) {
         throw UnsupportedOperationException(
@@ -41,15 +43,19 @@ class Chat {
 
 class Completions {
     /**
-     * Synchronous, callback-based completion call.
+     * Stub completion call. Always throws because [MLCEngine.reload] will have
+     * already thrown before this point can be reached; the exception is caught
+     * by the `runCatching` in [LlamaEngine][com.example.starbucknotetaker.LlamaEngine]
+     * and routed to the rule-based fallback.
      *
-     * The stub never invokes [callback] because the native engine is absent.
-     * [MLCEngine.reload] will have already thrown before this is reached.
+     * @throws UnsupportedOperationException always — native TVM libraries are not present
      */
     fun create(
         request: OpenAIProtocol.ChatCompletionRequest,
         callback: (OpenAIProtocol.ChatCompletionStreamResponse) -> Unit,
     ) {
-        // no-op stub — native engine unavailable
+        throw UnsupportedOperationException(
+            "MLC LLM native library is not available in this build."
+        )
     }
 }
