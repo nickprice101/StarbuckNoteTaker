@@ -91,10 +91,19 @@ class NoteViewModel(
     private var llamaBroadcastReceiver: BroadcastReceiver? = null
     private var llamaModelManager: LlamaModelManager? = null
 
-    /** Download/presence status of the Llama 3.1 8B MLC model weights. */
+    /** Download/presence status of the Llama 3.2 3B MLC model weights. */
     val modelStatus: StateFlow<LlamaModelManager.ModelStatus>
         get() = llamaModelManager?.modelStatus
             ?: MutableStateFlow(LlamaModelManager.ModelStatus.Missing)
+
+    /**
+     * `true` when the device meets the minimum hardware requirements to run the
+     * on-device AI model (currently 4 GB total RAM).  When `false`, AI features
+     * are hidden in the UI and model inference always falls back to rule-based
+     * heuristics.  Evaluated once per session during [loadNotes].
+     */
+    var isAiCapable: Boolean = false
+        private set
 
     fun loadNotes(context: Context, pin: String) {
         this.pin = pin
@@ -116,6 +125,7 @@ class NoteViewModel(
         _summarizerEnabled.value = summarizerEnabled
         configureSummarizer(summarizerEnabled)
         llamaModelManager = LlamaModelManager(appContext)
+        isAiCapable = DeviceCapabilityChecker.isAiCapable(appContext)
         registerLlamaBroadcastReceiver(appContext)
     }
 

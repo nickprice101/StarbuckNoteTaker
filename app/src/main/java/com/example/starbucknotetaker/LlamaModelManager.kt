@@ -15,10 +15,11 @@ import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * Manages the lifecycle of the Llama 3.1 8B MLC-compiled model weights on device.
+ * Manages the lifecycle of the Llama 3.2 3B MLC-compiled model weights on device.
  *
- * The model is never bundled in the APK (~4.5 GB).  It is downloaded from HuggingFace
- * on first use and stored in `filesDir/models/Llama-3.1-8B-Instruct-q4f16_1-MLC/`.
+ * The model weights (~2 GB) are never bundled in the APK.  They are downloaded from
+ * HuggingFace on first use and stored in
+ * `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/`.
  *
  * The MLC model directory contains:
  *   - `mlc-chat-config.json`   — model/tokenizer configuration
@@ -27,9 +28,16 @@ import java.util.concurrent.TimeUnit
  *   - `tokenizer_config.json`  — tokenizer hyper-parameters
  *   - `params_shard_*.bin`     — actual model weights (many shards)
  *
- * The compiled model library (`.so`) is expected to be bundled in the APK's
- * `jniLibs/<abi>/` directory.  It is obtained from the MLC binary release at:
- * https://github.com/mlc-ai/binary-mlc-llm-libs
+ * The compiled model library (`.so`) must be placed in the APK's
+ * `jniLibs/arm64-v8a/` directory before building.  Extract it from the MLC
+ * prebuilt release APK published at:
+ * https://github.com/mlc-ai/binary-mlc-llm-libs/releases/tag/Android-09262024
+ *
+ * Steps:
+ *   1. Download `mlc-chat.apk` from the release above.
+ *   2. Unzip: `unzip mlc-chat.apk "lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so"`
+ *   3. Copy the extracted `.so` to `app/src/main/jniLibs/arm64-v8a/`.
+ *   4. Rebuild the project — Gradle will package the library automatically.
  *
  * Usage:
  * ```
@@ -153,7 +161,7 @@ class LlamaModelManager(private val context: Context) {
         }
 
     /**
-     * Deletes the local model weights directory to free ~4.5 GB of storage.
+     * Deletes the local model weights directory to free ~2 GB of storage.
      */
     fun deleteModel() {
         modelDir.deleteRecursively()
@@ -261,7 +269,7 @@ class LlamaModelManager(private val context: Context) {
         private const val TAG = "LlamaModelManager"
 
         /** HuggingFace model repository identifier. */
-        const val HF_REPO_ID = "mlc-ai/Llama-3.1-8B-Instruct-q4f16_1-MLC"
+        const val HF_REPO_ID = "mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /** Base URL for downloading individual files from this repo. */
         private const val HF_BASE_URL =
@@ -271,18 +279,17 @@ class LlamaModelManager(private val context: Context) {
          * Sub-directory inside `filesDir` where the model weights live.
          * This is also the value passed to [ai.mlc.mlcllm.MLCEngine.reload] as `modelPath`.
          */
-        const val MODEL_SUBDIR = "models/Llama-3.1-8B-Instruct-q4f16_1-MLC"
+        const val MODEL_SUBDIR = "models/Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /**
          * The model-library name passed to [ai.mlc.mlcllm.MLCEngine.reload].
-         * This corresponds to the compiled `.so` bundled in the APK's `jniLibs/`.
-         * Obtain the prebuilt library from:
-         * https://github.com/mlc-ai/binary-mlc-llm-libs/tree/main/android/
+         * This corresponds to the compiled `.so` bundled in the APK's `jniLibs/arm64-v8a/`.
+         * See the class KDoc for instructions on obtaining the prebuilt library.
          */
-        const val MODEL_LIB_NAME = "Llama-3.1-8B-Instruct-q4f16_1-MLC"
+        const val MODEL_LIB_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /** Human-readable approximate download size shown in the Settings UI. */
-        const val MODEL_SIZE_LABEL = "~4.5 GB"
+        const val MODEL_SIZE_LABEL = "~2.0 GB"
 
         /**
          * Files that must be present for the model to be considered ready.
