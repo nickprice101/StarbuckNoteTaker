@@ -167,9 +167,8 @@ echo ""
 
 ${MLC_LLM_CMD} compile \
   "${WEIGHTS_DIR}" \
-  --target android \
-  --device "android:arm64-v8a" \
-  --system-lib \
+  --device android \
+  --host aarch64-linux-android \
   --output "${COMPILE_OUTPUT_DIR}/model.tar"
 
 # ---------------------------------------------------------------------------
