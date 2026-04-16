@@ -904,6 +904,11 @@ class NoteViewModel(
                 if (isError) {
                     Log.e("NoteViewModel", "LLM error for requestId=$requestId: $result")
                     _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, result)
+                    // Write the error into the Answer note for QUESTION mode so the user
+                    // can read and copy the full error message for debugging.
+                    if (mode == LlamaEngine.Mode.QUESTION && noteId != -1L) {
+                        createAnswerNote(noteId, "⚠️ AI Error\n\n$result")
+                    }
                     return
                 }
 

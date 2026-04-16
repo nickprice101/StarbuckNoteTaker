@@ -88,7 +88,8 @@ class LlamaForegroundService : Service() {
                 broadcastResult(requestId, noteId, mode, result, isError = false)
             } catch (e: Exception) {
                 Log.e(TAG, "Inference failed for requestId=$requestId", e)
-                broadcastResult(requestId, noteId, mode, e.message ?: "Inference failed", isError = true)
+                val errorDetail = "[${e::class.simpleName}] ${e.message ?: "Inference failed"}"
+                broadcastResult(requestId, noteId, mode, errorDetail, isError = true)
             } finally {
                 phraseJob?.cancel()
                 stopForeground(STOP_FOREGROUND_REMOVE)
