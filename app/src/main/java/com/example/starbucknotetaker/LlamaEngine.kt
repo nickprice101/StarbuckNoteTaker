@@ -149,14 +149,17 @@ class LlamaEngine(private val context: Context) {
                 ensureEngineLoaded(modelPath)
                 generateWithMlc(mode, primaryText, secondaryText, taskId)
             }.getOrElse { e ->
-                Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId", e)
+                val diagInfo = modelManager.debugModelDirInfo()
+                Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId " +
+                    "[${e::class.simpleName}]: ${e.message}\n$diagInfo", e)
                 _progress.value = InferenceProgress.Error(taskId, e.message ?: "inference error")
                 // Return a distinct message for QUESTION mode so the user is not told the model
                 // is not downloaded when it is actually present but failed to load or run.
                 fallback(
                     mode, primaryText,
                     questionMessage =
-                        "AI model failed to run. Try restarting the app, or delete and " +
+                        "AI model failed to run (${e::class.simpleName}). " +
+                        "Try restarting the app, or delete and " +
                         "re-download the model in Settings → AI model.",
                 )
             }
@@ -166,13 +169,24 @@ class LlamaEngine(private val context: Context) {
     private fun ensureEngineLoaded(modelPath: String) {
         if (engineLoaded) return
         val modelLibPath = modelManager.extractModelLibIfNeeded()
-            ?: throw IllegalStateException(
-                "Failed to extract model library from APK assets " +
-                "(${LlamaModelManager.TAR_ASSET_NAME}). " +
-                "Reinstalling the app may fix this."
-            )
+            ?: run {
+                val diagInfo = modelManager.debugModelDirInfo()
+                Log.e(TAG, "Model lib extraction failed.\n$diagInfo")
+                throw IllegalStateException(
+                    "Failed to extract model library from APK assets " +
+                    "(${LlamaModelManager.TAR_ASSET_NAME}). " +
+                    "Reinstalling the app may fix this."
+                )
+            }
         Log.i(TAG, "Loading MLCEngine: lib=$modelLibPath path=$modelPath")
-        mlcEngine.reload(modelLibPath, modelPath)
+        Log.d(TAG, modelManager.debugModelDirInfo())
+        try {
+            mlcEngine.reload(modelLibPath, modelPath)
+        } catch (e: Throwable) {
+            val diagInfo = modelManager.debugModelDirInfo()
+            Log.e(TAG, "MLCEngine.reload failed [${e::class.qualifiedName}]: ${e.message}\n$diagInfo", e)
+            throw e
+        }
         engineLoaded = true
         Log.i(TAG, "MLCEngine loaded successfully")
     }

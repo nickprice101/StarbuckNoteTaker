@@ -48,8 +48,13 @@ class LlamaModelManager(private val context: Context) {
 
     sealed class ModelStatus {
         object Missing      : ModelStatus()
-        data class Present(val path: String) : ModelStatus()
-        data class Downloading(val progressPercent: Int, val label: String) : ModelStatus()
+        data class Present(val path: String, val sizeBytes: Long = 0L) : ModelStatus()
+        data class Downloading(
+            val progressPercent: Int,
+            val label: String,
+            val downloadedBytes: Long = 0L,
+            val totalBytes: Long = 0L,
+        ) : ModelStatus()
         data class Error(val message: String) : ModelStatus()
     }
 
@@ -99,7 +104,7 @@ class LlamaModelManager(private val context: Context) {
      */
     suspend fun downloadModel(onProgress: (Int) -> Unit = {}): Boolean =
         withContext(Dispatchers.IO) {
-            _modelStatus.value = ModelStatus.Downloading(0, "Preparing download…")
+            _modelStatus.value = ModelStatus.Downloading(0, "Preparing download…", 0L, 0L)
             val dest = modelDir
 
             try {
@@ -127,6 +132,8 @@ class LlamaModelManager(private val context: Context) {
                     _modelStatus.value = ModelStatus.Downloading(
                         if (totalBytes > 0) (downloadedBytes * 100L / totalBytes).toInt() else 0,
                         label,
+                        downloadedBytes,
+                        totalBytes,
                     )
 
                     val targetFile = File(dest, fileName)
@@ -143,7 +150,7 @@ class LlamaModelManager(private val context: Context) {
                         val pct = if (totalBytes > 0) {
                             (downloadedBytes * 100L / totalBytes).toInt()
                         } else 0
-                        _modelStatus.value = ModelStatus.Downloading(pct, label)
+                        _modelStatus.value = ModelStatus.Downloading(pct, label, downloadedBytes, totalBytes)
                         onProgress(pct)
                     }
                     if (!ok) {
@@ -152,8 +159,9 @@ class LlamaModelManager(private val context: Context) {
                     }
                 }
 
-                _modelStatus.value = ModelStatus.Present(dest.absolutePath)
-                Log.i(TAG, "Model download complete → ${dest.absolutePath}")
+                val sizeBytes = dest.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                _modelStatus.value = ModelStatus.Present(dest.absolutePath, sizeBytes)
+                Log.i(TAG, "Model download complete → ${dest.absolutePath} (${sizeBytes / (1024 * 1024)} MB)")
                 true
 
             } catch (e: Exception) {
@@ -222,13 +230,43 @@ class LlamaModelManager(private val context: Context) {
         return if (bytes > 0) bytes.toFloat() / (1024 * 1024 * 1024) else null
     }
 
+    /**
+     * Returns a multi-line debug string describing the state of the model and lib directories.
+     * Intended to be included in error messages and log output when inference fails.
+     */
+    fun debugModelDirInfo(): String {
+        val sb = StringBuilder()
+        val dir = modelDir
+        sb.appendLine("Model dir: ${dir.absolutePath} (exists=${dir.exists()})")
+        if (dir.exists()) {
+            val files = dir.listFiles()?.sortedBy { it.name } ?: emptyList()
+            sb.appendLine("  Files (${files.size}):")
+            files.forEach { f ->
+                val sizeMb = f.length() / (1024.0 * 1024.0)
+                sb.appendLine("    ${f.name}  %.2f MB".format(sizeMb))
+            }
+        }
+        val libDir = File(context.filesDir, MODEL_LIB_EXTRACT_SUBDIR)
+        sb.appendLine("Lib dir: ${libDir.absolutePath} (exists=${libDir.exists()})")
+        if (libDir.exists()) {
+            val files = libDir.listFiles()?.sortedBy { it.name } ?: emptyList()
+            sb.appendLine("  Files (${files.size}):")
+            files.forEach { f ->
+                val sizeMb = f.length() / (1024.0 * 1024.0)
+                sb.appendLine("    ${f.name}  %.2f MB".format(sizeMb))
+            }
+        }
+        return sb.toString().trimEnd()
+    }
+
     // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
 
     private fun computeCurrentStatus(): ModelStatus {
-        val path = getModelPath()
-        return if (path != null) ModelStatus.Present(path) else ModelStatus.Missing
+        val path = getModelPath() ?: return ModelStatus.Missing
+        val sizeBytes = modelDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        return ModelStatus.Present(path, sizeBytes)
     }
 
     /**

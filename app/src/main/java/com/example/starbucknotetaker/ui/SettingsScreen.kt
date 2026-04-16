@@ -575,11 +575,20 @@ private fun AiModelDownloadSection(
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                 )
-                Text("$pct%", style = MaterialTheme.typography.caption)
+                val progressText = if (modelStatus.totalBytes > 0) {
+                    val downloadedMb = modelStatus.downloadedBytes / (1024f * 1024f)
+                    val totalMb = modelStatus.totalBytes / (1024f * 1024f)
+                    "$pct%  (%.0f MB / %.0f MB)".format(downloadedMb, totalMb)
+                } else {
+                    "$pct%"
+                }
+                Text(progressText, style = MaterialTheme.typography.caption)
             }
             is LlamaModelManager.ModelStatus.Present -> {
+                val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
+                val sizeLabel = if (modelStatus.sizeBytes > 0) " (%.0f MB on disk)".format(sizeMb) else ""
                 Text(
-                    "✅ Model ready — Llama 3.2 3B",
+                    "✅ Model ready — Llama 3.2 3B$sizeLabel",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.primary,
                 )
@@ -588,7 +597,10 @@ private fun AiModelDownloadSection(
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colors.error,
                     ),
-                ) { Text("Delete model (free storage)") }
+                ) {
+                    val freeLabel = if (modelStatus.sizeBytes > 0) " (free %.0f MB)".format(sizeMb) else ""
+                    Text("Delete model$freeLabel")
+                }
             }
             is LlamaModelManager.ModelStatus.Error -> {
                 Text(
@@ -602,12 +614,18 @@ private fun AiModelDownloadSection(
     }
 
     if (showDeleteConfirm) {
+        val sizeLabel = if (modelStatus is LlamaModelManager.ModelStatus.Present && modelStatus.sizeBytes > 0) {
+            val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
+            "%.0f MB".format(sizeMb)
+        } else {
+            "~2 GB"
+        }
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Delete AI model?") },
             text = {
                 Text(
-                    "This will remove the Llama 3.2 3B model (~2 GB) from your device. " +
+                    "This will remove the Llama 3.2 3B model ($sizeLabel) from your device. " +
                         "AI features will fall back to simple rule-based previews until you " +
                         "re-download the model."
                 )
