@@ -16,12 +16,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.Card
 import androidx.compose.material.CircularProgressIndicator
+import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,6 +48,9 @@ private val WITTY_PHRASES = listOf(
     "Almost there, bear with me 🐻",
 )
 
+/** How long (ms) the error card stays visible before fading out. */
+private const val ERROR_DISPLAY_MS = 5_000L
+
 /**
  * Semi-transparent overlay card displayed over the content area being updated
  * by an AI inference task.
@@ -52,9 +59,13 @@ private val WITTY_PHRASES = listOf(
  * shows a spinner and cycles through [WITTY_PHRASES] every ~2 seconds.  It
  * also streams the live partial token output from the model beneath the phrase.
  *
+ * When [progress] transitions to [LlamaEngine.InferenceProgress.Error] a brief
+ * error card is shown for [ERROR_DISPLAY_MS] milliseconds and then fades out,
+ * giving the user in-app visual feedback without permanently blocking the UI.
+ *
  * The overlay fades out automatically when [progress] transitions to
  * [LlamaEngine.InferenceProgress.Done], [LlamaEngine.InferenceProgress.Idle],
- * or [LlamaEngine.InferenceProgress.Error].
+ * or after the error display timeout.
  *
  * @param progress   Current inference progress from [LlamaEngine.progress].
  * @param modifier   Optional layout modifier.
@@ -64,8 +75,24 @@ fun AiProgressOverlay(
     progress: LlamaEngine.InferenceProgress,
     modifier: Modifier = Modifier,
 ) {
+    // Track whether the error card should still be shown.
+    // We keep a separate boolean so the card auto-dismisses after ERROR_DISPLAY_MS
+    // even though the InferenceProgress state stays as Error until the next action.
+    var showError by remember { mutableStateOf(false) }
+
+    LaunchedEffect(progress) {
+        if (progress is LlamaEngine.InferenceProgress.Error) {
+            showError = true
+            delay(ERROR_DISPLAY_MS)
+            showError = false
+        } else {
+            showError = false
+        }
+    }
+
     val isVisible = progress is LlamaEngine.InferenceProgress.Thinking ||
-            progress is LlamaEngine.InferenceProgress.Throttled
+            progress is LlamaEngine.InferenceProgress.Throttled ||
+            showError
 
     AnimatedVisibility(
         visible = isVisible,
@@ -73,7 +100,11 @@ fun AiProgressOverlay(
         exit  = fadeOut(animationSpec = tween(durationMillis = 500)),
         modifier = modifier,
     ) {
-        AiProgressCard(progress = progress)
+        if (showError && progress is LlamaEngine.InferenceProgress.Error) {
+            AiErrorCard(message = progress.message)
+        } else {
+            AiProgressCard(progress = progress)
+        }
     }
 }
 
@@ -130,6 +161,38 @@ private fun AiProgressCard(progress: LlamaEngine.InferenceProgress) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+/** Error card shown briefly when an inference attempt fails. */
+@Composable
+private fun AiErrorCard(message: String) {
+    Card(
+        backgroundColor = MaterialTheme.colors.error.copy(alpha = 0.10f),
+        elevation = 4.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colors.error,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.caption,
+                color = MaterialTheme.colors.error,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
