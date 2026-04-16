@@ -73,6 +73,16 @@ jobs:
           # whether pip used the system or the per-user site-packages directory.
           export PATH="$(python3 -m site --user-base)/bin:${PATH}"
 
+          echo "🔬  Verifying mlc-llm is importable after install …"
+          python3 -c "import mlc_llm; print('  mlc_llm module OK:', mlc_llm.__file__)" || {
+            echo "::error::mlc_llm is not importable after pip install. Diagnostic info:"
+            python3 -m pip show mlc-llm-nightly-cpu || true
+            python3 -c "import sys; print(sys.path)"
+            exit 1
+          }
+          # Also add the sys.prefix/bin to PATH (covers venv / system pip scenarios).
+          export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
+
           echo "⚙️   Compiling model library (this may take 10–30 min) …"
           bash scripts/compile_model_tar.sh
 
