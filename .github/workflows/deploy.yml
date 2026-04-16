@@ -68,7 +68,7 @@ jobs:
           git lfs install
 
           echo "📦  Installing mlc-llm …"
-          pip install --pre -f https://mlc.ai/wheels mlc-llm mlc-ai-nightly-cpu
+          pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
 
           echo "⚙️   Compiling model library (this may take 10–30 min) …"
           bash scripts/compile_model_tar.sh
