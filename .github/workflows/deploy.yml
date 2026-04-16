@@ -37,6 +37,11 @@ jobs:
           fi
           echo "sdk.dir=$SDK_PATH" > local.properties
 
+      - name: Download MLC TVM runtime native library
+        run: |
+          set -euo pipefail
+          bash scripts/fetch_mlc_native.sh
+
       - name: Verify MLC model configuration assets
         run: |
 
