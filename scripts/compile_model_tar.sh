@@ -180,19 +180,25 @@ echo "🔎  Verifying compiled archive …"
 # Dump the archive listing once; use plain 'tar -tf' so that both plain .tar
 # and gzip-compressed .tar.gz archives are handled correctly (GNU tar and
 # BSD tar both auto-detect compression without an explicit -z flag).
-TAR_CONTENTS="$(tar -tf "${COMPILE_OUTPUT_DIR}/model.tar" 2>/dev/null)"
+# Normalise entries by stripping any leading "./" so that both "./lib0.o"
+# and "lib0.o" style archives are matched uniformly.
+TAR_LISTING_ERR="$(mktemp)"
+TAR_CONTENTS="$(tar -tf "${COMPILE_OUTPUT_DIR}/model.tar" 2>"${TAR_LISTING_ERR}" | sed 's|^\./||')" || true
 
 if [[ -z "${TAR_CONTENTS}" ]]; then
-  echo "❌  Could not list compiled archive (empty or unreadable)." >&2
+  echo "❌  Could not list compiled archive." >&2
+  if [[ -s "${TAR_LISTING_ERR}" ]]; then
+    echo "     tar error: $(cat "${TAR_LISTING_ERR}")" >&2
+  fi
+  rm -f "${TAR_LISTING_ERR}"
   exit 1
 fi
+rm -f "${TAR_LISTING_ERR}"
 
 MISSING=()
 
 # lib0.o — TVM runtime support code; always expected.
-# The entry may appear as "lib0.o" or "./lib0.o" depending on how the
-# archive was created, so strip any leading "./" before comparing.
-if ! echo "${TAR_CONTENTS}" | sed 's|^\./||' | grep -q "^lib0\.o$"; then
+if ! echo "${TAR_CONTENTS}" | grep -q "^lib0\.o$"; then
   MISSING+=("lib0.o")
 fi
 
@@ -204,7 +210,7 @@ fi
 # Accept any .o whose basename starts with the system-lib prefix so that
 # future naming changes don't break this check.
 SYS_LIB_PREFIX="llama_q4f16_0_"
-if ! echo "${TAR_CONTENTS}" | sed 's|^\./||' | grep -q "^${SYS_LIB_PREFIX}.*\.o$"; then
+if ! echo "${TAR_CONTENTS}" | grep -q "^${SYS_LIB_PREFIX}.*\.o$"; then
   MISSING+=("${SYS_LIB_PREFIX}*.o  (no file matching the model prefix found)")
 fi
 
