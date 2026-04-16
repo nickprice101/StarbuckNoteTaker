@@ -27,6 +27,7 @@ jobs:
             platforms;android-34
             build-tools;34.0.0
             ndk;26.1.10909125
+            ndk;27.2.12479018
 
       - name: Configure local.properties
         run: |
@@ -41,6 +42,44 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/fetch_mlc_native.sh
+
+      - name: Build MLC model library (.tar) if stub
+        run: |
+          set -euo pipefail
+
+          TAR_PATH="app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar"
+
+          # A real compiled system-lib .tar for Llama 3.2 3B is tens of MB.
+          # The placeholder stub committed to the repo is ~512 KB.
+          # Anything above 10 MB is treated as a genuine compiled archive.
+          MIN_REAL_BYTES=10485760
+
+          if [[ -f "${TAR_PATH}" ]] && \
+             [[ $(stat -c%s "${TAR_PATH}") -gt ${MIN_REAL_BYTES} ]]; then
+            echo "✅  Model library .tar is already a real compiled archive — skipping compilation."
+            echo "     Size: $(du -sh "${TAR_PATH}" | cut -f1)"
+            exit 0
+          fi
+
+          echo "⚠️  Stub model library detected ($(du -sh "${TAR_PATH}" 2>/dev/null | cut -f1 || echo 'missing')) — compiling real archive."
+
+          echo "📦  Installing git-lfs …"
+          sudo apt-get install -y --no-install-recommends git-lfs
+          git lfs install
+
+          echo "📦  Installing mlc-llm …"
+          pip install --quiet mlc-llm
+
+          echo "⚙️   Compiling model library (this may take 10–30 min) …"
+          bash scripts/compile_model_tar.sh
+
+          echo "📝  Committing compiled .tar back to branch …"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${TAR_PATH}"
+          git commit -m "ci: replace stub model .tar with real compiled archive [skip ci]"
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            "HEAD:${{ github.ref_name }}"
 
       - name: Verify MLC model configuration assets
         run: |
