@@ -49,7 +49,17 @@ trap 'rm -rf "${COMPILE_OUTPUT_DIR}"' EXIT
 # ---------------------------------------------------------------------------
 echo "🔍  Checking prerequisites …"
 
-if ! command -v mlc_llm &>/dev/null; then
+# Determine how to invoke mlc_llm. pip may install the entry-point script to
+# ~/.local/bin which is not always on $PATH within the same CI step that ran
+# the install.  Falling back to the Python module invocation ensures the tool
+# is always found as long as the package is importable.
+if command -v mlc_llm &>/dev/null; then
+  MLC_LLM_CMD="mlc_llm"
+elif python3 -m mlc_llm --version &>/dev/null 2>&1; then
+  MLC_LLM_CMD="python3 -m mlc_llm"
+elif python -m mlc_llm --version &>/dev/null 2>&1; then
+  MLC_LLM_CMD="python -m mlc_llm"
+else
   echo "❌  mlc_llm not found.  Install it with:" >&2
   echo "      pip install mlc-llm" >&2
   exit 1
@@ -77,7 +87,7 @@ if [[ -z "${ANDROID_NDK:-}" || ! -d "${ANDROID_NDK}" ]]; then
   exit 1
 fi
 
-echo "     mlc_llm : $(mlc_llm --version 2>&1 | head -1 || echo 'unknown')"
+echo "     mlc_llm : $(${MLC_LLM_CMD} --version 2>&1 | head -1 || echo 'unknown')"
 echo "     NDK     : ${ANDROID_NDK}"
 
 # ---------------------------------------------------------------------------
@@ -113,7 +123,7 @@ echo "⚙️   Compiling Llama 3.2 3B for Android arm64 (system-lib) …"
 echo "     This may take 10–30 minutes depending on your machine."
 echo ""
 
-mlc_llm compile \
+${MLC_LLM_CMD} compile \
   "${WEIGHTS_DIR}" \
   --target android \
   --device "android:arm64-v8a" \
