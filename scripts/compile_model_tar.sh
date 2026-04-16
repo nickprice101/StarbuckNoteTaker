@@ -56,13 +56,15 @@ if ! command -v mlc_llm &>/dev/null; then
 fi
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
-  # Try common locations
-  for candidate in \
-      "${ANDROID_HOME:-}/ndk/$(ls "${ANDROID_HOME:-/nonexistent}/ndk" 2>/dev/null | sort -V | tail -1)" \
-      "${NDK_HOME:-}" \
-      "/usr/local/android-ndk" \
-      "/opt/android-ndk"; do
-    if [[ -d "${candidate}" ]]; then
+  # Try common locations, guarding against unset ANDROID_HOME
+  ndk_candidates=()
+  if [[ -n "${ANDROID_HOME:-}" && -d "${ANDROID_HOME}/ndk" ]]; then
+    latest_ndk_ver="$(ls "${ANDROID_HOME}/ndk" 2>/dev/null | sort -V | tail -1)"
+    [[ -n "${latest_ndk_ver}" ]] && ndk_candidates+=("${ANDROID_HOME}/ndk/${latest_ndk_ver}")
+  fi
+  ndk_candidates+=("${NDK_HOME:-}" "/usr/local/android-ndk" "/opt/android-ndk")
+  for candidate in "${ndk_candidates[@]}"; do
+    if [[ -n "${candidate}" && -d "${candidate}" ]]; then
       export ANDROID_NDK="${candidate}"
       break
     fi
@@ -75,7 +77,7 @@ if [[ -z "${ANDROID_NDK:-}" || ! -d "${ANDROID_NDK}" ]]; then
   exit 1
 fi
 
-echo "     mlc_llm : $(mlc_llm --version 2>&1 | head -1)"
+echo "     mlc_llm : $(mlc_llm --version 2>&1 | head -1 || echo 'unknown')"
 echo "     NDK     : ${ANDROID_NDK}"
 
 # ---------------------------------------------------------------------------

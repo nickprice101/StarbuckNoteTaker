@@ -63,8 +63,7 @@ class MLCEngine {
     fun reload(modelLib: String, modelPath: String) {
         if (chatHandle != 0L) {
             Log.d(TAG, "Unloading existing engine before reload")
-            ChatModule.chatUnload(chatHandle)
-            chatHandle = 0L
+            releaseHandle()
         }
         Log.i(TAG, "Loading model: lib=$modelLib  weights=$modelPath")
         chatHandle = ChatModule.chatCreate(modelLib, modelPath, "{}")
@@ -80,10 +79,7 @@ class MLCEngine {
 
     /** Releases the native engine and frees model memory. */
     fun unload() {
-        if (chatHandle != 0L) {
-            ChatModule.chatUnload(chatHandle)
-            chatHandle = 0L
-        }
+        releaseHandle()
     }
 
     /**
@@ -93,6 +89,14 @@ class MLCEngine {
     fun reset() {
         if (chatHandle != 0L) {
             ChatModule.chatReset(chatHandle)
+        }
+    }
+
+    /** Releases the native handle, if one is held. */
+    private fun releaseHandle() {
+        if (chatHandle != 0L) {
+            ChatModule.chatUnload(chatHandle)
+            chatHandle = 0L
         }
     }
 
