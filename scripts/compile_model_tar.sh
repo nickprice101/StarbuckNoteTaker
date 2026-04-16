@@ -60,9 +60,17 @@ elif python3 -m mlc_llm --version &>/dev/null 2>&1; then
 elif python -m mlc_llm --version &>/dev/null 2>&1; then
   MLC_LLM_CMD="python -m mlc_llm"
 else
-  echo "❌  mlc_llm not found.  Install it with:" >&2
-  echo "      pip install mlc-llm" >&2
-  exit 1
+  # pip may install entry-point scripts to the Python user-base bin directory
+  # (e.g. ~/.local/bin) which is not always on $PATH.  Check there explicitly.
+  _user_bin="$(python3 -m site --user-base 2>/dev/null)/bin"
+  if [[ -x "${_user_bin}/mlc_llm" ]]; then
+    MLC_LLM_CMD="${_user_bin}/mlc_llm"
+  else
+    echo "❌  mlc_llm not found.  Install it with:" >&2
+    echo "      pip install mlc-llm" >&2
+    exit 1
+  fi
+  unset _user_bin
 fi
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
