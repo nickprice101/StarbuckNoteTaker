@@ -598,7 +598,9 @@ private fun AiModelDownloadSection(
                         contentColor = MaterialTheme.colors.error,
                     ),
                 ) {
-                    val freeLabel = if (modelStatus.sizeBytes > 0) " (free %.0f MB)".format(sizeMb) else ""
+                    val freeLabel = if (modelStatus.sizeBytes > 0) {
+                        " (free %.0f MB)".format(modelStatus.sizeBytes / (1024f * 1024f))
+                    } else ""
                     Text("Delete model$freeLabel")
                 }
             }
