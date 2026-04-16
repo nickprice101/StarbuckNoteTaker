@@ -80,6 +80,14 @@ class LlamaEngine(private val context: Context) {
     @Volatile
     private var engineLoaded = false
 
+    /**
+     * `null`  = not yet tested
+     * `true`  = library loaded successfully at least once
+     * `false` = library failed to load; all subsequent inference calls skip the model
+     */
+    @Volatile
+    private var nativeLibAvailable: Boolean? = null
+
     // ------------------------------------------------------------------
     // Public API
     // ------------------------------------------------------------------
@@ -153,6 +161,20 @@ class LlamaEngine(private val context: Context) {
                 Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId " +
                     "[${e::class.simpleName}]: ${e.message}\n$diagInfo", e)
                 _progress.value = InferenceProgress.Error(taskId, e.message ?: "inference error")
+                // Native-library failures (missing .so or JVM class-init error from a previous
+                // failed load attempt) are permanent for this process lifetime.  Cache the state
+                // so future calls skip the engine immediately, and rethrow as RuntimeException so
+                // LlamaForegroundService broadcasts isError=true instead of silently storing an
+                // error message as if it were a real AI answer.
+                if (e is UnsatisfiedLinkError || e is NoClassDefFoundError) {
+                    nativeLibAvailable = false
+                    engineLoaded = false
+                    throw RuntimeException(
+                        "The on-device AI feature is unavailable on this device or build. " +
+                        "Detail: ${e.message}",
+                        e,
+                    )
+                }
                 // Return a distinct message for QUESTION mode so the user is not told the model
                 // is not downloaded when it is actually present but failed to load or run.
                 fallback(
@@ -167,6 +189,14 @@ class LlamaEngine(private val context: Context) {
     }
 
     private fun ensureEngineLoaded(modelPath: String) {
+        // Short-circuit immediately if a previous attempt confirmed the native library is absent.
+        // Without this guard the JVM would throw NoClassDefFoundError on every subsequent call
+        // (because the ChatModule class-init failed earlier), which is harder to diagnose.
+        if (nativeLibAvailable == false) {
+            throw UnsatisfiedLinkError(
+                "The on-device AI feature is unavailable on this device or build."
+            )
+        }
         if (engineLoaded) return
         val modelLibPath = modelManager.extractModelLibIfNeeded()
             ?: run {
@@ -188,6 +218,7 @@ class LlamaEngine(private val context: Context) {
             throw e
         }
         engineLoaded = true
+        nativeLibAvailable = true
         Log.i(TAG, "MLCEngine loaded successfully")
     }
 
