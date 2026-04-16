@@ -129,7 +129,13 @@ class LlamaEngine(private val context: Context) {
         inferenceMutex.withLock {
             // Skip the model entirely on devices that do not meet the RAM threshold
             if (!DeviceCapabilityChecker.isAiCapable(context)) {
-                return@withLock fallback(mode, primaryText)
+                return@withLock when (mode) {
+                    Mode.SUMMARISE -> Summarizer.lightweightPreview(primaryText)
+                    Mode.REWRITE   -> primaryText.trim()
+                    Mode.QUESTION  ->
+                        "This device does not meet the minimum 4 GB RAM requirement " +
+                        "to run the on-device AI model."
+                }
             }
 
             val modelPath = modelManager.getModelPath()
@@ -146,7 +152,15 @@ class LlamaEngine(private val context: Context) {
             }.getOrElse { e ->
                 Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId", e)
                 _progress.value = InferenceProgress.Error(taskId, e.message ?: "inference error")
-                fallback(mode, primaryText)
+                // Use a specific message for QUESTION mode so the user is not told the model
+                // is not downloaded when it actually failed to load or run.
+                when (mode) {
+                    Mode.SUMMARISE -> Summarizer.lightweightPreview(primaryText)
+                    Mode.REWRITE   -> primaryText.trim()
+                    Mode.QUESTION  ->
+                        "AI model failed to run. Try restarting the app, or delete and " +
+                        "re-download the model in Settings → AI model."
+                }
             }
         }
     }
