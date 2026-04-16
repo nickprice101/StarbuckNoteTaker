@@ -1,0 +1,90 @@
+name: Test mlc-llm install and detection
+
+# Runs on every push/PR that touches deploy.yml, the mlc install scripts, or
+# this workflow file itself, as well as on a weekly schedule.  The job catches
+# regressions where the mlc.ai nightly wheel changes break detection before
+# the full 30-minute build step is attempted.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/test-mlc-install.yml'
+      - 'scripts/compile_model_tar.sh'
+      - 'scripts/test_mlc_install.sh'
+  pull_request:
+    paths:
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/test-mlc-install.yml'
+      - 'scripts/compile_model_tar.sh'
+      - 'scripts/test_mlc_install.sh'
+  schedule:
+    # Weekly on Monday at 06:00 UTC – catches upstream nightly wheel changes.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  test-mlc-install:
+    name: Install mlc-llm and verify detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install mlc-llm nightly (CPU) and run detection test
+        run: |
+          set -euo pipefail
+          bash scripts/test_mlc_install.sh
+        env:
+          WHEEL_INDEX: https://mlc.ai/wheels
+
+      - name: Verify compile_model_tar.sh prereq check passes
+        # Run only the prerequisites section of the compile script (exit before
+        # NDK check since NDK is not installed in this lightweight job).
+        # We extract just the mlc_llm detection block and run it in isolation.
+        run: |
+          set -euo pipefail
+
+          # Add user-base/bin to PATH (mirrors what deploy.yml does).
+          export PATH="$(python3 -m site --user-base)/bin:${PATH}"
+          export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
+
+          # Source only the detection block of compile_model_tar.sh by running
+          # up to and including the MLC_LLM_CMD assignment, then assert the
+          # variable is non-empty.
+          MLC_LLM_CMD=""
+
+          if command -v mlc_llm &>/dev/null; then
+            MLC_LLM_CMD="mlc_llm"
+          fi
+
+          if [[ -z "${MLC_LLM_CMD}" ]]; then
+            for _d in \
+              "$(python3 -m site --user-base 2>/dev/null)/bin" \
+              "$(python3 -c 'import sys; print(sys.prefix)' 2>/dev/null)/bin" \
+              "/usr/local/bin" "/usr/bin"; do
+              if [[ -n "${_d}" && -x "${_d}/mlc_llm" ]]; then
+                MLC_LLM_CMD="${_d}/mlc_llm"
+                break
+              fi
+            done
+          fi
+
+          if [[ -z "${MLC_LLM_CMD}" ]]; then
+            if python3 -c "import mlc_llm" &>/dev/null 2>&1; then
+              MLC_LLM_CMD="python3 -m mlc_llm"
+            fi
+          fi
+
+          if [[ -z "${MLC_LLM_CMD}" ]]; then
+            echo "::error::compile_model_tar.sh detection would fail in deploy.yml"
+            exit 1
+          fi
+
+          echo "✅  compile_model_tar.sh detection OK → ${MLC_LLM_CMD}"

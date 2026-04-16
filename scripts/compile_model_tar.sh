@@ -49,28 +49,62 @@ trap 'rm -rf "${COMPILE_OUTPUT_DIR}"' EXIT
 # ---------------------------------------------------------------------------
 echo "🔍  Checking prerequisites …"
 
-# Determine how to invoke mlc_llm. pip may install the entry-point script to
-# ~/.local/bin which is not always on $PATH within the same CI step that ran
-# the install.  Falling back to the Python module invocation ensures the tool
-# is always found as long as the package is importable.
+# Determine how to invoke mlc_llm.
+#
+# Strategy (in order of preference):
+#  1. Entry-point script already on PATH.
+#  2. Entry-point script in any well-known pip prefix directory.
+#  3. Python module invocation – works as long as the package is importable,
+#     regardless of whether an entry-point script was installed.
+#
+# NOTE: We test importability via `python3 -c "import mlc_llm"` rather than
+#       `python3 -m mlc_llm --version` because nightly/CPU wheels may not
+#       implement the --version flag and would exit non-zero even when the
+#       package is perfectly usable.
+
+MLC_LLM_CMD=""
+
+# 1. Check PATH first (covers system-wide installs, e.g. /usr/local/bin).
 if command -v mlc_llm &>/dev/null; then
   MLC_LLM_CMD="mlc_llm"
-elif python3 -m mlc_llm --version &>/dev/null 2>&1; then
-  MLC_LLM_CMD="python3 -m mlc_llm"
-elif python -m mlc_llm --version &>/dev/null 2>&1; then
-  MLC_LLM_CMD="python -m mlc_llm"
-else
-  # pip may install entry-point scripts to the Python user-base bin directory
-  # (e.g. ~/.local/bin) which is not always on $PATH.  Check there explicitly.
-  _user_bin="$(python3 -m site --user-base 2>/dev/null)/bin"
-  if [[ -x "${_user_bin}/mlc_llm" ]]; then
-    MLC_LLM_CMD="${_user_bin}/mlc_llm"
-  else
-    echo "❌  mlc_llm not found.  Install it with:" >&2
-    echo "      pip install mlc-llm" >&2
-    exit 1
+fi
+
+# 2. If not on PATH, search common pip-prefix bin directories.
+if [[ -z "${MLC_LLM_CMD}" ]]; then
+  _search_dirs=(
+    "$(python3 -m site --user-base 2>/dev/null)/bin"   # ~/.local/bin
+    "$(python3 -c 'import sys; print(sys.prefix)' 2>/dev/null)/bin"  # venv bin
+    "/usr/local/bin"
+    "/usr/bin"
+  )
+  for _d in "${_search_dirs[@]}"; do
+    if [[ -n "${_d}" && -x "${_d}/mlc_llm" ]]; then
+      MLC_LLM_CMD="${_d}/mlc_llm"
+      break
+    fi
+  done
+  unset _search_dirs _d
+fi
+
+# 3. Fall back to Python module invocation if the package is importable.
+if [[ -z "${MLC_LLM_CMD}" ]]; then
+  if python3 -c "import mlc_llm" &>/dev/null 2>&1; then
+    MLC_LLM_CMD="python3 -m mlc_llm"
+  elif python -c "import mlc_llm" &>/dev/null 2>&1; then
+    MLC_LLM_CMD="python -m mlc_llm"
   fi
-  unset _user_bin
+fi
+
+if [[ -z "${MLC_LLM_CMD}" ]]; then
+  echo "❌  mlc_llm not found.  Install it with:" >&2
+  echo "      pip install mlc-llm" >&2
+  echo "" >&2
+  echo "Diagnostic info:" >&2
+  echo "  python3  : $(command -v python3 2>/dev/null || echo 'not found')" >&2
+  echo "  pip3     : $(command -v pip3 2>/dev/null || echo 'not found')" >&2
+  echo "  user-bin : $(python3 -m site --user-base 2>/dev/null)/bin" >&2
+  python3 -m pip show mlc-llm 2>/dev/null || python3 -m pip show mlc-llm-nightly-cpu 2>/dev/null || echo "  pip show : package not listed" >&2
+  exit 1
 fi
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
