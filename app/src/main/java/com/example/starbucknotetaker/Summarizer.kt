@@ -302,7 +302,7 @@ class Summarizer(
          * Tokenises [text] against [vocabulary] into a fixed-length int array.
          * Retained for backward compatibility with unit tests.
          */
-        fun tokenizeForModelInput(text: String, vocabulary: TokenizerVocabulary): IntArray {
+        internal fun tokenizeForModelInput(text: String, vocabulary: TokenizerVocabulary): IntArray {
             val normalized = normalizeForModelInput(text).lowercase(Locale.US)
             val stripped = STRIP_PUNCTUATION_REGEX.replace(normalized, " ")
             val tokens = TOKEN_SPLIT_REGEX.split(stripped).filter { it.isNotBlank() }

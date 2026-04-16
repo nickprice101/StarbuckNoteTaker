@@ -256,7 +256,7 @@ class LlamaEngine(private val context: Context) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
         try {
             val throttled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                pm.thermalHeadroom(1) < THERMAL_HEADROOM_THROTTLE_THRESHOLD
+                pm.getThermalHeadroom(1) < THERMAL_HEADROOM_THROTTLE_THRESHOLD
             } else {
                 @Suppress("DEPRECATION")
                 pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE
