@@ -177,23 +177,54 @@ ${MLC_LLM_CMD} compile \
 echo ""
 echo "🔎  Verifying compiled archive …"
 
-REQUIRED_FILES=("lib0.o" "llama_q4f16_0_devc.o")
-MISSING=()
-for f in "${REQUIRED_FILES[@]}"; do
-  if ! tar -tzf "${COMPILE_OUTPUT_DIR}/model.tar" 2>/dev/null | grep -q "^${f}$"; then
-    MISSING+=("${f}")
+# Dump the archive listing once; use plain 'tar -tf' so that both plain .tar
+# and gzip-compressed .tar.gz archives are handled correctly (GNU tar and
+# BSD tar both auto-detect compression without an explicit -z flag).
+# Normalise entries by stripping any leading "./" so that both "./lib0.o"
+# and "lib0.o" style archives are matched uniformly.
+TAR_LISTING_ERR="$(mktemp)"
+TAR_CONTENTS="$(tar -tf "${COMPILE_OUTPUT_DIR}/model.tar" 2>"${TAR_LISTING_ERR}" | sed 's|^\./||')" || true
+
+if [[ -z "${TAR_CONTENTS}" ]]; then
+  echo "❌  Could not list compiled archive." >&2
+  if [[ -s "${TAR_LISTING_ERR}" ]]; then
+    echo "     tar error: $(cat "${TAR_LISTING_ERR}")" >&2
   fi
-done
+  rm -f "${TAR_LISTING_ERR}"
+  exit 1
+fi
+rm -f "${TAR_LISTING_ERR}"
+
+MISSING=()
+
+# lib0.o — TVM runtime support code; always expected.
+if ! echo "${TAR_CONTENTS}" | grep -q "^lib0\.o$"; then
+  MISSING+=("lib0.o")
+fi
+
+# Model device code — the exact filename varies across mlc_llm versions and
+# compilation targets:
+#   • CUDA / Vulkan builds:  llama_q4f16_0_devc.o
+#   • OpenCL builds (Android): may be llama_q4f16_0_devc.o, or the device
+#     kernels may be embedded differently with no separate _devc.o file.
+# Accept any .o whose basename starts with the system-lib prefix so that
+# future naming changes don't break this check.
+SYS_LIB_PREFIX="llama_q4f16_0_"
+if ! echo "${TAR_CONTENTS}" | grep -q "^${SYS_LIB_PREFIX}.*\.o$"; then
+  MISSING+=("${SYS_LIB_PREFIX}*.o  (no file matching the model prefix found)")
+fi
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "❌  Compiled .tar is missing expected files: ${MISSING[*]}" >&2
+  echo "     Archive contents:" >&2
+  echo "${TAR_CONTENTS}" | sed 's/^/       /' >&2
   echo "     The output may be from a different quantisation or mlc_llm version." >&2
   exit 1
 fi
 
 ARCHIVE_SIZE="$(du -sh "${COMPILE_OUTPUT_DIR}/model.tar" | cut -f1)"
 echo "     Archive size : ${ARCHIVE_SIZE}"
-echo "     Contents     : $(tar -tzf "${COMPILE_OUTPUT_DIR}/model.tar" | tr '\n' '  ')"
+echo "     Contents     : $(echo "${TAR_CONTENTS}" | tr '\n' '  ')"
 
 # ---------------------------------------------------------------------------
 # Copy to assets
