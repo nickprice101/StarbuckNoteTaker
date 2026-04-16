@@ -1,6 +1,6 @@
 # AI Deployment Notes (MLC LLM — Llama 3.2 3B Instruct)
 
-This document describes the AI inference stack currently integrated into the Android app.
+This document describes the AI inference stack integrated into the Android app.
 
 ## Runtime overview
 
@@ -11,59 +11,69 @@ This document describes the AI inference stack currently integrated into the And
 
 ## Build-time requirements
 
-### Compiled model library (`.so`)
+### 1. TVM runtime — `libtvm4j_runtime_packed.so`
 
-The MLC-compiled model library must be placed in the APK before building:
+The packed TVM Android runtime must be present before building:
 
 ```
-app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
+app/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so
 ```
 
-> **There is no prebuilt download available for this file.** The
-> `mlc-ai/binary-mlc-llm-libs` release `Android-09262024` does not contain a
-> Llama-3.2-3B Android `.so`. The `mlc-chat.apk` from that release only bundles the
-> generic TVM Java runtime (`libtvm4j_runtime_packed.so`), not this model library.
-> You must compile it yourself.
-
-**Prerequisites:** Python 3.10+, Android NDK r27+, and the `mlc-llm` Python package.
-Set `ANDROID_NDK` and `TVM_NDK_CC` as described at
-<https://llm.mlc.ai/docs/install/index.html>.
+Run the fetch script (requires `curl` and `unzip`):
 
 ```bash
-# 1. Install MLC-LLM
-pip install mlc-llm
-
-# 2. Download quantised weights
-git clone https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC
-
-# 3. Compile the model library for Android arm64
-mlc_llm compile \
-  ./Llama-3.2-3B-Instruct-q4f16_0-MLC \
-  --target android \
-  --device android:arm64-v8a \
-  -o Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so
-
-# 4. Copy into the project (note the required "lib" prefix)
-cp Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so \
-   app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
+bash scripts/fetch_mlc_native.sh
 ```
 
-The `.so` is excluded from the repository via `.gitignore`. Each developer and CI environment must compile and place it locally before building.
+This downloads `mlc-chat.apk` from the `mlc-ai/binary-mlc-llm-libs` release
+`Android-09262024` and extracts the `.so` from it.  The CI workflow runs this
+step automatically.
+
+### 2. Model library archive — system-lib `.tar`
+
+The compiled model library is distributed as a gzip-compressed tar archive
+bundled inside the APK:
+
+```
+app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
+```
+
+The archive contains the TVM system-lib object files (`lib0.o`,
+`llama_q4f16_0_devc.o`).  At runtime `LlamaModelManager.extractModelLibIfNeeded()`
+extracts these to `filesDir/lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android/` and
+passes the directory path to `MLCEngine.reload()` as `modelLib`.
+
+**The placeholder `.tar` currently committed contains stub `.o` files and must
+be replaced with a real compiled archive** before inference will work.  Run:
+
+```bash
+bash scripts/compile_model_tar.sh
+```
+
+Prerequisites: Python 3.10+, `mlc_llm` Python package, Android NDK r27+.
+
+```bash
+pip install mlc-llm
+# Set ANDROID_NDK if not already on PATH
+export ANDROID_NDK=/path/to/android-ndk-r27
+bash scripts/compile_model_tar.sh
+```
+
+The script downloads the quantised weights from HuggingFace, runs
+`mlc_llm compile --target android --system-lib`, verifies the output, and
+writes the `.tar` to the assets directory.
 
 ## Runtime weight download
 
-The model weights (~2 GB) are **not bundled** in the APK. They are downloaded from HuggingFace on first use and cached at:
+The model weights (~2 GB) are **not bundled** in the APK.  They are downloaded
+from HuggingFace on first use via the Settings screen and cached at:
 
 ```
 filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/
 ```
 
-The download is managed by `LlamaModelManager`, which exposes a `modelStatus` `StateFlow` for UI progress. The following shards are retrieved:
-
-- `mlc-chat-config.json`
-- `ndarray-cache.json`
-- `tokenizer.json` / `tokenizer_config.json`
-- `params_shard_*.bin` (many shards)
+The download is managed by `LlamaModelManager`, which exposes a `modelStatus`
+`StateFlow` for UI progress.
 
 ## AI modes
 
@@ -75,12 +85,19 @@ The download is managed by `LlamaModelManager`, which exposes a `modelStatus` `S
 
 ## Foreground service
 
-Heavy inference runs inside `LlamaForegroundService` to prevent the OS from killing the process during extended computation.
+Heavy inference runs inside `LlamaForegroundService` to prevent the OS from
+killing the process during extended computation.
 
 ## Fallback behaviour
 
-When the model is unavailable (weights not yet downloaded, `.so` missing, or insufficient device RAM), all AI operations fall back automatically to the lightweight rule-based heuristics in `Summarizer`.
+When the model is unavailable (weights not yet downloaded, native library
+missing, or insufficient device RAM), all AI operations fall back automatically
+to the lightweight rule-based heuristics in `Summarizer`.
 
 ## Legacy TFLite assets
 
-The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, and `deployment_metadata.json` are retained in `app/src/main/assets/` as legacy artifacts from the previous TFLite classification path. They are no longer used at runtime.
+The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`,
+`category_mapping.json`, and `deployment_metadata.json` are retained in
+`app/src/main/assets/` as legacy artifacts from the previous TFLite
+classification path.  They are no longer used at runtime.
+

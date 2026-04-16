@@ -3,6 +3,21 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// ---------------------------------------------------------------------------
+// MLC LLM binary release coordinates.
+// The TVM runtime .so lives inside the mlc-chat.apk published at this URL.
+// Run scripts/fetch_mlc_native.sh to extract it automatically.
+// ---------------------------------------------------------------------------
+ext {
+    mlcBinaryReleaseTag  = 'Android-09262024'
+    mlcBinaryReleaseBase = "https://github.com/mlc-ai/binary-mlc-llm-libs/releases/download/${mlcBinaryReleaseTag}"
+    mlcChatApkUrl        = "${mlcBinaryReleaseBase}/mlc-chat.apk"
+    tvmRuntimeSoName     = 'libtvm4j_runtime_packed.so'
+    tvmRuntimeApkPath    = "lib/arm64-v8a/${tvmRuntimeSoName}"
+    tvmRuntimeLocalDir   = "src/main/jniLibs/arm64-v8a"
+    tvmRuntimeLocalPath  = "${tvmRuntimeLocalDir}/${tvmRuntimeSoName}"
+}
+
 android {
     namespace 'ai.mlc.mlcllm'
     compileSdk 34
@@ -19,8 +34,87 @@ android {
     kotlinOptions {
         jvmTarget = '11'
     }
+
+    // Expose the jniLibs directory so the packed TVM runtime .so is packaged
+    // into any AAR or APK that depends on this module.
+    sourceSets {
+        main {
+            jniLibs.srcDirs += ['src/main/jniLibs']
+        }
+    }
 }
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
+}
+
+// ---------------------------------------------------------------------------
+// downloadTvmRuntime
+// Downloads libtvm4j_runtime_packed.so from the MLC LLM binary release APK.
+// The APK is a ZIP archive; we extract just the one .so without unpacking
+// everything.  The task is skipped when the file is already present.
+// ---------------------------------------------------------------------------
+tasks.register('downloadTvmRuntime') {
+    group = 'setup'
+    description = "Downloads ${tvmRuntimeSoName} from the MLC LLM binary release APK " +
+                  "(tag: ${mlcBinaryReleaseTag}) and places it in ${tvmRuntimeLocalDir}/."
+
+    def soFile = file(tvmRuntimeLocalPath)
+    outputs.file(soFile)
+
+    onlyIf {
+        if (soFile.exists()) {
+            logger.lifecycle("${tvmRuntimeSoName} already present at ${soFile} — skipping download.")
+            return false
+        }
+        return true
+    }
+
+    doLast {
+        def soOut = file(tvmRuntimeLocalPath)
+        soOut.parentFile.mkdirs()
+
+        def apkUrl = mlcChatApkUrl
+        logger.lifecycle("Downloading mlc-chat.apk from ${apkUrl} …")
+
+        def tempApk = new File(buildDir, "mlc_download/mlc-chat.apk")
+        tempApk.parentFile.mkdirs()
+
+        // Stream-download the APK
+        new URL(apkUrl).openConnection().with { conn ->
+            conn.connectTimeout = 30_000
+            conn.readTimeout    = 300_000
+            conn.inputStream.withStream { is ->
+                tempApk.bytes = is.bytes
+            }
+        }
+        logger.lifecycle("Downloaded APK (${tempApk.length()} bytes).  Extracting ${tvmRuntimeApkPath} …")
+
+        // Extract the single .so entry from the ZIP
+        def zipFile = new java.util.zip.ZipFile(tempApk)
+        try {
+            def entry = zipFile.getEntry(tvmRuntimeApkPath)
+            if (entry == null) {
+                throw new GradleException(
+                    "${tvmRuntimeApkPath} was not found inside mlc-chat.apk. " +
+                    "The release tag '${mlcBinaryReleaseTag}' may be outdated — " +
+                    "check https://github.com/mlc-ai/binary-mlc-llm-libs/releases for the latest tag."
+                )
+            }
+            zipFile.getInputStream(entry).withStream { is ->
+                soOut.bytes = is.bytes
+            }
+        } finally {
+            zipFile.close()
+            tempApk.delete()
+        }
+        logger.lifecycle("Saved ${tvmRuntimeSoName} → ${soOut.absolutePath} (${soOut.length()} bytes)")
+    }
+}
+
+// Make every build variant's pre-build task depend on the runtime download
+// so a missing .so is caught early with a clear error message rather than
+// a cryptic link failure at runtime.
+tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.configureEach {
+    dependsOn('downloadTvmRuntime')
 }

@@ -1,0 +1,2 @@
+# libtvm4j_runtime_packed.so belongs here.
+# Run scripts/fetch_mlc_native.sh to download it before building.

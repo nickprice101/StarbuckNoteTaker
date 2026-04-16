@@ -20,3 +20,7 @@ app/src/main/assets/tokenizer.json
 flan_t5_small_type_first_finetuned/
 flan_t5_small_type_first_tflite_min/
 flan_t5_small_type_first_tflite_min.zip
+
+# MLC LLM native runtime — fetch via scripts/fetch_mlc_native.sh
+app/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so
+mlc4j/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so
