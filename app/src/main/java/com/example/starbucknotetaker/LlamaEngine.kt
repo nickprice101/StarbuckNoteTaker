@@ -129,13 +129,12 @@ class LlamaEngine(private val context: Context) {
         inferenceMutex.withLock {
             // Skip the model entirely on devices that do not meet the RAM threshold
             if (!DeviceCapabilityChecker.isAiCapable(context)) {
-                return@withLock when (mode) {
-                    Mode.SUMMARISE -> Summarizer.lightweightPreview(primaryText)
-                    Mode.REWRITE   -> primaryText.trim()
-                    Mode.QUESTION  ->
+                return@withLock fallback(
+                    mode, primaryText,
+                    questionMessage =
                         "This device does not meet the minimum 4 GB RAM requirement " +
-                        "to run the on-device AI model."
-                }
+                        "to run the on-device AI model.",
+                )
             }
 
             val modelPath = modelManager.getModelPath()
@@ -152,15 +151,14 @@ class LlamaEngine(private val context: Context) {
             }.getOrElse { e ->
                 Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId", e)
                 _progress.value = InferenceProgress.Error(taskId, e.message ?: "inference error")
-                // Use a specific message for QUESTION mode so the user is not told the model
-                // is not downloaded when it actually failed to load or run.
-                when (mode) {
-                    Mode.SUMMARISE -> Summarizer.lightweightPreview(primaryText)
-                    Mode.REWRITE   -> primaryText.trim()
-                    Mode.QUESTION  ->
+                // Return a distinct message for QUESTION mode so the user is not told the model
+                // is not downloaded when it is actually present but failed to load or run.
+                fallback(
+                    mode, primaryText,
+                    questionMessage =
                         "AI model failed to run. Try restarting the app, or delete and " +
-                        "re-download the model in Settings → AI model."
-                }
+                        "re-download the model in Settings → AI model.",
+                )
             }
         }
     }
@@ -209,12 +207,23 @@ class LlamaEngine(private val context: Context) {
         return result
     }
 
-    private fun fallback(mode: Mode, text: String): String = when (mode) {
+    /**
+     * Returns a rule-based fallback result for [mode].
+     *
+     * [questionMessage] overrides the default QUESTION fallback so callers can provide
+     * an accurate message for each failure scenario (model missing vs. engine error vs.
+     * device capability) without duplicating the SUMMARISE / REWRITE logic.
+     */
+    private fun fallback(
+        mode: Mode,
+        text: String,
+        questionMessage: String =
+            "Llama 3.2 3B not yet downloaded (~2 GB). " +
+            "Download it in Settings → AI model to enable question answering.",
+    ): String = when (mode) {
         Mode.SUMMARISE -> Summarizer.lightweightPreview(text)
         Mode.REWRITE   -> text.trim()
-        Mode.QUESTION  ->
-            "Llama 3.2 3B not yet downloaded (~2 GB). " +
-            "Download it in Settings → AI model to enable question answering."
+        Mode.QUESTION  -> questionMessage
     }
 
     // ------------------------------------------------------------------
