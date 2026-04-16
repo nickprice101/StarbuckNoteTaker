@@ -52,10 +52,10 @@ export PATH="$(python3 -c 'import sys; print(sys.prefix)' 2>/dev/null)/bin:${PAT
 # 2. Package listing
 # ---------------------------------------------------------------------------
 echo "🔍  Checking installed package metadata …"
-if python3 -m pip show mlc-llm-nightly-cpu &>/dev/null 2>&1; then
+if python3 -m pip show mlc-llm-nightly-cpu &>/dev/null; then
   pass "pip show mlc-llm-nightly-cpu"
   python3 -m pip show mlc-llm-nightly-cpu | sed 's/^/     /'
-elif python3 -m pip show mlc-llm &>/dev/null 2>&1; then
+elif python3 -m pip show mlc-llm &>/dev/null; then
   pass "pip show mlc-llm (stable)"
 else
   fail "mlc-llm package not found by pip show"
@@ -103,10 +103,10 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
 fi
 
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" &>/dev/null 2>&1; then
+  if python3 -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
     pass "python3 -c 'import mlc_llm' → will use: python3 -m mlc_llm"
-  elif python -c "import mlc_llm" &>/dev/null 2>&1; then
+  elif python -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
     pass "python -c 'import mlc_llm' → will use: python -m mlc_llm"
   fi

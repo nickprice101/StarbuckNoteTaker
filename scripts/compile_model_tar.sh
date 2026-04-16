@@ -88,9 +88,9 @@ fi
 
 # 3. Fall back to Python module invocation if the package is importable.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" &>/dev/null 2>&1; then
+  if python3 -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
-  elif python -c "import mlc_llm" &>/dev/null 2>&1; then
+  elif python -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
   fi
 fi

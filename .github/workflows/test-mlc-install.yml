@@ -27,6 +27,8 @@ jobs:
   test-mlc-install:
     name: Install mlc-llm and verify detection
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -77,7 +79,7 @@ jobs:
           fi
 
           if [[ -z "${MLC_LLM_CMD}" ]]; then
-            if python3 -c "import mlc_llm" &>/dev/null 2>&1; then
+            if python3 -c "import mlc_llm" &>/dev/null; then
               MLC_LLM_CMD="python3 -m mlc_llm"
             fi
           fi
