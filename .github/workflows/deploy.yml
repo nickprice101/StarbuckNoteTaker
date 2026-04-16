@@ -69,6 +69,9 @@ jobs:
 
           echo "📦  Installing mlc-llm …"
           pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+          # Ensure the pip-installed entry-point script is on PATH regardless of
+          # whether pip used the system or the per-user site-packages directory.
+          export PATH="$(python3 -m site --user-base)/bin:${PATH}"
 
           echo "⚙️   Compiling model library (this may take 10–30 min) …"
           bash scripts/compile_model_tar.sh
