@@ -64,14 +64,19 @@ class LlamaModelManager(private val context: Context) {
     }
 
     /**
-     * Returns the path to the model weights directory if all required files are present.
+     * Returns the path to the model weights directory if all required files are present,
+     * including at least one weight-shard `.bin` file.
+     *
+     * Checking only the metadata JSON files is insufficient: a partial download that fetched
+     * the config/tokenizer files but not the weight shards would pass a JSON-only check and
+     * cause the Settings UI to falsely show "Model ready" while inference would still fail.
      */
     fun getModelPath(): String? {
         val dir = modelDir
-        val allPresent = REQUIRED_FILES.all { name ->
-            File(dir, name).exists()
-        }
-        return if (allPresent && dir.exists()) dir.absolutePath else null
+        val metaPresent = REQUIRED_FILES.all { name -> File(dir, name).exists() }
+        if (!metaPresent) return null
+        val hasWeightShard = dir.listFiles()?.any { it.isFile && it.name.endsWith(".bin") } == true
+        return if (hasWeightShard) dir.absolutePath else null
     }
 
     /** `true` when the model is fully downloaded and ready to load. */

@@ -155,7 +155,7 @@ class Summarizer(
             } catch (t: Throwable) {
                 logger("answer failed", t)
                 _state.emit(SummarizerState.Fallback)
-                "AI model not yet downloaded. Download it in Settings to enable Q&A."
+                "AI model not available. Check Settings → AI model to download or troubleshoot."
             }
         }
 
