@@ -3,7 +3,7 @@
  *
  * The Llama model library (.o files) was compiled with a newer TVM that uses the
  * TVMFFI* API (post-2024 refactor).  The bundled runtime (libtvm4j_runtime_packed.so
- * from Android-09262024) still exports the older TVMBackend*/TVMFuncCall API.
+ * from Android-09262024) still exports the older TVMBackend* / TVMFuncCall API.
  *
  * This file bridges the gap by providing thin wrappers for the three renamed symbols
  * so the model .o files link and run correctly against the older runtime.
