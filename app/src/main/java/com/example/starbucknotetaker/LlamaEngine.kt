@@ -191,27 +191,32 @@ class LlamaEngine(private val context: Context) {
     private fun ensureEngineLoaded(modelPath: String) {
         // Short-circuit immediately if a previous attempt confirmed the native library is absent.
         // Without this guard the JVM would throw NoClassDefFoundError on every subsequent call
-        // (because the ChatModule class-init failed earlier), which is harder to diagnose.
+        // (because a class-init failed earlier), which is harder to diagnose.
         if (nativeLibAvailable == false) {
             throw UnsatisfiedLinkError(
                 "The on-device AI feature is unavailable on this device or build."
             )
         }
         if (engineLoaded) return
-        val modelLibPath = modelManager.extractModelLibIfNeeded()
-            ?: run {
-                val diagInfo = modelManager.debugModelDirInfo()
-                Log.e(TAG, "Model lib extraction failed.\n$diagInfo")
-                throw IllegalStateException(
-                    "Failed to extract model library from APK assets " +
-                    "(${LlamaModelManager.TAR_ASSET_NAME}). " +
-                    "Reinstalling the app may fix this."
-                )
-            }
-        Log.i(TAG, "Loading MLCEngine: lib=$modelLibPath path=$modelPath")
+
+        // The compiled model kernel library is built by the Gradle task `buildModelLibSo` and
+        // packaged in the APK's jniLibs.  Android extracts it to nativeLibraryDir at install time.
+        val modelSoPath = "${context.applicationInfo.nativeLibraryDir}/${LlamaModelManager.MODEL_SO_FILENAME}"
+        val modelSoFile = java.io.File(modelSoPath)
+        if (!modelSoFile.exists()) {
+            val diagInfo = modelManager.debugModelDirInfo()
+            Log.e(TAG, "Model library .so not found: $modelSoPath\n$diagInfo")
+            throw IllegalStateException(
+                "Model library not found at $modelSoPath. " +
+                "The APK may need to be rebuilt so that the Gradle task " +
+                "'buildModelLibSo' can compile the model kernel library."
+            )
+        }
+
+        Log.i(TAG, "Loading MLCEngine: lib=$modelSoPath path=$modelPath")
         Log.d(TAG, modelManager.debugModelDirInfo())
         try {
-            mlcEngine.reload(modelLibPath, modelPath)
+            mlcEngine.reload(modelSoPath, modelPath)
         } catch (e: Throwable) {
             val diagInfo = modelManager.debugModelDirInfo()
             Log.e(TAG, "MLCEngine.reload failed [${e::class.qualifiedName}]: ${e.message}\n$diagInfo", e)
@@ -232,7 +237,7 @@ class LlamaEngine(private val context: Context) {
         val maxTokens = if (isThermallyThrottled()) MAX_TOKENS_THROTTLED else MAX_TOKENS_NORMAL
         val request = OpenAIProtocol.ChatCompletionRequest(
             messages = messages,
-            model = LlamaModelManager.MODEL_LIB_NAME,
+            model = LlamaModelManager.MODEL_DISPLAY_NAME,
             stream = true,
             maxTokens = maxTokens,
         )
