@@ -246,16 +246,10 @@ class LlamaModelManager(private val context: Context) {
                 sb.appendLine("    ${f.name}  %.2f MB".format(sizeMb))
             }
         }
-        val libDir = File(context.filesDir, MODEL_LIB_EXTRACT_SUBDIR)
-        sb.appendLine("Lib dir: ${libDir.absolutePath} (exists=${libDir.exists()})")
-        if (libDir.exists()) {
-            val files = libDir.listFiles()?.sortedBy { it.name } ?: emptyList()
-            sb.appendLine("  Files (${files.size}):")
-            files.forEach { f ->
-                val sizeMb = f.length() / (1024.0 * 1024.0)
-                sb.appendLine("    ${f.name}  %.2f MB".format(sizeMb))
-            }
-        }
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val modelSo = java.io.File(nativeLibDir, MODEL_SO_FILENAME)
+        sb.appendLine("Model .so: ${modelSo.absolutePath} (exists=${modelSo.exists()}," +
+            " size=${if (modelSo.exists()) "%.1f MB".format(modelSo.length() / (1024.0 * 1024.0)) else "n/a"})")
         return sb.toString().trimEnd()
     }
 
@@ -379,14 +373,24 @@ class LlamaModelManager(private val context: Context) {
         const val MODEL_SUBDIR = "models/Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /**
-         * The model-library name passed to [ai.mlc.mlcllm.MLCEngine.reload].
-         * This corresponds to the compiled `.so` bundled in the APK's `jniLibs/arm64-v8a/`.
-         * See the class KDoc for instructions on compiling and placing the library.
+         * The filename of the compiled model kernel library bundled in the APK's
+         * `jniLibs/arm64-v8a/` directory.
+         *
+         * Android extracts this file to {@code applicationInfo.nativeLibraryDir} at install time.
+         * The absolute path `"${nativeLibraryDir}/$MODEL_SO_FILENAME"` is passed to
+         * [ai.mlc.mlcllm.MLCEngine.reload] as the `modelLib` parameter.
+         *
+         * The library is built by the Gradle task `buildModelLibSo`, which links the
+         * `.o` files from [TAR_ASSET_NAME] together with a TVM API compatibility shim
+         * into a single `.so` that works with the bundled `libtvm4j_runtime_packed.so`.
          */
-        const val MODEL_LIB_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
+        const val MODEL_SO_FILENAME = "libLlama-3.2-3B-Instruct-q4f16_0-MLC.so"
 
         /** Human-readable approximate download size shown in the Settings UI. */
         const val MODEL_SIZE_LABEL = "~2.0 GB"
+
+        /** Human-readable model name used in request metadata. */
+        const val MODEL_DISPLAY_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /**
          * Files that must be present for the model to be considered ready.

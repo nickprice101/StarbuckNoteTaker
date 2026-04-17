@@ -317,11 +317,114 @@ def prepareLibcxxShared = tasks.register('prepareLibcxxShared', Sync) {
 }
 
 tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.configureEach {
-    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared, 'buildModelLibSo')
 }
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
     dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
+}
+
+// ---------------------------------------------------------------------------
+// Task: buildModelLibSo
+//
+// Links the Llama 3.2 3B model kernel .o files (extracted from the bundled
+// .tar asset) together with a TVM API compatibility shim into a single
+// arm64-v8a shared library that is packaged in the APK's jniLibs.
+//
+// The compatibility shim (scripts/tvm_compat.c) bridges the TVMFFI* symbols
+// required by the model .o files (compiled with newer TVM) to the TVMBackend*
+// API exported by the September-2024 libtvm4j_runtime_packed.so runtime.
+//
+// The task runs once and caches the result; re-run by deleting the output .so.
+// ---------------------------------------------------------------------------
+tasks.register('buildModelLibSo') {
+    group = 'setup'
+    description = 'Compiles TVM compat shim and links model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
+
+    // Ensure the TVM runtime .so is present before we link against it.
+    dependsOn(':mlc4j:downloadTvmRuntime')
+
+    def tarAsset    = file("src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar")
+    def compatSrc   = rootProject.file("scripts/tvm_compat.c")
+    def tvmSoDir    = project(':mlc4j').file("src/main/jniLibs/arm64-v8a")
+    def outputDir   = file("src/main/jniLibs/arm64-v8a")
+    def outputSo    = new File(outputDir, "libLlama-3.2-3B-Instruct-q4f16_0-MLC.so")
+
+    inputs.file(tarAsset)
+    inputs.file(compatSrc)
+    outputs.file(outputSo)
+
+    onlyIf {
+        if (outputSo.exists()) {
+            logger.lifecycle('buildModelLibSo: output .so already present — skipping.')
+            return false
+        }
+        return true
+    }
+
+    doLast {
+        if (!tarAsset.exists()) {
+            throw new GradleException("Model .tar not found: ${tarAsset}. " +
+                "Run scripts/compile_model_tar.sh or let the CI workflow compile it.")
+        }
+        if (!compatSrc.exists()) {
+            throw new GradleException("TVM compat shim not found: ${compatSrc}")
+        }
+
+        // Locate NDK clang for arm64
+        def ndkDir  = android.ndkDirectory
+        def hostTag = resolveNdkHostTag(ndkDir)
+        def clang   = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/bin/aarch64-linux-android26-clang")
+        if (!clang.exists()) {
+            throw new GradleException("NDK clang not found at ${clang}. " +
+                "Ensure NDK 26+ is installed via the Android SDK Manager.")
+        }
+
+        // Extract .o files from the model .tar into a temporary directory
+        def tmpDir = new File(buildDir, "model_obj_build")
+        tmpDir.deleteDir()
+        tmpDir.mkdirs()
+        exec {
+            commandLine 'tar', '-xf', tarAsset.absolutePath, '-C', tmpDir.absolutePath
+            ignoreExitValue = false
+        }
+
+        def lib0     = new File(tmpDir, 'lib0.o')
+        def devcObj  = new File(tmpDir, 'llama_q4f16_0_devc.o')
+        if (!lib0.exists())    { throw new GradleException("lib0.o not found in ${tarAsset}") }
+        if (!devcObj.exists()) { throw new GradleException("llama_q4f16_0_devc.o not found in ${tarAsset}") }
+
+        // Compile the TVM API compatibility shim to an .o file
+        def compatObj = new File(tmpDir, 'tvm_compat.o')
+        exec {
+            commandLine clang.absolutePath,
+                '-target', 'aarch64-linux-android26',
+                '-fPIC', '-O2',
+                '-c', compatSrc.absolutePath,
+                '-o', compatObj.absolutePath
+        }
+
+        outputDir.mkdirs()
+
+        // Link: model .o + compat shim → shared library depending on the TVM runtime
+        exec {
+            commandLine clang.absolutePath,
+                '-target', 'aarch64-linux-android26',
+                '-shared',
+                "-Wl,-soname,libLlama-3.2-3B-Instruct-q4f16_0-MLC.so",
+                '-Wl,--build-id',
+                '-Wl,-z,nocopyreloc',
+                '-o', outputSo.absolutePath,
+                lib0.absolutePath,
+                devcObj.absolutePath,
+                compatObj.absolutePath,
+                "-L${tvmSoDir.absolutePath}",
+                '-ltvm4j_runtime_packed',
+                '-llog', '-lm', '-lc', '-ldl'
+        }
+
+        logger.lifecycle("buildModelLibSo: built ${outputSo} (${outputSo.length()} bytes)")
+    }
 }
 
 def robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
