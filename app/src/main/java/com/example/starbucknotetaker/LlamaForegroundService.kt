@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -74,7 +75,18 @@ class LlamaForegroundService : Service() {
         }
 
         val notification = buildNotification(PHRASES.first())
-        startForeground(NOTIFICATION_ID, notification)
+        // On Android 10+ (API 29) the 3-arg overload is available; on Android 14 (API 34,
+        // targetSdk 34) it is *required* when the manifest declares a foregroundServiceType.
+        // Calling the 2-arg form when a type is declared throws InvalidForegroundServiceTypeException.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         startPhraseCycler()
 
         inferenceJob?.cancel()
