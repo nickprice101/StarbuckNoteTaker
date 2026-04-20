@@ -373,18 +373,38 @@ class LlamaModelManager(private val context: Context) {
         const val MODEL_SUBDIR = "models/Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /**
+         * The Android library name for the compiled model kernel library.
+         *
+         * This is the bare name (without the `lib` prefix or `.so` suffix) used to
+         * derive [MODEL_SO_FILENAME] and [MODEL_LIB_SYSTEM_HANDLE].
+         */
+        const val MODEL_LIB_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
+
+        /**
          * The filename of the compiled model kernel library bundled in the APK's
          * `jniLibs/arm64-v8a/` directory.
          *
          * Android extracts this file to {@code applicationInfo.nativeLibraryDir} at install time.
-         * The absolute path `"${nativeLibraryDir}/$MODEL_SO_FILENAME"` is passed to
-         * [ai.mlc.mlcllm.MLCEngine.reload] as the `modelLib` parameter.
+         * The library is loaded via {@code System.load(path)} so that the model kernel functions
+         * are registered with TVM's global system-lib registry via the {@code tvm_compat.c} shim.
          *
          * The library is built by the Gradle task `buildModelLibSo`, which links the
          * `.o` files from [TAR_ASSET_NAME] together with a TVM API compatibility shim
          * into a single `.so` that works with the bundled `libtvm4j_runtime_packed.so`.
          */
-        const val MODEL_SO_FILENAME = "libLlama-3.2-3B-Instruct-q4f16_0-MLC.so"
+        const val MODEL_SO_FILENAME = "lib$MODEL_LIB_NAME.so"
+
+        /**
+         * The system-library handle passed to [ai.mlc.mlcllm.MLCEngine.reload] as `modelLib`.
+         *
+         * After the model kernel library has been loaded via {@code System.load} (which registers
+         * all kernel functions with TVM's system-lib registry), MLC-LLM must be told to access
+         * those functions through the system-lib mechanism rather than via TVM's file loader
+         * (which would require `runtime.module.loadfile_so` — not available in the bundled
+         * Android TVM runtime).  Passing the `system://` prefix instructs MLC-LLM to call
+         * TVM's `runtime.SystemLib()` and retrieve the pre-registered module.
+         */
+        const val MODEL_LIB_SYSTEM_HANDLE = "system://$MODEL_LIB_NAME"
 
         /** Human-readable approximate download size shown in the Settings UI. */
         const val MODEL_SIZE_LABEL = "~2.0 GB"
