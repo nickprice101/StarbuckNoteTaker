@@ -17,14 +17,21 @@ import kotlinx.coroutines.withContext
  * On-device LLM inference engine backed by MLC LLM ([MLCEngine]) running
  * Llama 3.2 3B Instruct (q4f16_0 quantisation).
  *
- * **Model library (`.tar` flow):**
+ * **Model library (system-lib `.so` flow):**
  * The compiled model library is distributed as a `.tar` asset bundled inside the APK
- * (`assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar`).  The archive contains
- * the MLC system-library object files that the TVM runtime links at runtime.
- * On the first inference attempt [LlamaModelManager.extractModelLibIfNeeded] extracts
- * the archive to `filesDir/lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android/`.  The
- * resulting absolute directory path is then passed to [MLCEngine.reload] as `modelLib`
- * instead of a JNI library name.
+ * (`assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar`).  The Gradle task
+ * `buildModelLibSo` links the `.o` files from that archive together with a TVM API
+ * compatibility shim (`scripts/tvm_compat.c`) into a single shared library
+ * (`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`) placed in the APK's `jniLibs/`.
+ * Android extracts it to `nativeLibraryDir` at install time.
+ *
+ * On the first inference attempt [ensureEngineLoaded] loads the library via
+ * `System.load(path)`.  This registers all model kernel functions with TVM's
+ * global system-lib registry through the compatibility shim.  [MLCEngine.reload]
+ * is then called with [LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE] (`system://…`),
+ * which instructs MLC-LLM to retrieve the pre-registered module via TVM's system-lib
+ * mechanism rather than attempting to load a `.so` file through TVM's file-loader
+ * (which is not available in the bundled Android TVM runtime).
  *
  * The model weights (~2 GB) are not bundled in the APK; they are downloaded
  * to `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/` via [LlamaModelManager].
@@ -216,7 +223,17 @@ class LlamaEngine(private val context: Context) {
         Log.i(TAG, "Loading MLCEngine: lib=$modelSoPath path=$modelPath")
         Log.d(TAG, modelManager.debugModelDirInfo())
         try {
-            mlcEngine.reload(modelSoPath, modelPath)
+            // Load the model kernel library via Android's native linker.  This registers all
+            // model kernel functions with TVM's global system-lib registry through the
+            // TVMFFIEnvModRegisterSystemLibSymbol → TVMBackendRegisterSystemLibSymbol shim.
+            // Must happen before reload() so that the system-lib module is populated when
+            // MLC-LLM calls runtime.SystemLib() inside the background engine loop.
+            System.load(modelSoPath)
+            // Pass the system:// handle so MLC-LLM retrieves the pre-registered module via
+            // TVM's system-lib mechanism instead of trying to load the .so through TVM's
+            // file-loader (runtime.module.loadfile_so), which is not registered in the
+            // bundled Android TVM runtime and causes the mlc-background-loop crash.
+            mlcEngine.reload(LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE, modelPath)
         } catch (e: Throwable) {
             val diagInfo = modelManager.debugModelDirInfo()
             Log.e(TAG, "MLCEngine.reload failed [${e::class.qualifiedName}]: ${e.message}\n$diagInfo", e)
