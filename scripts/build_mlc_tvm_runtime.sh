@@ -82,7 +82,7 @@ if ! python3 -c "import mlc_llm" 2>/dev/null; then
     echo "  pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu" >&2
     exit 1
   fi
-  echo "⚠️  'import mlc_llm' failed but pip package is installed; proceeding."
+  echo "⚠️  'import mlc_llm' failed but pip package is installed; proceeding." >&2
 fi
 
 if [[ ! -f "${MODEL_TAR}" ]]; then

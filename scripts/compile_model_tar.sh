@@ -128,6 +128,10 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
      python3 -m pip show mlc-llm &>/dev/null; then
     echo "⚠️  'import mlc_llm' failed but pip package is installed; using module invocation." >&2
     MLC_LLM_CMD="python3 -m mlc_llm"
+  elif python -m pip show mlc-llm-nightly-cpu &>/dev/null || \
+       python -m pip show mlc-llm &>/dev/null; then
+    echo "⚠️  'import mlc_llm' failed but pip package is installed; using module invocation." >&2
+    MLC_LLM_CMD="python -m mlc_llm"
   fi
 fi
 
