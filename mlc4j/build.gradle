@@ -54,27 +54,35 @@ dependencies {
 // The APK is a ZIP archive; we extract just the one .so without unpacking
 // everything.  The task is skipped when the file is already present.
 // ---------------------------------------------------------------------------
+def tvmRuntimeDownloadSoName = tvmRuntimeSoName
+def tvmRuntimeDownloadLocalPath = tvmRuntimeLocalPath
+def tvmRuntimeDownloadApkPath = tvmRuntimeApkPath
+def tvmRuntimeDownloadApkUrl = mlcChatApkUrl
+def tvmRuntimeDownloadReleaseTag = mlcBinaryReleaseTag
+
 tasks.register('downloadTvmRuntime') {
+    notCompatibleWithConfigurationCache('Downloads and extracts a native runtime file during task execution')
+
     group = 'setup'
     description = "Downloads ${tvmRuntimeSoName} from the MLC LLM binary release APK " +
-                  "(tag: ${mlcBinaryReleaseTag}) and places it in ${tvmRuntimeLocalDir}/."
+                  "(tag: ${tvmRuntimeDownloadReleaseTag}) and places it in ${tvmRuntimeLocalDir}/."
 
     def soFile = file(tvmRuntimeLocalPath)
     outputs.file(soFile)
 
     onlyIf {
         if (soFile.exists()) {
-            logger.lifecycle("${tvmRuntimeSoName} already present at ${soFile} — skipping download.")
+            logger.lifecycle("${tvmRuntimeDownloadSoName} already present at ${soFile} - skipping download.")
             return false
         }
         return true
     }
 
     doLast {
-        def soOut = file(tvmRuntimeLocalPath)
+        def soOut = file(tvmRuntimeDownloadLocalPath)
         soOut.parentFile.mkdirs()
 
-        def apkUrl = mlcChatApkUrl
+        def apkUrl = tvmRuntimeDownloadApkUrl
         logger.lifecycle("Downloading mlc-chat.apk from ${apkUrl} …")
 
         def tempApk = new File(buildDir, "mlc_download/mlc-chat.apk")
@@ -88,16 +96,16 @@ tasks.register('downloadTvmRuntime') {
                 tempApk.bytes = is.bytes
             }
         }
-        logger.lifecycle("Downloaded APK (${tempApk.length()} bytes).  Extracting ${tvmRuntimeApkPath} …")
+        logger.lifecycle("Downloaded APK (${tempApk.length()} bytes).  Extracting ${tvmRuntimeDownloadApkPath} ...")
 
         // Extract the single .so entry from the ZIP
         def zipFile = new java.util.zip.ZipFile(tempApk)
         try {
-            def entry = zipFile.getEntry(tvmRuntimeApkPath)
+            def entry = zipFile.getEntry(tvmRuntimeDownloadApkPath)
             if (entry == null) {
                 throw new GradleException(
-                    "${tvmRuntimeApkPath} was not found inside mlc-chat.apk. " +
-                    "The release tag '${mlcBinaryReleaseTag}' may be outdated — " +
+                    "${tvmRuntimeDownloadApkPath} was not found inside mlc-chat.apk. " +
+                    "The release tag '${tvmRuntimeDownloadReleaseTag}' may be outdated — " +
                     "check https://github.com/mlc-ai/binary-mlc-llm-libs/releases for the latest tag."
                 )
             }
@@ -108,7 +116,7 @@ tasks.register('downloadTvmRuntime') {
             zipFile.close()
             tempApk.delete()
         }
-        logger.lifecycle("Saved ${tvmRuntimeSoName} → ${soOut.absolutePath} (${soOut.length()} bytes)")
+        logger.lifecycle("Saved ${tvmRuntimeDownloadSoName} -> ${soOut.absolutePath} (${soOut.length()} bytes)")
     }
 }
 

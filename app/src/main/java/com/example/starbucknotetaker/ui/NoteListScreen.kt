@@ -1,15 +1,12 @@
 package com.example.starbucknotetaker.ui
 
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.AnchoredDraggableState
-import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.animateTo
-import androidx.compose.foundation.gestures.anchoredDraggable
-import androidx.compose.foundation.gestures.snapTo
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -44,9 +41,6 @@ import com.example.starbucknotetaker.Summarizer
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.collect
-import androidx.compose.runtime.snapshotFlow
 import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
@@ -261,9 +255,6 @@ fun NoteListScreen(
     }
 }
 
-private enum class SwipeActionState { Closed, Open }
-
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeToDeleteNoteItem(
     note: Note,
@@ -276,48 +267,44 @@ private fun SwipeToDeleteNoteItem(
     val actionWidth = 80.dp
     val density = LocalDensity.current
     val actionWidthPx = with(density) { actionWidth.toPx() }
-    val velocityThresholdPx = with(density) { 100.dp.toPx() }
-    val swipeState = remember(actionWidthPx) {
-        AnchoredDraggableState(
-            initialValue = SwipeActionState.Closed,
-            anchors = DraggableAnchors {
-                SwipeActionState.Closed at 0f
-                SwipeActionState.Open at -actionWidthPx
-            },
-            positionalThreshold = { distance -> distance * 0.3f },
-            velocityThreshold = { velocityThresholdPx },
-            animationSpec = spring()
-        )
-    }
     val scope = rememberCoroutineScope()
+    var offset by remember(note.id, actionWidthPx) { mutableFloatStateOf(0f) }
+    val closedOffset = 0f
+    val openOffset = -actionWidthPx
+    val openThreshold = actionWidthPx * 0.3f
+    val swipeState = rememberDraggableState { delta ->
+        offset = (offset + delta).coerceIn(openOffset, closedOffset)
+    }
 
     LaunchedEffect(isOpen) {
-        val target = if (isOpen) SwipeActionState.Open else SwipeActionState.Closed
-        swipeState.animateTo(target)
-    }
-
-    LaunchedEffect(swipeState) {
-        snapshotFlow { swipeState.currentValue }
-            .distinctUntilChanged()
-            .collect { value ->
-                if (value == SwipeActionState.Open) {
-                    onOpen()
-                } else {
-                    onClose()
-                }
+        val targetOffset = if (isOpen) openOffset else closedOffset
+        if (offset != targetOffset) {
+            animate(
+                initialValue = offset,
+                targetValue = targetOffset,
+                animationSpec = spring()
+            ) { value, _ ->
+                offset = value
             }
+        }
     }
-
-    val offset = swipeState.offset.takeIf { it.isFinite() } ?: 0f
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
             .background(Color.Transparent)
-            .anchoredDraggable(
+            .draggable(
                 state = swipeState,
-                orientation = Orientation.Horizontal
+                orientation = Orientation.Horizontal,
+                onDragStopped = {
+                    val shouldOpen = -offset > openThreshold
+                    if (shouldOpen) {
+                        onOpen()
+                    } else {
+                        onClose()
+                    }
+                }
             )
     ) {
         Box(
@@ -331,7 +318,7 @@ private fun SwipeToDeleteNoteItem(
                     .background(Color.Red)
                     .clickable {
                         onDelete()
-                        scope.launch { swipeState.snapTo(SwipeActionState.Closed) }
+                        offset = closedOffset
                     }
             ) {
                 Icon(
@@ -345,8 +332,17 @@ private fun SwipeToDeleteNoteItem(
         NoteListItem(
             note = note,
             onClick = {
-                if (swipeState.currentValue == SwipeActionState.Open) {
-                    scope.launch { swipeState.animateTo(SwipeActionState.Closed) }
+                if (offset == openOffset) {
+                    scope.launch {
+                        animate(
+                            initialValue = offset,
+                            targetValue = closedOffset,
+                            animationSpec = spring()
+                        ) { value, _ ->
+                            offset = value
+                        }
+                    }
+                    onClose()
                 } else {
                     onClick()
                 }
