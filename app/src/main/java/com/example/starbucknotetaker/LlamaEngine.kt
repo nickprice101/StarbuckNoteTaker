@@ -152,6 +152,12 @@ class LlamaEngine(private val context: Context) {
                 )
             }
 
+            val currentStatus = modelManager.modelStatus.value
+            if (currentStatus is LlamaModelManager.ModelStatus.Unsupported) {
+                _progress.value = InferenceProgress.Error(taskId, currentStatus.message)
+                throw IllegalStateException(currentStatus.message)
+            }
+
             val modelPath = modelManager.getModelPath()
             if (modelPath == null) {
                 // Model weights not yet downloaded — use rule-based fallback

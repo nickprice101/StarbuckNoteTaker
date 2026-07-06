@@ -143,13 +143,15 @@ class LlamaEngineUnitTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun modelManager_initialStatusIsMissing_whenModelDirIsEmpty() {
+    fun modelManager_initialStatusIsNotPresent_whenModelDirIsEmptyOrAbiUnsupported() {
         val manager = LlamaModelManager(appContext)
         val status = manager.modelStatus.value
-        // On a fresh Robolectric context the model directory does not exist.
+        // On a fresh Robolectric context the model directory does not exist. Some host
+        // test environments also report an ABI that cannot run the Android MLC stack.
         assertTrue(
-            "Expected Missing status in test environment, got $status",
-            status is LlamaModelManager.ModelStatus.Missing,
+            "Expected Missing or Unsupported status in test environment, got $status",
+            status is LlamaModelManager.ModelStatus.Missing ||
+                status is LlamaModelManager.ModelStatus.Unsupported,
         )
     }
 
@@ -185,5 +187,35 @@ class LlamaEngineUnitTest {
             "Model lib name should reference Llama-3.2-3B",
             LlamaModelManager.MODEL_LIB_NAME.contains("Llama-3.2-3B", ignoreCase = true),
         )
+    }
+
+    @Test
+    fun modelManager_selectRuntimeAbi_prefersInstalledNativeLibraryDir() {
+        val abi = LlamaModelManager.selectRuntimeAbi(
+            nativeLibraryDir = "/data/app/example/lib/x86_64",
+            supportedAbis = listOf("arm64-v8a", "x86_64"),
+        )
+
+        assertEquals("x86_64", abi)
+    }
+
+    @Test
+    fun modelManager_selectRuntimeAbi_mapsArm64RuntimeDirToApkAbi() {
+        val abi = LlamaModelManager.selectRuntimeAbi(
+            nativeLibraryDir = "/data/app/example/lib/arm64",
+            supportedAbis = listOf("arm64-v8a"),
+        )
+
+        assertEquals("arm64-v8a", abi)
+    }
+
+    @Test
+    fun modelManager_selectRuntimeAbi_fallsBackToSupportedAbiList() {
+        val abi = LlamaModelManager.selectRuntimeAbi(
+            nativeLibraryDir = null,
+            supportedAbis = listOf("arm64-v8a", "x86_64"),
+        )
+
+        assertEquals("arm64-v8a", abi)
     }
 }
