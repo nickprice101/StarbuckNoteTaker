@@ -1,6 +1,7 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,12 +49,18 @@ class LlamaModelManager(private val context: Context) {
 
     sealed class ModelStatus {
         object Missing      : ModelStatus()
-        data class Present(val path: String, val sizeBytes: Long = 0L) : ModelStatus()
+        data class Present(val path: String, val sizeBytes: Long = 0L, val abi: String = UNKNOWN_ABI) : ModelStatus()
         data class Downloading(
             val progressPercent: Int,
             val label: String,
             val downloadedBytes: Long = 0L,
             val totalBytes: Long = 0L,
+            val abi: String = UNKNOWN_ABI,
+        ) : ModelStatus()
+        data class Unsupported(
+            val abi: String,
+            val supportedAbis: List<String>,
+            val message: String,
         ) : ModelStatus()
         data class Error(val message: String) : ModelStatus()
     }
@@ -61,8 +68,17 @@ class LlamaModelManager(private val context: Context) {
     private val _modelStatus = MutableStateFlow<ModelStatus>(ModelStatus.Missing)
     val modelStatus: StateFlow<ModelStatus> = _modelStatus
 
+    private val runtimeAbi: String
+        get() = selectRuntimeAbi(
+            nativeLibraryDir = context.applicationInfo.nativeLibraryDir,
+            supportedAbis = Build.SUPPORTED_ABIS.toList(),
+        )
+
+    private val runtimeProfile: RuntimeModelProfile?
+        get() = resolveRuntimeProfile(runtimeAbi)
+
     private val modelDir: File
-        get() = File(context.filesDir, MODEL_SUBDIR).also { it.mkdirs() }
+        get() = modelDirFor(runtimeProfile)
 
     init {
         _modelStatus.value = computeCurrentStatus()
@@ -77,7 +93,12 @@ class LlamaModelManager(private val context: Context) {
      * cause the Settings UI to falsely show "Model ready" while inference would still fail.
      */
     fun getModelPath(): String? {
-        val dir = modelDir
+        val profile = runtimeProfile ?: return null
+        return getModelPath(profile)
+    }
+
+    private fun getModelPath(profile: RuntimeModelProfile): String? {
+        val dir = modelDirFor(profile)
         val metaPresent = REQUIRED_FILES.all { name -> File(dir, name).exists() }
         if (!metaPresent) return null
         val hasWeightShard = dir.listFiles()?.any { it.isFile && it.name.endsWith(".bin") } == true
@@ -104,8 +125,22 @@ class LlamaModelManager(private val context: Context) {
      */
     suspend fun downloadModel(onProgress: (Int) -> Unit = {}): Boolean =
         withContext(Dispatchers.IO) {
-            _modelStatus.value = ModelStatus.Downloading(0, "Preparing download…", 0L, 0L)
-            val dest = modelDir
+            val profile = runtimeProfile
+            if (profile == null) {
+                val unsupported = unsupportedStatus()
+                _modelStatus.value = unsupported
+                Log.w(TAG, unsupported.message)
+                return@withContext false
+            }
+
+            _modelStatus.value = ModelStatus.Downloading(
+                0,
+                "Preparing ${profile.abi} download…",
+                0L,
+                0L,
+                profile.abi,
+            )
+            val dest = modelDirFor(profile)
 
             try {
                 val client = OkHttpClient.Builder()
@@ -114,7 +149,7 @@ class LlamaModelManager(private val context: Context) {
                     .build()
 
                 // 1. Get file listing from HuggingFace API
-                val files = fetchHuggingFaceFileList(client)
+                val files = fetchHuggingFaceFileList(client, profile)
                 if (files.isEmpty()) {
                     _modelStatus.value = ModelStatus.Error("Could not retrieve model file list")
                     return@withContext false
@@ -134,6 +169,7 @@ class LlamaModelManager(private val context: Context) {
                         label,
                         downloadedBytes,
                         totalBytes,
+                        profile.abi,
                     )
 
                     val targetFile = File(dest, fileName)
@@ -144,13 +180,19 @@ class LlamaModelManager(private val context: Context) {
                         continue
                     }
 
-                    val url = "$HF_BASE_URL/$fileName"
+                    val url = profile.fileUrl(fileName)
                     val ok = downloadFile(client, url, targetFile) { chunkBytes ->
                         downloadedBytes += chunkBytes
                         val pct = if (totalBytes > 0) {
                             (downloadedBytes * 100L / totalBytes).toInt()
                         } else 0
-                        _modelStatus.value = ModelStatus.Downloading(pct, label, downloadedBytes, totalBytes)
+                        _modelStatus.value = ModelStatus.Downloading(
+                            pct,
+                            label,
+                            downloadedBytes,
+                            totalBytes,
+                            profile.abi,
+                        )
                         onProgress(pct)
                     }
                     if (!ok) {
@@ -160,7 +202,7 @@ class LlamaModelManager(private val context: Context) {
                 }
 
                 val sizeBytes = dest.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                _modelStatus.value = ModelStatus.Present(dest.absolutePath, sizeBytes)
+                _modelStatus.value = ModelStatus.Present(dest.absolutePath, sizeBytes, profile.abi)
                 Log.i(TAG, "Model download complete → ${dest.absolutePath} (${sizeBytes / (1024 * 1024)} MB)")
                 true
 
@@ -175,9 +217,13 @@ class LlamaModelManager(private val context: Context) {
      * Deletes the local model weights directory to free ~2 GB of storage.
      */
     fun deleteModel() {
-        modelDir.deleteRecursively()
+        MODEL_PROFILES.values
+            .map { modelDirFor(it) }
+            .distinctBy { it.absolutePath }
+            .forEach { it.deleteRecursively() }
+        modelDirFor(null).deleteRecursively()
         Log.i(TAG, "Model directory deleted")
-        _modelStatus.value = ModelStatus.Missing
+        _modelStatus.value = computeCurrentStatus()
     }
 
     /**
@@ -192,7 +238,13 @@ class LlamaModelManager(private val context: Context) {
      * @return The absolute path to the extracted library directory, or `null` on failure.
      */
     fun extractModelLibIfNeeded(): String? {
-        val libDir = File(context.filesDir, MODEL_LIB_EXTRACT_SUBDIR)
+        val profile = runtimeProfile ?: run {
+            val unsupported = unsupportedStatus()
+            _modelStatus.value = unsupported
+            Log.w(TAG, unsupported.message)
+            return null
+        }
+        val libDir = File(context.filesDir, profile.modelLibExtractSubdir)
         val sentinel = File(libDir, ".extracted")
         // Only skip extraction when the sentinel exists AND the expected object files are present,
         // so a partial or corrupt previous extraction is always retried.
@@ -201,10 +253,10 @@ class LlamaModelManager(private val context: Context) {
             return libDir.absolutePath
         }
         return try {
-            Log.i(TAG, "Extracting model lib from asset $TAR_ASSET_NAME → ${libDir.absolutePath}")
+            Log.i(TAG, "Extracting model lib from asset ${profile.tarAssetName} → ${libDir.absolutePath}")
             libDir.deleteRecursively()
             libDir.mkdirs()
-            context.assets.open(TAR_ASSET_NAME).use { input ->
+            context.assets.open(profile.tarAssetName).use { input ->
                 TarExtractor.extract(input, libDir)
             }
             // Verify extraction before writing the sentinel so a corrupt archive is retried.
@@ -224,7 +276,8 @@ class LlamaModelManager(private val context: Context) {
 
     /** Approximate size of downloaded model in GB, or `null` if not present. */
     fun modelSizeGb(): Float? {
-        val dir = modelDir
+        val profile = runtimeProfile ?: return null
+        val dir = modelDirFor(profile)
         if (!dir.exists()) return null
         val bytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         return if (bytes > 0) bytes.toFloat() / (1024 * 1024 * 1024) else null
@@ -236,6 +289,11 @@ class LlamaModelManager(private val context: Context) {
      */
     fun debugModelDirInfo(): String {
         val sb = StringBuilder()
+        val profile = runtimeProfile
+        sb.appendLine(
+            "Runtime ABI: $runtimeAbi (supported=${profile != null}, " +
+                "supportedAbis=${SUPPORTED_MODEL_ABIS.joinToString()})"
+        )
         val dir = modelDir
         sb.appendLine("Model dir: ${dir.absolutePath} (exists=${dir.exists()})")
         if (dir.exists()) {
@@ -258,17 +316,37 @@ class LlamaModelManager(private val context: Context) {
     // ------------------------------------------------------------------
 
     private fun computeCurrentStatus(): ModelStatus {
-        val path = getModelPath() ?: return ModelStatus.Missing
-        val sizeBytes = modelDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        return ModelStatus.Present(path, sizeBytes)
+        val profile = runtimeProfile ?: return unsupportedStatus()
+        val path = getModelPath(profile) ?: return ModelStatus.Missing
+        val dir = modelDirFor(profile)
+        val sizeBytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        return ModelStatus.Present(path, sizeBytes, profile.abi)
     }
+
+    private fun unsupportedStatus(): ModelStatus.Unsupported {
+        val abi = runtimeAbi
+        return ModelStatus.Unsupported(
+            abi = abi,
+            supportedAbis = SUPPORTED_MODEL_ABIS,
+            message = "The installed native runtime is '$abi', but this build only has " +
+                "Llama native artifacts for ${SUPPORTED_MODEL_ABIS.joinToString()}. " +
+                "Use an ${SUPPORTED_MODEL_ABIS.first()} build/device or add a matching " +
+                "MLC runtime and compiled model library for '$abi'.",
+        )
+    }
+
+    private fun modelDirFor(profile: RuntimeModelProfile?): File =
+        File(context.filesDir, profile?.modelSubdir ?: MODEL_SUBDIR).also { it.mkdirs() }
 
     /**
      * Fetches the list of files in the HuggingFace repo via the tree API.
      * Returns a list of (filename, sizeBytes) pairs.
      */
-    private fun fetchHuggingFaceFileList(client: OkHttpClient): List<Pair<String, Long>> {
-        val apiUrl = "https://huggingface.co/api/models/$HF_REPO_ID"
+    private fun fetchHuggingFaceFileList(
+        client: OkHttpClient,
+        profile: RuntimeModelProfile,
+    ): List<Pair<String, Long>> {
+        val apiUrl = "https://huggingface.co/api/models/${profile.hfRepoId}"
         val request = Request.Builder().url(apiUrl).build()
         return try {
             client.newCall(request).execute().use { response ->
@@ -342,8 +420,20 @@ class LlamaModelManager(private val context: Context) {
         }
     }
 
+    private data class RuntimeModelProfile(
+        val abi: String,
+        val hfRepoId: String,
+        val modelSubdir: String,
+        val tarAssetName: String,
+        val modelLibExtractSubdir: String,
+    ) {
+        fun fileUrl(fileName: String): String =
+            "https://huggingface.co/$hfRepoId/resolve/main/$fileName"
+    }
+
     companion object {
         private const val TAG = "LlamaModelManager"
+        const val UNKNOWN_ABI = "unknown"
 
         /**
          * Asset file name of the `.tar` that bundles the compiled MLC model library.
@@ -361,10 +451,6 @@ class LlamaModelManager(private val context: Context) {
 
         /** HuggingFace model repository identifier. */
         const val HF_REPO_ID = "mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
-
-        /** Base URL for downloading individual files from this repo. */
-        private const val HF_BASE_URL =
-            "https://huggingface.co/$HF_REPO_ID/resolve/main"
 
         /**
          * Sub-directory inside `filesDir` where the model weights live.
@@ -411,6 +497,46 @@ class LlamaModelManager(private val context: Context) {
 
         /** Human-readable model name used in request metadata. */
         const val MODEL_DISPLAY_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
+
+        private const val ABI_ARM64_V8A = "arm64-v8a"
+        val SUPPORTED_MODEL_ABIS: List<String> = listOf(ABI_ARM64_V8A)
+
+        private val MODEL_PROFILES: Map<String, RuntimeModelProfile> = mapOf(
+            ABI_ARM64_V8A to RuntimeModelProfile(
+                abi = ABI_ARM64_V8A,
+                hfRepoId = HF_REPO_ID,
+                modelSubdir = MODEL_SUBDIR,
+                tarAssetName = TAR_ASSET_NAME,
+                modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR,
+            )
+        )
+
+        private val NATIVE_DIR_ABI_ALIASES = mapOf(
+            "arm64" to ABI_ARM64_V8A,
+            "arm64-v8a" to ABI_ARM64_V8A,
+            "armeabi" to "armeabi-v7a",
+            "armeabi-v7a" to "armeabi-v7a",
+            "x86" to "x86",
+            "x86_64" to "x86_64",
+        )
+
+        internal fun selectRuntimeAbi(
+            nativeLibraryDir: String?,
+            supportedAbis: List<String>,
+        ): String {
+            val selectedDirAbi = nativeLibraryDir
+                ?.let { File(it).name }
+                ?.let { NATIVE_DIR_ABI_ALIASES[it] ?: it }
+                ?.takeIf { it.isNotBlank() && it != "lib" }
+            if (selectedDirAbi != null) return selectedDirAbi
+
+            return supportedAbis
+                .firstOrNull { it.isNotBlank() }
+                ?: UNKNOWN_ABI
+        }
+
+        private fun resolveRuntimeProfile(abi: String): RuntimeModelProfile? =
+            MODEL_PROFILES[abi]
 
         /**
          * Files that must be present for the model to be considered ready.

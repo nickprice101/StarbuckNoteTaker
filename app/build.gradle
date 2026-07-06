@@ -321,7 +321,7 @@ tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.config
 }
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
-    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared, 'buildModelLibSo')
 }
 
 // ---------------------------------------------------------------------------
@@ -354,14 +354,6 @@ tasks.register('buildModelLibSo') {
     inputs.file(compatSrc)
     outputs.file(outputSo)
 
-    onlyIf {
-        if (outputSo.exists()) {
-            logger.lifecycle('buildModelLibSo: output .so already present — skipping.')
-            return false
-        }
-        return true
-    }
-
     doLast {
         if (!tarAsset.exists()) {
             throw new GradleException("Model .tar not found: ${tarAsset}. " +
@@ -374,7 +366,10 @@ tasks.register('buildModelLibSo') {
         // Locate NDK clang for arm64
         def ndkDir  = android.ndkDirectory
         def hostTag = resolveNdkHostTag(ndkDir)
-        def clang   = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/bin/aarch64-linux-android26-clang")
+        def clangName = hostTag.startsWith('windows') ?
+                'aarch64-linux-android26-clang.cmd' :
+                'aarch64-linux-android26-clang'
+        def clang   = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/bin/${clangName}")
         if (!clang.exists()) {
             throw new GradleException("NDK clang not found at ${clang}. " +
                 "Ensure NDK 26+ is installed via the Android SDK Manager.")

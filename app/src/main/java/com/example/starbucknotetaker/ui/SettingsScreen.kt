@@ -603,6 +603,13 @@ private fun AiModelDownloadSection(
                         Text("Delete model$freeLabel")
                     }
                 }
+                is LlamaModelManager.ModelStatus.Unsupported -> {
+                    Text(
+                        modelStatus.message,
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colors.error,
+                    )
+                }
                 is LlamaModelManager.ModelStatus.Error -> {
                     Text(
                         "Download error: ${modelStatus.message}",

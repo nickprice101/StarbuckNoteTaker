@@ -58,9 +58,10 @@ class SummarizerModelInstrumentationTest {
         // On a CI/test device the ~2 GB model is typically not present.
         val status = manager.modelStatus.value
         assertTrue(
-            "Expected Missing or Present, got $status",
+            "Expected Missing, Present, or Unsupported, got $status",
             status is LlamaModelManager.ModelStatus.Missing ||
-            status is LlamaModelManager.ModelStatus.Present
+            status is LlamaModelManager.ModelStatus.Present ||
+            status is LlamaModelManager.ModelStatus.Unsupported
         )
     }
 
