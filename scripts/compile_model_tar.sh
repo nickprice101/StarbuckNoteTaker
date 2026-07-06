@@ -113,10 +113,21 @@ fi
 
 # 3. Fall back to Python module invocation if the package is importable.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" &>/dev/null; then
+  if python3 -c "import mlc_llm" 2>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
-  elif python -c "import mlc_llm" &>/dev/null; then
+  elif python -c "import mlc_llm" 2>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
+  fi
+fi
+
+# 4. If the import check failed (e.g. nightly packages with import-time errors),
+#    check if the pip package is actually installed and assume module invocation
+#    will work for subcommands (they may lazy-import heavy dependencies).
+if [[ -z "${MLC_LLM_CMD}" ]]; then
+  if python3 -m pip show mlc-llm-nightly-cpu &>/dev/null || \
+     python3 -m pip show mlc-llm &>/dev/null; then
+    echo "⚠️  'import mlc_llm' failed but pip package is installed; using module invocation." >&2
+    MLC_LLM_CMD="python3 -m mlc_llm"
   fi
 fi
 
