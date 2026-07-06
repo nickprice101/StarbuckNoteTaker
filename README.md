@@ -56,35 +56,21 @@ scripts/                           Repository helper scripts
 
 ## AI / ML setup
 
-### MLC model library (required before building)
+### MLC native artifacts (required before building)
 
-The compiled Llama 3.2 3B model library must be placed in `app/src/main/jniLibs/arm64-v8a/` before building.
-There is no prebuilt Android `.so` for this model in the public MLC release artifacts, so you must compile it locally:
+The app builds ABI-specific Llama model `.so` files from MLC system-library tar archives. Arm64 phones use the published MLC TVM runtime; x86_64 emulators require a locally built x86_64 TVM runtime because the public MLC Android APK only ships `arm64-v8a`.
 
 ```bash
-# Prerequisites:
-# - Python 3.10+
-# - Android NDK r27+
-# - pip install mlc-llm
-# - export ANDROID_NDK=~/Android/Sdk/ndk/<version>
-# - export TVM_NDK_CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+# Arm64 phone artifacts
+bash scripts/compile_model_tar.sh
+bash scripts/fetch_mlc_native.sh
 
-# 1. Download the quantised weights
-git clone https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC
-
-# 2. Compile the model library for Android arm64
-mlc_llm compile \
-  ./Llama-3.2-3B-Instruct-q4f16_0-MLC \
-  --target android \
-  --device android:arm64-v8a \
-  -o Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so
-
-# 3. Copy into the project (note the required "lib" prefix)
-cp Llama-3.2-3B-Instruct-q4f16_0-MLC-android.so \
-   app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
+# x86_64 emulator artifacts
+TARGET_ABI=x86_64 bash scripts/compile_model_tar.sh
+TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh
 ```
 
-The `.so` is the compiled model library (~MB range). Model **weights** (~2 GB) are downloaded automatically at runtime from HuggingFace on first use.
+The generated model `.so` files are written under `app/src/main/jniLibs/<abi>/` by Gradle task `buildModelLibSo`. Model **weights** (~2 GB) are still downloaded automatically at runtime from HuggingFace on first use.
 
 ### Legacy TFLite assets (optional)
 

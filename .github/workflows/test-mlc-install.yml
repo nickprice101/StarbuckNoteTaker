@@ -11,12 +11,14 @@ on:
       - '.github/workflows/deploy.yml'
       - '.github/workflows/test-mlc-install.yml'
       - 'scripts/compile_model_tar.sh'
+      - 'scripts/build_mlc_tvm_runtime.sh'
       - 'scripts/test_mlc_install.sh'
   pull_request:
     paths:
       - '.github/workflows/deploy.yml'
       - '.github/workflows/test-mlc-install.yml'
       - 'scripts/compile_model_tar.sh'
+      - 'scripts/build_mlc_tvm_runtime.sh'
       - 'scripts/test_mlc_install.sh'
   schedule:
     # Weekly on Monday at 06:00 UTC – catches upstream nightly wheel changes.

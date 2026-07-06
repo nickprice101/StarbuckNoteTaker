@@ -16,6 +16,7 @@ ext {
     tvmRuntimeApkPath    = "lib/arm64-v8a/${tvmRuntimeSoName}"
     tvmRuntimeLocalDir   = "src/main/jniLibs/arm64-v8a"
     tvmRuntimeLocalPath  = "${tvmRuntimeLocalDir}/${tvmRuntimeSoName}"
+    tvmRuntimeRequiredAbis = ['arm64-v8a', 'x86_64']
 }
 
 android {
@@ -49,8 +50,8 @@ dependencies {
 }
 
 // ---------------------------------------------------------------------------
-// downloadTvmRuntime
-// Downloads libtvm4j_runtime_packed.so from the MLC LLM binary release APK.
+// downloadArm64TvmRuntime
+// Downloads arm64-v8a libtvm4j_runtime_packed.so from the MLC LLM binary release APK.
 // The APK is a ZIP archive; we extract just the one .so without unpacking
 // everything.  The task is skipped when the file is already present.
 // ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ def tvmRuntimeDownloadApkPath = tvmRuntimeApkPath
 def tvmRuntimeDownloadApkUrl = mlcChatApkUrl
 def tvmRuntimeDownloadReleaseTag = mlcBinaryReleaseTag
 
-tasks.register('downloadTvmRuntime') {
+tasks.register('downloadArm64TvmRuntime') {
     notCompatibleWithConfigurationCache('Downloads and extracts a native runtime file during task execution')
 
     group = 'setup'
@@ -117,6 +118,30 @@ tasks.register('downloadTvmRuntime') {
             tempApk.delete()
         }
         logger.lifecycle("Saved ${tvmRuntimeDownloadSoName} -> ${soOut.absolutePath} (${soOut.length()} bytes)")
+    }
+}
+
+tasks.register('downloadTvmRuntime') {
+    group = 'setup'
+    description = "Ensures ${tvmRuntimeSoName} is present for ${tvmRuntimeRequiredAbis.join(', ')}."
+
+    dependsOn('downloadArm64TvmRuntime')
+
+    tvmRuntimeRequiredAbis.each { abi ->
+        outputs.file(file("src/main/jniLibs/${abi}/${tvmRuntimeSoName}"))
+    }
+
+    doLast {
+        def missing = tvmRuntimeRequiredAbis.findAll { abi ->
+            !file("src/main/jniLibs/${abi}/${tvmRuntimeSoName}").exists()
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                "Missing ${tvmRuntimeSoName} for ABI(s): ${missing.join(', ')}. " +
+                "The upstream ${mlcBinaryReleaseTag} mlc-chat.apk only contains arm64-v8a; " +
+                "run TARGET_ABI=x86_64 scripts/build_mlc_tvm_runtime.sh to generate a real x86_64 TVM runtime."
+            )
+        }
     }
 }
 

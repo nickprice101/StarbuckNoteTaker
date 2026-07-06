@@ -7,7 +7,7 @@ import java.io.IOException;
  * Bootstraps the TVM native library.
  *
  * On Android the library is shipped as {@code libtvm4j_runtime_packed.so} in
- * {@code jniLibs/arm64-v8a/}.  The static initialiser falls back to that
+ * {@code jniLibs/<abi>/}.  The static initialiser falls back to that
  * packed variant automatically when the standalone {@code libtvm4j.so} is not
  * present on the library search path.
  */

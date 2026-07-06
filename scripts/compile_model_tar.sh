@@ -3,7 +3,7 @@
 # compile_model_tar.sh
 #
 # Compiles the Llama 3.2 3B Instruct (q4f16_0) model into the MLC system-lib
-# format (.tar) and places it at:
+# format (.tar) and places it at the ABI-specific asset path, for example:
 #
 #   app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
 #
@@ -22,10 +22,14 @@
 #   - ~20 GB free disk space  (weights + compilation intermediates)
 #
 # Optional env vars:
+#   TARGET_ABI   Android ABI to compile for: arm64-v8a or x86_64.
+#                Defaults to arm64-v8a.
+#   MLC_DEVICE   MLC target device hint. Defaults to android for arm64-v8a and
+#                cpu for x86_64 emulator builds.
 #   WEIGHTS_DIR   Path to pre-downloaded quantised weights directory.
 #                 Defaults to ./Llama-3.2-3B-Instruct-q4f16_0-MLC (current dir).
 #   OUTPUT_TAR    Destination path for the compiled .tar.
-#                 Defaults to app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
+#                 Defaults to an ABI-specific file in app/src/main/assets/.
 # =============================================================================
 
 set -euo pipefail
@@ -38,8 +42,29 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 HF_REPO="mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
 MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
+TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
+
+case "${TARGET_ABI}" in
+  arm64-v8a)
+    HOST_TRIPLE="aarch64-linux-android"
+    DEFAULT_MLC_DEVICE="android"
+    OUTPUT_SUFFIX="android"
+    ;;
+  x86_64)
+    HOST_TRIPLE="x86_64-linux-android"
+    DEFAULT_MLC_DEVICE="cpu"
+    OUTPUT_SUFFIX="android-x86_64"
+    ;;
+  *)
+    echo "Unsupported TARGET_ABI: ${TARGET_ABI}" >&2
+    echo "Supported values: arm64-v8a, x86_64" >&2
+    exit 1
+    ;;
+esac
+
+MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
-OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-android.tar}"
+OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
 COMPILE_OUTPUT_DIR="$(mktemp -d /tmp/mlc_compile_XXXXXX)"
 
 trap 'rm -rf "${COMPILE_OUTPUT_DIR}"' EXIT
@@ -158,17 +183,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Compile the model library as an Android arm64 system-lib .tar
+# Compile the model library as an Android ABI-specific system-lib .tar
 # ---------------------------------------------------------------------------
 echo ""
-echo "⚙️   Compiling Llama 3.2 3B for Android arm64 (system-lib) …"
+echo "⚙️   Compiling Llama 3.2 3B for Android ${TARGET_ABI} (system-lib) …"
 echo "     This may take 10–30 minutes depending on your machine."
 echo ""
 
+echo "     Target ABI   : ${TARGET_ABI}"
+echo "     MLC device   : ${MLC_DEVICE}"
+echo "     Host triple  : ${HOST_TRIPLE}"
+
 ${MLC_LLM_CMD} compile \
   "${WEIGHTS_DIR}" \
-  --device android \
-  --host aarch64-linux-android \
+  --device "${MLC_DEVICE}" \
+  --host "${HOST_TRIPLE}" \
   --output "${COMPILE_OUTPUT_DIR}/model.tar"
 
 # ---------------------------------------------------------------------------
@@ -202,16 +231,11 @@ if ! echo "${TAR_CONTENTS}" | grep -q "^lib0\.o$"; then
   MISSING+=("lib0.o")
 fi
 
-# Model device code — the exact filename varies across mlc_llm versions and
-# compilation targets:
-#   • CUDA / Vulkan builds:  llama_q4f16_0_devc.o
-#   • OpenCL builds (Android): may be llama_q4f16_0_devc.o, or the device
-#     kernels may be embedded differently with no separate _devc.o file.
-# Accept any .o whose basename starts with the system-lib prefix so that
-# future naming changes don't break this check.
-SYS_LIB_PREFIX="llama_q4f16_0_"
-if ! echo "${TAR_CONTENTS}" | grep -q "^${SYS_LIB_PREFIX}.*\.o$"; then
-  MISSING+=("${SYS_LIB_PREFIX}*.o  (no file matching the model prefix found)")
+# Model code — the exact filenames vary across mlc_llm versions, runtimes, and
+# target devices, especially between OpenCL arm64 and CPU x86_64 builds. Accept
+# any non-lib0 object file so all model objects produced by MLC are linked.
+if ! echo "${TAR_CONTENTS}" | grep -Ev '(^|/)lib0\.o$' | grep -q "\.o$"; then
+  MISSING+=("model .o  (no object file other than lib0.o found)")
 fi
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
@@ -237,6 +261,6 @@ echo "✅  Compiled model library written to:"
 echo "     ${OUTPUT_TAR}"
 echo ""
 echo "Next steps:"
-echo "  1. Commit the updated .tar:  git add app/src/main/assets/${MODEL_NAME}-android.tar"
-echo "  2. Run scripts/fetch_mlc_native.sh  (if not done already)"
+echo "  1. Commit the updated .tar:  git add ${OUTPUT_TAR#${REPO_ROOT}/}"
+echo "  2. Run TARGET_ABI=${TARGET_ABI} scripts/fetch_mlc_native.sh  (if not done already)"
 echo "  3. Run ./gradlew assembleDebug"

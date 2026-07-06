@@ -16,10 +16,11 @@ import kotlin.concurrent.thread
  *
  * Before building, two native artifacts must be present:
  *
- * 1. **`libtvm4j_runtime_packed.so`** in `mlc4j/src/main/jniLibs/arm64-v8a/`
- *    — the packed TVM runtime.  Run `scripts/fetch_mlc_native.sh`.
+ * 1. **`libtvm4j_runtime_packed.so`** in `mlc4j/src/main/jniLibs/<abi>/`
+ *    — the packed TVM runtime.  Run `scripts/fetch_mlc_native.sh` for arm64
+ *    or `TARGET_ABI=x86_64 scripts/build_mlc_tvm_runtime.sh` for the emulator.
  *
- * 2. **`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`** in `app/src/main/jniLibs/arm64-v8a/`
+ * 2. **`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`** in `app/src/main/jniLibs/<abi>/`
  *    — the compiled model kernel library.  The Gradle task `buildModelLibSo`
  *    creates this automatically during the build by linking the `.o` files
  *    from the bundled `.tar` asset with a compatibility shim.
@@ -39,11 +40,11 @@ import kotlin.concurrent.thread
  *       → jsonFFIEngine.chatCompletion(json, id)  // streams tokens via callback
  * ```
  */
-class MLCEngine {
+class MLCEngine(deviceType: String = "opencl") {
 
     private val TAG = "MLCEngine"
 
-    private val jsonFFIEngine = JSONFFIEngine()
+    private val jsonFFIEngine = JSONFFIEngine(deviceType)
 
     /** Maps in-flight request IDs to their completion latches and stream callbacks. */
     private val pending = ConcurrentHashMap<String, PendingRequest>()
