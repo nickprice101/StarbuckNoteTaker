@@ -550,67 +550,67 @@ private fun AiModelDownloadSection(
                 style = MaterialTheme.typography.body2,
                 color = MaterialTheme.colors.error,
             )
-            return@Column
-        }
-        Text(
-            "Download the Llama 3.2 3B Instruct model to enable summarisation, " +
-                "rewriting, and Q&A without internet access.",
-            style = MaterialTheme.typography.body2,
-        )
-        when (modelStatus) {
-            is LlamaModelManager.ModelStatus.Missing -> {
-                Text(
-                    "Model not downloaded. Required size: ${LlamaModelManager.MODEL_SIZE_LABEL}.",
-                    style = MaterialTheme.typography.caption,
-                )
-                Button(onClick = onDownload) { Text("Download AI model") }
-            }
-            is LlamaModelManager.ModelStatus.Downloading -> {
-                val pct = modelStatus.progressPercent
-                val label = modelStatus.label
-                Text(label, style = MaterialTheme.typography.caption)
-                LinearProgressIndicator(
-                    progress = pct / 100f,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                )
-                val progressText = if (modelStatus.totalBytes > 0) {
-                    val downloadedMb = modelStatus.downloadedBytes / (1024f * 1024f)
-                    val totalMb = modelStatus.totalBytes / (1024f * 1024f)
-                    "$pct%  (%.0f MB / %.0f MB)".format(downloadedMb, totalMb)
-                } else {
-                    "$pct%"
+        } else {
+            Text(
+                "Download the Llama 3.2 3B Instruct model to enable summarisation, " +
+                    "rewriting, and Q&A without internet access.",
+                style = MaterialTheme.typography.body2,
+            )
+            when (modelStatus) {
+                is LlamaModelManager.ModelStatus.Missing -> {
+                    Text(
+                        "Model not downloaded. Required size: ${LlamaModelManager.MODEL_SIZE_LABEL}.",
+                        style = MaterialTheme.typography.caption,
+                    )
+                    Button(onClick = onDownload) { Text("Download AI model") }
                 }
-                Text(progressText, style = MaterialTheme.typography.caption)
-            }
-            is LlamaModelManager.ModelStatus.Present -> {
-                val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
-                val sizeLabel = if (modelStatus.sizeBytes > 0) " (%.0f MB on disk)".format(sizeMb) else ""
-                Text(
-                    "✅ Model ready — Llama 3.2 3B$sizeLabel",
-                    style = MaterialTheme.typography.caption,
-                    color = MaterialTheme.colors.primary,
-                )
-                OutlinedButton(
-                    onClick = { showDeleteConfirm = true },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colors.error,
-                    ),
-                ) {
-                    val freeLabel = if (modelStatus.sizeBytes > 0) {
-                        " (free %.0f MB)".format(modelStatus.sizeBytes / (1024f * 1024f))
-                    } else ""
-                    Text("Delete model$freeLabel")
+                is LlamaModelManager.ModelStatus.Downloading -> {
+                    val pct = modelStatus.progressPercent
+                    val label = modelStatus.label
+                    Text(label, style = MaterialTheme.typography.caption)
+                    LinearProgressIndicator(
+                        progress = pct / 100f,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    )
+                    val progressText = if (modelStatus.totalBytes > 0) {
+                        val downloadedMb = modelStatus.downloadedBytes / (1024f * 1024f)
+                        val totalMb = modelStatus.totalBytes / (1024f * 1024f)
+                        "$pct%  (%.0f MB / %.0f MB)".format(downloadedMb, totalMb)
+                    } else {
+                        "$pct%"
+                    }
+                    Text(progressText, style = MaterialTheme.typography.caption)
                 }
-            }
-            is LlamaModelManager.ModelStatus.Error -> {
-                Text(
-                    "Download error: ${modelStatus.message}",
-                    style = MaterialTheme.typography.caption,
-                    color = MaterialTheme.colors.error,
-                )
-                Button(onClick = onDownload) { Text("Retry download") }
+                is LlamaModelManager.ModelStatus.Present -> {
+                    val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
+                    val sizeLabel = if (modelStatus.sizeBytes > 0) " (%.0f MB on disk)".format(sizeMb) else ""
+                    Text(
+                        "✅ Model ready — Llama 3.2 3B$sizeLabel",
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colors.primary,
+                    )
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colors.error,
+                        ),
+                    ) {
+                        val freeLabel = if (modelStatus.sizeBytes > 0) {
+                            " (free %.0f MB)".format(modelStatus.sizeBytes / (1024f * 1024f))
+                        } else ""
+                        Text("Delete model$freeLabel")
+                    }
+                }
+                is LlamaModelManager.ModelStatus.Error -> {
+                    Text(
+                        "Download error: ${modelStatus.message}",
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colors.error,
+                    )
+                    Button(onClick = onDownload) { Text("Retry download") }
+                }
             }
         }
     }
