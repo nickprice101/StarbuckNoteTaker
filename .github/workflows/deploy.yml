@@ -98,6 +98,43 @@ jobs:
           git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
             "HEAD:${{ github.ref_name }}"
 
+      - name: Build x86_64 MLC model and TVM runtime artifacts
+        run: |
+          set -euo pipefail
+
+          X86_TAR_PATH="app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar"
+          MIN_REAL_BYTES=102400
+
+          echo "Installing native build prerequisites..."
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git-lfs ninja-build cmake
+          git lfs install
+
+          echo "Installing mlc-llm..."
+          pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+          export PATH="$(python3 -m site --user-base)/bin:${PATH}"
+          export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
+
+          if [[ -f "${X86_TAR_PATH}" ]] && \
+             [[ $(stat -c%s "${X86_TAR_PATH}") -gt ${MIN_REAL_BYTES} ]]; then
+            echo "x86_64 model library .tar is already present; skipping compilation."
+          else
+            TARGET_ABI=x86_64 bash scripts/compile_model_tar.sh
+
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "${X86_TAR_PATH}"
+            if git diff --cached --quiet; then
+              echo "No x86_64 tar changes to commit."
+            else
+              git commit -m "ci: add x86_64 compiled model archive [skip ci]"
+              git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+                "HEAD:${{ github.ref_name }}"
+            fi
+          fi
+
+          TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh
+
       - name: Verify MLC model configuration assets
         run: |
 

@@ -9,6 +9,20 @@ plugins {
 }
 
 def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+def llamaModelName = 'Llama-3.2-3B-Instruct-q4f16_0-MLC'
+def llamaModelSoName = "lib${llamaModelName}.so"
+def llamaModelAbiProfiles = [
+        'arm64-v8a': [
+                clangPrefix: 'aarch64-linux-android',
+                target     : 'aarch64-linux-android26',
+                tarAsset   : "src/main/assets/${llamaModelName}-android.tar",
+        ],
+        'x86_64': [
+                clangPrefix: 'x86_64-linux-android',
+                target     : 'x86_64-linux-android26',
+                tarAsset   : "src/main/assets/${llamaModelName}-android-x86_64.tar",
+        ],
+]
 def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
 def abiToLibcxxTriple = [
         'arm64-v8a': 'aarch64-linux-android',
@@ -270,6 +284,11 @@ def penguinNativeConfiguration = configurations.detachedConfiguration(
 )
 penguinNativeConfiguration.transitive = false
 
+def robolectricAndroidAllConfiguration = configurations.detachedConfiguration(
+        dependencies.create('org.robolectric:android-all-instrumented:14-robolectric-10818077-i6')
+)
+robolectricAndroidAllConfiguration.transitive = false
+
 def preparePenguinNativeLibs = tasks.register('preparePenguinNativeLibs', Sync) {
     from {
         penguinNativeConfiguration.files.collect { zipTree(it) }
@@ -337,9 +356,10 @@ tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }
 //
 // The task runs once and caches the result; re-run by deleting the output .so.
 // ---------------------------------------------------------------------------
-tasks.register('buildModelLibSo') {
+tasks.register('buildModelLibSoArm64Legacy') {
     group = 'setup'
     description = 'Compiles TVM compat shim and links model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
+    enabled = false
 
     // Ensure the TVM runtime .so is present before we link against it.
     dependsOn(':mlc4j:downloadTvmRuntime')
@@ -422,6 +442,112 @@ tasks.register('buildModelLibSo') {
     }
 }
 
+tasks.register('buildModelLibSo') {
+    group = 'setup'
+    description = 'Compiles TVM compat shim and links ABI-specific model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
+
+    dependsOn(':mlc4j:downloadTvmRuntime')
+
+    def compatSrc = rootProject.file("scripts/tvm_compat.c")
+    inputs.file(compatSrc)
+    llamaModelAbiProfiles.each { abi, profile ->
+        inputs.file(file(profile.tarAsset)).withPropertyName("modelTar_${abi}")
+        outputs.file(new File(file("src/main/jniLibs/${abi}"), llamaModelSoName))
+    }
+
+    doLast {
+        if (!compatSrc.exists()) {
+            throw new GradleException("TVM compat shim not found: ${compatSrc}")
+        }
+
+        def ndkDir  = android.ndkDirectory
+        def hostTag = resolveNdkHostTag(ndkDir)
+
+        llamaModelAbiProfiles.each { abi, profile ->
+            def tarAsset = file(profile.tarAsset)
+            if (!tarAsset.exists()) {
+                throw new GradleException("Model .tar not found for ABI ${abi}: ${tarAsset}. " +
+                    "Run TARGET_ABI=${abi} scripts/compile_model_tar.sh or let CI compile it.")
+            }
+
+            def tvmSoDir = project(':mlc4j').file("src/main/jniLibs/${abi}")
+            def tvmSo = new File(tvmSoDir, 'libtvm4j_runtime_packed.so')
+            if (!tvmSo.exists()) {
+                throw new GradleException("TVM runtime not found for ABI ${abi}: ${tvmSo}. " +
+                    "Run TARGET_ABI=${abi} scripts/fetch_mlc_native.sh or scripts/build_mlc_tvm_runtime.sh.")
+            }
+
+            def clangBaseName = "${profile.clangPrefix}26-clang"
+            def clangName = hostTag.startsWith('windows') ? "${clangBaseName}.cmd" : clangBaseName
+            def clang = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/bin/${clangName}")
+            if (!clang.exists()) {
+                throw new GradleException("NDK clang not found for ABI ${abi} at ${clang}. " +
+                    "Ensure NDK 26+ is installed via the Android SDK Manager.")
+            }
+
+            def tmpDir = new File(buildDir, "model_obj_build/${abi}")
+            tmpDir.deleteDir()
+            tmpDir.mkdirs()
+            exec {
+                commandLine 'tar', '-xf', tarAsset.absolutePath, '-C', tmpDir.absolutePath
+                ignoreExitValue = false
+            }
+
+            def objectFiles = []
+            tmpDir.eachFileRecurse(FileType.FILES) { File objectFile ->
+                if (objectFile.name.endsWith('.o')) {
+                    objectFiles.add(objectFile)
+                }
+            }
+            objectFiles = objectFiles.sort { it.name }
+            def lib0 = objectFiles.find { it.name == 'lib0.o' }
+            def modelObjects = objectFiles.findAll { it.name != 'lib0.o' }
+            if (lib0 == null) {
+                throw new GradleException("lib0.o not found in ${tarAsset}")
+            }
+            if (modelObjects.isEmpty()) {
+                throw new GradleException("No model object files found in ${tarAsset}")
+            }
+
+            def compatObj = new File(tmpDir, 'tvm_compat.o')
+            exec {
+                commandLine clang.absolutePath,
+                    '-target', profile.target,
+                    '-fPIC', '-O2',
+                    '-c', compatSrc.absolutePath,
+                    '-o', compatObj.absolutePath
+            }
+
+            def outputDir = file("src/main/jniLibs/${abi}")
+            def outputSo = new File(outputDir, llamaModelSoName)
+            outputDir.mkdirs()
+
+            def linkCommand = [
+                clang.absolutePath,
+                '-target', profile.target,
+                '-shared',
+                "-Wl,-soname,${llamaModelSoName}",
+                '-Wl,--build-id',
+                '-Wl,-z,nocopyreloc',
+                '-o', outputSo.absolutePath,
+                lib0.absolutePath,
+            ]
+            linkCommand.addAll(modelObjects.collect { it.absolutePath })
+            linkCommand.addAll([
+                compatObj.absolutePath,
+                "-L${tvmSoDir.absolutePath}",
+                '-ltvm4j_runtime_packed',
+                '-llog', '-lm', '-lc', '-ldl'
+            ])
+            exec {
+                commandLine linkCommand
+            }
+
+            logger.lifecycle("buildModelLibSo: built ${abi} ${outputSo} (${outputSo.length()} bytes)")
+        }
+    }
+}
+
 def robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
 
 tasks.withType(MergeNativeLibsTask).configureEach { task ->
@@ -458,7 +584,7 @@ tasks.withType(GenerateResValues).configureEach { task ->
 tasks.register('prepareRobolectricDependencies', Copy) {
     into(robolectricDependencyDir)
     from(project.provider {
-        configurations.getByName("debugUnitTestRuntimeClasspath")
+        robolectricAndroidAllConfiguration
             .filter { file -> file.name.startsWith('android-all-instrumented-') }
     })
     includeEmptyDirs = false

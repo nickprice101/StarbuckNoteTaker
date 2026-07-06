@@ -4,7 +4,7 @@ This directory contains assets bundled into the APK and related deployment docum
 
 ## Active runtime: MLC LLM (Llama 3.2 3B Instruct)
 
-The primary on-device AI now uses **MLC LLM** with Llama 3.2 3B Instruct. The compiled model library (`.so`) must be placed in `app/src/main/jniLibs/arm64-v8a/` before building (see `DEPLOYMENT_README.md`). Model weights (~2 GB) are downloaded at runtime by `LlamaModelManager`.
+The primary on-device AI now uses **MLC LLM** with Llama 3.2 3B Instruct. Gradle builds ABI-specific model libraries under `app/src/main/jniLibs/<abi>/` from the MLC tar assets before packaging (see `DEPLOYMENT_README.md`). Model weights (~2 GB) are downloaded at runtime by `LlamaModelManager`.
 
 ## Legacy TFLite assets (no longer used at runtime)
 

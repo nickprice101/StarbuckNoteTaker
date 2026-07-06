@@ -62,12 +62,19 @@ class LlamaEngineUnitTest {
     }
 
     @Test
-    fun summarizer_answer_fallbackContainsDownloadHint() = runTest {
+    fun summarizer_answer_fallbackContainsActionableAvailabilityMessage() = runTest {
         val summarizer = Summarizer(appContext)
         val result = summarizer.answer("What is the capital of France?")
+        assertTrue("Expected non-empty fallback answer", result.isNotBlank())
         assertTrue(
-            "Expected download-hint message in fallback answer",
-            result.contains("Settings", ignoreCase = true) || result.contains("download", ignoreCase = true),
+            "Expected model availability message in fallback answer",
+            result.contains("model", ignoreCase = true) &&
+                (
+                    result.contains("Settings", ignoreCase = true) ||
+                        result.contains("download", ignoreCase = true) ||
+                        result.contains("device", ignoreCase = true) ||
+                        result.contains("RAM", ignoreCase = true)
+                    ),
         )
     }
 
@@ -187,6 +194,12 @@ class LlamaEngineUnitTest {
             "Model lib name should reference Llama-3.2-3B",
             LlamaModelManager.MODEL_LIB_NAME.contains("Llama-3.2-3B", ignoreCase = true),
         )
+    }
+
+    @Test
+    fun modelManager_supportedModelAbis_includeX8664Emulator() {
+        assertTrue(LlamaModelManager.SUPPORTED_MODEL_ABIS.contains("arm64-v8a"))
+        assertTrue(LlamaModelManager.SUPPORTED_MODEL_ABIS.contains("x86_64"))
     }
 
     @Test

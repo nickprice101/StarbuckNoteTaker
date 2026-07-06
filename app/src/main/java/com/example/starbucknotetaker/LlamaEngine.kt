@@ -19,10 +19,10 @@ import kotlinx.coroutines.withContext
  *
  * **Model library (system-lib `.so` flow):**
  * The compiled model library is distributed as a `.tar` asset bundled inside the APK
- * (`assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar`).  The Gradle task
- * `buildModelLibSo` links the `.o` files from that archive together with a TVM API
- * compatibility shim (`scripts/tvm_compat.c`) into a single shared library
- * (`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`) placed in the APK's `jniLibs/`.
+ * (`assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android*.tar`).  The Gradle task
+ * `buildModelLibSo` links the ABI-specific `.o` files from that archive together
+ * with a TVM API compatibility shim (`scripts/tvm_compat.c`) into a single shared
+ * library (`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`) placed in the APK's `jniLibs/`.
  * Android extracts it to `nativeLibraryDir` at install time.
  *
  * On the first inference attempt [ensureEngineLoaded] loads the library via
@@ -80,8 +80,10 @@ class LlamaEngine(private val context: Context) {
     val progress: StateFlow<InferenceProgress> = _progress
 
     private val inferenceMutex = Mutex()
-    private val mlcEngine: MLCEngine by lazy { MLCEngine() }
     private val modelManager = LlamaModelManager(context)
+    private val mlcEngine: MLCEngine by lazy {
+        MLCEngine(modelManager.getRuntimeMlcDeviceType() ?: "opencl")
+    }
     val modelStatus: StateFlow<LlamaModelManager.ModelStatus> = modelManager.modelStatus
 
     @Volatile

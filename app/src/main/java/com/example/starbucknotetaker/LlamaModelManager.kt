@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit
  * **Modern `.tar` flow:**
  * The compiled model library is distributed as [TAR_ASSET_NAME], bundled inside
  * the APK's `assets/` directory.  The `.tar` contains the MLC system-library object
- * files (`lib0.o`, `llama_q4f16_0_devc.o`) that the TVM runtime links at runtime.
+ * files (`lib0.o` plus model object files) that the TVM runtime links at runtime.
  * On the first call to [extractModelLibIfNeeded] the archive is extracted to
  * `filesDir/[MODEL_LIB_EXTRACT_SUBDIR]/` and that directory path is passed to
  * [ai.mlc.mlcllm.MLCEngine.reload] as `modelLib` instead of a JNI library name.
@@ -76,6 +76,8 @@ class LlamaModelManager(private val context: Context) {
 
     private val runtimeProfile: RuntimeModelProfile?
         get() = resolveRuntimeProfile(runtimeAbi)
+
+    fun getRuntimeMlcDeviceType(): String? = runtimeProfile?.mlcDeviceType
 
     private val modelDir: File
         get() = modelDirFor(runtimeProfile)
@@ -232,7 +234,7 @@ class LlamaModelManager(private val context: Context) {
      *
      * The `.tar` (see [TAR_ASSET_NAME]) is packaged inside the APK's `assets/`
      * directory and contains the compiled MLC system-library object files
-     * (`lib0.o`, `llama_q4f16_0_devc.o`).  Extraction is skipped when the
+     * (`lib0.o` plus model object files).  Extraction is skipped when the
      * sentinel file `[MODEL_LIB_EXTRACT_SUBDIR]/.extracted` already exists.
      *
      * @return The absolute path to the extracted library directory, or `null` on failure.
@@ -248,7 +250,7 @@ class LlamaModelManager(private val context: Context) {
         val sentinel = File(libDir, ".extracted")
         // Only skip extraction when the sentinel exists AND the expected object files are present,
         // so a partial or corrupt previous extraction is always retried.
-        if (sentinel.exists() && REQUIRED_LIB_FILES.all { File(libDir, it).exists() }) {
+        if (sentinel.exists() && hasRequiredModelObjects(libDir)) {
             Log.d(TAG, "Model lib already extracted at ${libDir.absolutePath}")
             return libDir.absolutePath
         }
@@ -260,9 +262,8 @@ class LlamaModelManager(private val context: Context) {
                 TarExtractor.extract(input, libDir)
             }
             // Verify extraction before writing the sentinel so a corrupt archive is retried.
-            val missing = REQUIRED_LIB_FILES.filterNot { File(libDir, it).exists() }
-            if (missing.isNotEmpty()) {
-                Log.e(TAG, "Model lib extraction incomplete — missing: $missing")
+            if (!hasRequiredModelObjects(libDir)) {
+                Log.e(TAG, "Model lib extraction incomplete")
                 return null
             }
             sentinel.createNewFile()
@@ -321,6 +322,12 @@ class LlamaModelManager(private val context: Context) {
         val dir = modelDirFor(profile)
         val sizeBytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         return ModelStatus.Present(path, sizeBytes, profile.abi)
+    }
+
+    private fun hasRequiredModelObjects(libDir: File): Boolean {
+        val files = libDir.listFiles()?.filter { it.isFile } ?: return false
+        return files.any { it.name == "lib0.o" } &&
+            files.any { it.name != "lib0.o" && it.name.endsWith(".o") }
     }
 
     private fun unsupportedStatus(): ModelStatus.Unsupported {
@@ -426,6 +433,7 @@ class LlamaModelManager(private val context: Context) {
         val modelSubdir: String,
         val tarAssetName: String,
         val modelLibExtractSubdir: String,
+        val mlcDeviceType: String,
     ) {
         fun fileUrl(fileName: String): String =
             "https://huggingface.co/$hfRepoId/resolve/main/$fileName"
@@ -441,6 +449,7 @@ class LlamaModelManager(private val context: Context) {
          * [extractModelLibIfNeeded].
          */
         const val TAR_ASSET_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar"
+        const val TAR_ASSET_NAME_X86_64 = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar"
 
         /**
          * Sub-directory inside `filesDir` where the model library `.tar` is extracted.
@@ -448,6 +457,7 @@ class LlamaModelManager(private val context: Context) {
          * as `modelLib` in the modern `.tar` flow.
          */
         const val MODEL_LIB_EXTRACT_SUBDIR = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android"
+        const val MODEL_LIB_EXTRACT_SUBDIR_X86_64 = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64"
 
         /** HuggingFace model repository identifier. */
         const val HF_REPO_ID = "mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
@@ -468,7 +478,7 @@ class LlamaModelManager(private val context: Context) {
 
         /**
          * The filename of the compiled model kernel library bundled in the APK's
-         * `jniLibs/arm64-v8a/` directory.
+         * `jniLibs/<abi>/` directory.
          *
          * Android extracts this file to {@code applicationInfo.nativeLibraryDir} at install time.
          * The library is loaded via {@code System.load(path)} so that the model kernel functions
@@ -499,7 +509,8 @@ class LlamaModelManager(private val context: Context) {
         const val MODEL_DISPLAY_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         private const val ABI_ARM64_V8A = "arm64-v8a"
-        val SUPPORTED_MODEL_ABIS: List<String> = listOf(ABI_ARM64_V8A)
+        private const val ABI_X86_64 = "x86_64"
+        val SUPPORTED_MODEL_ABIS: List<String> = listOf(ABI_ARM64_V8A, ABI_X86_64)
 
         private val MODEL_PROFILES: Map<String, RuntimeModelProfile> = mapOf(
             ABI_ARM64_V8A to RuntimeModelProfile(
@@ -508,6 +519,15 @@ class LlamaModelManager(private val context: Context) {
                 modelSubdir = MODEL_SUBDIR,
                 tarAssetName = TAR_ASSET_NAME,
                 modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR,
+                mlcDeviceType = "opencl",
+            ),
+            ABI_X86_64 to RuntimeModelProfile(
+                abi = ABI_X86_64,
+                hfRepoId = HF_REPO_ID,
+                modelSubdir = MODEL_SUBDIR,
+                tarAssetName = TAR_ASSET_NAME_X86_64,
+                modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR_X86_64,
+                mlcDeviceType = "cpu",
             )
         )
 
@@ -552,8 +572,6 @@ class LlamaModelManager(private val context: Context) {
          * Object files that must be present after extracting [TAR_ASSET_NAME].
          * Used to verify extraction was complete before writing the sentinel.
          */
-        private val REQUIRED_LIB_FILES = listOf("lib0.o", "llama_q4f16_0_devc.o")
-
         private const val BUFFER_SIZE = 64 * 1024
     }
 }

@@ -29,10 +29,15 @@ public class JSONFFIEngine {
     private final Function runBackgroundLoopFunc;
     private final Function runBackgroundStreamBackLoopFunc;
     private final Function exitBackgroundLoopFunc;
+    private final Device device;
 
     private Function requestStreamCallback;
 
     public JSONFFIEngine() {
+        this("opencl");
+    }
+
+    public JSONFFIEngine(String deviceType) {
         Module engine = Function.getFunction("mlc.json_ffi.CreateJSONFFIEngine").invoke().asModule();
         this.jsonFFIEngine = engine;
         this.initBackgroundEngineFunc        = engine.getFunction("init_background_engine");
@@ -43,6 +48,7 @@ public class JSONFFIEngine {
         this.runBackgroundLoopFunc           = engine.getFunction("run_background_loop");
         this.runBackgroundStreamBackLoopFunc = engine.getFunction("run_background_stream_back_loop");
         this.exitBackgroundLoopFunc          = engine.getFunction("exit_background_loop");
+        this.device = createDevice(deviceType);
     }
 
     /**
@@ -54,7 +60,6 @@ public class JSONFFIEngine {
      * @param callback Receives streamed response JSON chunks on the stream-back thread.
      */
     public void initBackgroundEngine(final KotlinFunction callback) {
-        Device device = Device.opencl();
         this.requestStreamCallback = Function.convertFunc(args -> {
             callback.invoke(args[0].asString());
             return 1;
@@ -64,6 +69,23 @@ public class JSONFFIEngine {
                 .pushArg(device.deviceId)
                 .pushArg(requestStreamCallback)
                 .invoke();
+    }
+
+    private static Device createDevice(String deviceType) {
+        String normalized = deviceType == null ? "opencl" : deviceType.trim().toLowerCase();
+        switch (normalized) {
+            case "cpu":
+            case "llvm":
+                return Device.cpu();
+            case "vulkan":
+                return Device.vulkan();
+            case "opencl":
+            case "cl":
+            case "":
+                return Device.opencl();
+            default:
+                throw new IllegalArgumentException("Unsupported MLC device type: " + deviceType);
+        }
     }
 
     /** Loads (or hot-swaps) a model using the given engine-config JSON. */

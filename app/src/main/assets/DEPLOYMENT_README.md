@@ -11,12 +11,31 @@ This document describes the AI inference stack integrated into the Android app.
 
 ## Build-time requirements
 
+The build now has two Llama native ABI profiles:
+
+| ABI | Model archive | TVM runtime source |
+|-----|---------------|--------------------|
+| `arm64-v8a` | `app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar` | `bash scripts/fetch_mlc_native.sh` |
+| `x86_64` | `app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar` | `TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh` |
+
+Generate the model archives with:
+
+```bash
+bash scripts/compile_model_tar.sh
+TARGET_ABI=x86_64 bash scripts/compile_model_tar.sh
+```
+
+Gradle task `buildModelLibSo` links each archive into
+`app/src/main/jniLibs/<abi>/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`. The
+upstream `Android-09262024` APK only contains an arm64 TVM runtime, so x86_64
+must be built from MLC source.
+
 ### 1. TVM runtime — `libtvm4j_runtime_packed.so`
 
 The packed TVM Android runtime must be present before building:
 
 ```
-app/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so
+mlc4j/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so
 ```
 
 Run the fetch script (requires `curl` and `unzip`):

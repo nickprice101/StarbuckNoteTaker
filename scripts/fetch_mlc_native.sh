@@ -3,7 +3,7 @@
 # fetch_mlc_native.sh
 #
 # Downloads libtvm4j_runtime_packed.so from the MLC LLM binary release APK
-# and places it in app/src/main/jniLibs/arm64-v8a/ where the Gradle build
+# and places it in mlc4j/src/main/jniLibs/arm64-v8a/ where the Gradle build
 # expects to find it.
 #
 # Usage (from repository root):
@@ -23,13 +23,25 @@ set -euo pipefail
 # See https://github.com/mlc-ai/binary-mlc-llm-libs/releases
 # ---------------------------------------------------------------------------
 RELEASE_TAG="Android-09262024"
+TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
 APK_URL="https://github.com/mlc-ai/binary-mlc-llm-libs/releases/download/${RELEASE_TAG}/mlc-chat.apk"
 SO_INSIDE_APK="lib/arm64-v8a/libtvm4j_runtime_packed.so"
-DEST_DIR="app/src/main/jniLibs/arm64-v8a"
+DEST_DIR="mlc4j/src/main/jniLibs/arm64-v8a"
 DEST_FILE="${DEST_DIR}/libtvm4j_runtime_packed.so"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [[ "${TARGET_ABI}" == "x86_64" ]]; then
+  echo "The upstream ${RELEASE_TAG} mlc-chat.apk does not contain an x86_64 TVM runtime."
+  echo "Building x86_64 from MLC source instead."
+  exec bash "${SCRIPT_DIR}/build_mlc_tvm_runtime.sh"
+elif [[ "${TARGET_ABI}" != "arm64-v8a" ]]; then
+  echo "Unsupported TARGET_ABI: ${TARGET_ABI}" >&2
+  echo "Supported values: arm64-v8a, x86_64" >&2
+  exit 1
+fi
+
 DEST_PATH="${REPO_ROOT}/${DEST_FILE}"
 
 # ---------------------------------------------------------------------------
@@ -68,5 +80,5 @@ fi
 echo "✅  Saved libtvm4j_runtime_packed.so → ${DEST_FILE} ($(du -sh "${DEST_PATH}" | cut -f1))"
 echo ""
 echo "Next steps:"
-echo "  1. Run scripts/compile_model_tar.sh to build the real model library .tar"
+echo "  1. Run TARGET_ABI=${TARGET_ABI} scripts/compile_model_tar.sh to build the real model library .tar"
 echo "  2. Run ./gradlew assembleDebug"
