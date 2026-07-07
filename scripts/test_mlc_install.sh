@@ -21,11 +21,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MLC_TVM_SHIM_DIR=""
 WHEEL_INDEX="${WHEEL_INDEX:-https://mlc.ai/wheels}"
+MLC_LLM_PACKAGE="${MLC_LLM_PACKAGE:-mlc-llm-nightly-cpu}"
+MLC_AI_PACKAGE="${MLC_AI_PACKAGE:-mlc-ai-nightly-cpu}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"
-
-trap 'rm -rf "${MLC_TVM_SHIM_DIR:-}"' EXIT
 
 source "${SCRIPT_DIR}/mlc_python_env.sh"
 
@@ -44,22 +43,22 @@ echo "============================================================"
 # ---------------------------------------------------------------------------
 if [[ "${SKIP_INSTALL}" != "1" ]]; then
   echo ""
-  echo "📦  Installing mlc-llm-nightly-cpu + mlc-ai-nightly-cpu …"
-  pip install --pre -f "${WHEEL_INDEX}" mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+  echo "📦  Installing ${MLC_LLM_PACKAGE} + ${MLC_AI_PACKAGE} …"
+  pip install --pre -f "${WHEEL_INDEX}" "${MLC_LLM_PACKAGE}" "${MLC_AI_PACKAGE}"
   echo ""
 fi
 
 # Add user-base and sys.prefix bin dirs so we catch entry-points wherever pip
-# decided to put them, and run MLC CLI checks in compiler-only mode.
+# decided to put them.
 mlc_configure_compiler_environment
 
 # ---------------------------------------------------------------------------
 # 2. Package listing
 # ---------------------------------------------------------------------------
 echo "🔍  Checking installed package metadata …"
-if python3 -m pip show mlc-llm-nightly-cpu &>/dev/null; then
-  pass "pip show mlc-llm-nightly-cpu"
-  python3 -m pip show mlc-llm-nightly-cpu | sed 's/^/     /'
+if python3 -m pip show "${MLC_LLM_PACKAGE%%=*}" &>/dev/null; then
+  pass "pip show ${MLC_LLM_PACKAGE%%=*}"
+  python3 -m pip show "${MLC_LLM_PACKAGE%%=*}" | sed 's/^/     /'
 elif python3 -m pip show mlc-llm &>/dev/null; then
   pass "pip show mlc-llm (stable)"
 else
@@ -108,10 +107,10 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
 fi
 
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" &>/dev/null; then
+  if python3 -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
     pass "python3 -c 'import mlc_llm' → will use: python3 -m mlc_llm"
-  elif SKIP_LOADING_MLCLLM_SO=1 python -c "import mlc_llm" &>/dev/null; then
+  elif python -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
     pass "python -c 'import mlc_llm' → will use: python -m mlc_llm"
   fi

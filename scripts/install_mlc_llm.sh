@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Install the MLC Python packages used by CI and verify their native loader path.
+# Install the MLC Python packages used by CI and verify the compile CLI import.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MLC_TVM_SHIM_DIR=""
 WHEEL_INDEX="${WHEEL_INDEX:-https://mlc.ai/wheels}"
 MLC_LLM_PACKAGE="${MLC_LLM_PACKAGE:-mlc-llm-nightly-cpu}"
 MLC_AI_PACKAGE="${MLC_AI_PACKAGE:-mlc-ai-nightly-cpu}"
-
-trap 'rm -rf "${MLC_TVM_SHIM_DIR:-}"' EXIT
 
 source "${SCRIPT_DIR}/mlc_python_env.sh"
 

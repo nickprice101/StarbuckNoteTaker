@@ -8,6 +8,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      WHEEL_INDEX: https://mlc.ai/wheels
+      MLC_LLM_PACKAGE: mlc-llm-nightly-cpu==0.20.dev162
+      MLC_AI_PACKAGE: mlc-ai-nightly-cpu==0.26.dev61
 
     steps:
       - name: Checkout
@@ -78,14 +82,13 @@ jobs:
           export PATH="$(python3 -m site --user-base)/bin:${PATH}"
 
           echo "🔬  Verifying mlc-llm is importable after install …"
-          SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm; print('  mlc_llm module OK:', mlc_llm.__file__)" || {
-            echo "::warning::mlc_llm bare import failed; checking pip package is installed…"
-            python3 -m pip show mlc-llm-nightly-cpu || {
-              echo "::error::mlc-llm-nightly-cpu pip package is not installed."
-              python3 -c "import sys; print(sys.path)"
-              exit 1
-            }
-            echo "  pip package is installed — proceeding (module subcommands may still work)."
+          python3 -c "import mlc_llm; print('  mlc_llm module OK:', mlc_llm.__file__)" || {
+            echo "::error::mlc_llm is installed but cannot be imported."
+            python3 -m pip show mlc-llm-nightly-cpu || true
+            python3 -m pip show mlc-ai-nightly-cpu || true
+            python3 -m pip show apache-tvm-ffi || true
+            python3 -c "import sys; print(sys.path)"
+            exit 1
           }
           # Also add the sys.prefix/bin to PATH (covers venv / system pip scenarios).
           export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
