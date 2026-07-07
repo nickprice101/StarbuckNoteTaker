@@ -21,9 +21,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-MLC_TVM_SHIM_DIR=""
-
-trap 'rm -rf "${MLC_TVM_SHIM_DIR:-}"' EXIT
 
 source "${SCRIPT_DIR}/mlc_python_env.sh"
 
@@ -88,17 +85,6 @@ if ! mlc_assert_compiler_importable; then
   python3 -m pip show mlc-ai-nightly-cpu 2>/dev/null || true
   python3 -m pip show apache-tvm-ffi 2>/dev/null || true
   exit 1
-fi
-
-if ! SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" 2>/dev/null; then
-  # Nightly packages may fail bare import but still work for module subcommands.
-  if ! python3 -m pip show mlc-llm-nightly-cpu >/dev/null 2>&1 && \
-     ! python3 -m pip show mlc-llm >/dev/null 2>&1; then
-    echo "mlc_llm is not importable by python3. Install it with:" >&2
-    echo "  pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu" >&2
-    exit 1
-  fi
-  echo "⚠️  'import mlc_llm' failed but pip package is installed; proceeding." >&2
 fi
 
 if [[ ! -f "${MODEL_TAR}" ]]; then

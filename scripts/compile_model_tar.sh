@@ -66,9 +66,8 @@ MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
 OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
 COMPILE_OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_compile.XXXXXX")"
-MLC_TVM_SHIM_DIR=""
 
-trap 'rm -rf "${COMPILE_OUTPUT_DIR}" "${MLC_TVM_SHIM_DIR:-}"' EXIT
+trap 'rm -rf "${COMPILE_OUTPUT_DIR}"' EXIT
 
 source "${SCRIPT_DIR}/mlc_python_env.sh"
 
@@ -118,31 +117,16 @@ fi
 
 # 3. Fall back to Python module invocation if the package is importable.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" 2>/dev/null; then
+  if python3 -c "import mlc_llm" 2>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
-  elif SKIP_LOADING_MLCLLM_SO=1 python -c "import mlc_llm" 2>/dev/null; then
-    MLC_LLM_CMD="python -m mlc_llm"
-  fi
-fi
-
-# 4. If the import check failed (e.g. nightly packages with import-time errors),
-#    check if the pip package is actually installed and assume module invocation
-#    will work for subcommands (they may lazy-import heavy dependencies).
-if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -m pip show mlc-llm-nightly-cpu &>/dev/null || \
-     python3 -m pip show mlc-llm &>/dev/null; then
-    echo "⚠️  'import mlc_llm' failed but pip package is installed; using module invocation." >&2
-    MLC_LLM_CMD="python3 -m mlc_llm"
-  elif python -m pip show mlc-llm-nightly-cpu &>/dev/null || \
-       python -m pip show mlc-llm &>/dev/null; then
-    echo "⚠️  'import mlc_llm' failed but pip package is installed; using module invocation." >&2
+  elif python -c "import mlc_llm" 2>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
   fi
 fi
 
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  echo "❌  mlc_llm not found.  Install it with:" >&2
-  echo "      pip install mlc-llm" >&2
+  echo "❌  mlc_llm not found or not importable. Install it with:" >&2
+  echo "      pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu" >&2
   echo "" >&2
   echo "Diagnostic info:" >&2
   echo "  python3  : $(command -v python3 2>/dev/null || echo 'not found')" >&2
@@ -153,40 +137,14 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Configure MLC compiler-only mode
+# Configure MLC compiler environment
 # ---------------------------------------------------------------------------
-# Build-time compilation does not need the MLC serving runtime .so. Skipping it
-# avoids duplicate TVM FFI registrations in the current nightly wheel set.
+# Build-time compilation still imports MLC's package initializer. Let it load
+# its native extension so TVM object types registered by the extension exist.
 mlc_configure_compiler_environment
-_MLC_TVM_LIB_PATH=""
-if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
-  _MLC_TVM_LIB_DIR="$(dirname "${_MLC_TVM_LIB_PATH}")"
-  _MLC_TVM_LD_PATH="${_MLC_TVM_LIB_DIR}"
-  _MLC_TVM_LIB_BASENAME="$(basename "${_MLC_TVM_LIB_PATH}")"
-  _MLC_TVM_NEEDS_COMPATIBILITY_SHIM=0
-  if [[ "${_MLC_TVM_LIB_BASENAME}" == "libtvm_ffi.so" ]] && [[ ! -e "${_MLC_TVM_LIB_DIR}/libtvm.so" ]]; then
-    _MLC_TVM_NEEDS_COMPATIBILITY_SHIM=1
-  fi
-  if [[ "${_MLC_TVM_NEEDS_COMPATIBILITY_SHIM}" == "1" ]]; then
-    MLC_TVM_SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_tvm_shim.XXXXXX")"
-    ln -s "${_MLC_TVM_LIB_PATH}" "${MLC_TVM_SHIM_DIR}/libtvm.so"
-    _MLC_TVM_LD_PATH="${MLC_TVM_SHIM_DIR}:${_MLC_TVM_LD_PATH}"
-    echo "     libtvm.so : ${MLC_TVM_SHIM_DIR}/libtvm.so → ${_MLC_TVM_LIB_PATH}"
-  else
-    echo "     libtvm.so : ${_MLC_TVM_LIB_PATH}"
-  fi
-  if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
-    export LD_LIBRARY_PATH="${_MLC_TVM_LD_PATH}:${LD_LIBRARY_PATH}"
-  else
-    export LD_LIBRARY_PATH="${_MLC_TVM_LD_PATH}"
-  fi
-elif false; then
-  echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
-fi
-unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME _MLC_TVM_NEEDS_COMPATIBILITY_SHIM
 
 if ! mlc_assert_compiler_importable; then
-  echo "âŒ  mlc_llm is installed but its native extension could not be loaded." >&2
+  echo "âŒ  mlc_llm is installed but its compile CLI could not be imported." >&2
   echo "" >&2
   echo "Diagnostic info:" >&2
   echo "  python3  : $(command -v python3 2>/dev/null || echo 'not found')" >&2

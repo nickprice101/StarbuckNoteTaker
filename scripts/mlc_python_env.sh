@@ -13,12 +13,12 @@ mlc_add_python_bin_dirs() {
 }
 
 mlc_configure_compiler_environment() {
-  export SKIP_LOADING_MLCLLM_SO=1
+  unset SKIP_LOADING_MLCLLM_SO
   mlc_add_python_bin_dirs
 }
 
 mlc_assert_compiler_importable() {
-  SKIP_LOADING_MLCLLM_SO=1 python3 - <<'PYEOF'
+  python3 - <<'PYEOF'
 from mlc_llm.cli import compile as compile_cli
 print("     mlc_llm compile module OK:", compile_cli.__file__)
 PYEOF

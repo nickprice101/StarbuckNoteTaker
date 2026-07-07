@@ -1,9 +1,9 @@
 name: Test mlc-llm install and detection
 
 # Runs on every push/PR that touches deploy.yml, the mlc install scripts, or
-# this workflow file itself, as well as on a weekly schedule.  The job catches
-# regressions where the mlc.ai nightly wheel changes break detection before
-# the full 30-minute build step is attempted.
+# this workflow file itself, as well as on a weekly schedule. The job catches
+# pinned MLC package/environment regressions before the full 30-minute build
+# step is attempted.
 
 on:
   push:
@@ -25,7 +25,7 @@ on:
       - 'scripts/mlc_python_env.sh'
       - 'scripts/test_mlc_install.sh'
   schedule:
-    # Weekly on Monday at 06:00 UTC – catches upstream nightly wheel changes.
+    # Weekly on Monday at 06:00 UTC.
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
@@ -35,6 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      WHEEL_INDEX: https://mlc.ai/wheels
+      MLC_LLM_PACKAGE: mlc-llm-nightly-cpu==0.20.dev162
+      MLC_AI_PACKAGE: mlc-ai-nightly-cpu==0.26.dev61
 
     steps:
       - name: Checkout
@@ -49,9 +53,6 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/test_mlc_install.sh
-        env:
-          WHEEL_INDEX: https://mlc.ai/wheels
-
       - name: Verify compile_model_tar.sh prereq check passes
         # Run only the prerequisites section of the compile script (exit before
         # NDK check since NDK is not installed in this lightweight job).
@@ -84,7 +85,7 @@ jobs:
           fi
 
           if [[ -z "${MLC_LLM_CMD}" ]]; then
-            if SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" &>/dev/null; then
+            if python3 -c "import mlc_llm" &>/dev/null; then
               MLC_LLM_CMD="python3 -m mlc_llm"
             fi
           fi
