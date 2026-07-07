@@ -107,12 +107,9 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
 fi
 
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" &>/dev/null; then
-    MLC_LLM_CMD="python3 -m mlc_llm"
-    pass "python3 -c 'import mlc_llm' → will use: python3 -m mlc_llm"
-  elif python -c "import mlc_llm" &>/dev/null; then
-    MLC_LLM_CMD="python -m mlc_llm"
-    pass "python -c 'import mlc_llm' → will use: python -m mlc_llm"
+  if mlc_assert_compiler_importable &>/dev/null; then
+    MLC_LLM_CMD="python3 ${SCRIPT_DIR}/mlc_llm_compile_wrapper.py"
+    pass "compile wrapper import check -> will use: ${MLC_LLM_CMD}"
   fi
 fi
 
@@ -135,67 +132,33 @@ print(f"{sys.version_info.major}.{sys.version_info.minor}")
 PY
 )"
 EXPECTED_TVM_LIB_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MAJOR_MINOR}/site-packages/tvm_ffi/lib/libtvm_ffi.so"
+EXPECTED_TVM_COMPILER_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MAJOR_MINOR}/site-packages/tvm/lib/libtvm_compiler.so"
+EXPECTED_MLC_LIB_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MAJOR_MINOR}/site-packages/mlc_llm/lib/libmlc_llm_module.so"
+EXPECTED_MLC_TVM_RUNTIME_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MAJOR_MINOR}/site-packages/mlc_llm/lib/libtvm_runtime.so"
+EXPECTED_ALIAS_DIR="${FAKE_USER_BASE}/mlc-alias"
 mkdir -p "$(dirname "${EXPECTED_TVM_LIB_PATH}")"
+mkdir -p "$(dirname "${EXPECTED_TVM_COMPILER_PATH}")"
+mkdir -p "$(dirname "${EXPECTED_MLC_LIB_PATH}")"
 touch "${EXPECTED_TVM_LIB_PATH}"
+touch "${EXPECTED_TVM_COMPILER_PATH}"
+touch "${EXPECTED_MLC_LIB_PATH}"
+touch "${EXPECTED_MLC_TVM_RUNTIME_PATH}"
 
-TVM_LIB_PATH="$(PYTHONUSERBASE="${FAKE_USER_BASE}" python3 - <<'_PYEOF'
-import importlib.util, os, site
-
-def _find():
-    candidate_names = ("libtvm.so", "libtvm_ffi.so")
-    for mod_name in ("tvm", "tvm_ffi", "mlc_ai", "mlc_llm"):
-        try:
-            spec = importlib.util.find_spec(mod_name)
-            if not spec:
-                continue
-            search_dirs = []
-            if spec.origin:
-                search_dirs.append(os.path.dirname(spec.origin))
-            if spec.submodule_search_locations:
-                search_dirs.extend(spec.submodule_search_locations)
-            for directory in search_dirs:
-                for relative_dir in ("", "lib"):
-                    base_dir = os.path.join(directory, relative_dir)
-                    for lib_name in candidate_names:
-                        lib_path = os.path.join(base_dir, lib_name)
-                        if os.path.isfile(lib_path):
-                            return lib_path
-        except Exception:
-            pass
-    sp_dirs = []
-    try:
-        sp_dirs += site.getsitepackages()
-    except AttributeError:
-        pass
-    try:
-        sp_dirs.append(site.getusersitepackages())
-    except Exception:
-        pass
-    for sp in sp_dirs:
-        if not os.path.isdir(sp):
-            continue
-        try:
-            for entry in os.scandir(sp):
-                if entry.is_dir(follow_symlinks=True):
-                    for relative_dir in ("", "lib"):
-                        base_dir = os.path.join(entry.path, relative_dir)
-                        for lib_name in candidate_names:
-                            lib_path = os.path.join(base_dir, lib_name)
-                            if os.path.isfile(lib_path):
-                                return lib_path
-        except OSError:
-            pass
-    return ""
-
-print(_find())
-_PYEOF
-)"
-
-if [[ -n "${TVM_LIB_PATH}" && -f "${TVM_LIB_PATH}" ]]; then
-  pass "TVM shared-library locator found a usable runtime"
+if (
+  export PYTHONUSERBASE="${FAKE_USER_BASE}"
+  export MLC_PYTHON_ENV_LIB_DIR="${EXPECTED_ALIAS_DIR}"
+  unset LD_LIBRARY_PATH
+  mlc_configure_compiler_environment
+  [[ ":${LD_LIBRARY_PATH:-}:" == *":$(dirname "${EXPECTED_TVM_LIB_PATH}"):"* ]] &&
+  [[ ":${LD_LIBRARY_PATH:-}:" == *":$(dirname "${EXPECTED_TVM_COMPILER_PATH}"):"* ]] &&
+  [[ -e "${EXPECTED_ALIAS_DIR}/libtvm.so" ]]
+); then
+  pass "native library path includes tvm_ffi/tvm dirs and libtvm.so alias"
 else
-  fail "TVM shared-library locator did not find a usable runtime"
-  echo "     got: ${TVM_LIB_PATH:-<empty>}" >&2
+  fail "native library path setup did not expose the expected TVM libraries"
+  echo "     expected tvm_ffi dir : $(dirname "${EXPECTED_TVM_LIB_PATH}")" >&2
+  echo "     expected tvm dir     : $(dirname "${EXPECTED_TVM_COMPILER_PATH}")" >&2
+  echo "     expected alias       : ${EXPECTED_ALIAS_DIR}/libtvm.so" >&2
 fi
 
 rm -rf "${FAKE_USER_BASE}"
