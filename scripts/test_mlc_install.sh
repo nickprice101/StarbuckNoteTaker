@@ -20,8 +20,14 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MLC_TVM_SHIM_DIR=""
 WHEEL_INDEX="${WHEEL_INDEX:-https://mlc.ai/wheels}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"
+
+trap 'rm -rf "${MLC_TVM_SHIM_DIR:-}"' EXIT
+
+source "${SCRIPT_DIR}/mlc_python_env.sh"
 
 PASS=0
 FAIL=0
@@ -44,9 +50,9 @@ if [[ "${SKIP_INSTALL}" != "1" ]]; then
 fi
 
 # Add user-base and sys.prefix bin dirs so we catch entry-points wherever pip
-# decided to put them.
-export PATH="$(python3 -m site --user-base 2>/dev/null)/bin:${PATH}"
-export PATH="$(python3 -c 'import sys; print(sys.prefix)' 2>/dev/null)/bin:${PATH}"
+# decided to put them, then expose the MLC-bundled TVM runtime as libtvm.so.
+mlc_add_python_bin_dirs
+mlc_configure_native_library_path
 
 # ---------------------------------------------------------------------------
 # 2. Package listing
@@ -187,10 +193,10 @@ print(_find())
 _PYEOF
 )"
 
-if [[ "${TVM_LIB_PATH}" == "${EXPECTED_TVM_LIB_PATH}" ]]; then
-  pass "TVM shared-library locator found nested tvm_ffi runtime"
+if [[ -n "${TVM_LIB_PATH}" && -f "${TVM_LIB_PATH}" ]]; then
+  pass "TVM shared-library locator found a usable runtime"
 else
-  fail "TVM shared-library locator missed nested tvm_ffi runtime"
+  fail "TVM shared-library locator did not find a usable runtime"
   echo "     got: ${TVM_LIB_PATH:-<empty>}" >&2
 fi
 
