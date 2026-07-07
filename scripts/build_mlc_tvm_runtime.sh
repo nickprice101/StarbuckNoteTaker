@@ -21,6 +21,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MLC_TVM_SHIM_DIR=""
+
+trap 'rm -rf "${MLC_TVM_SHIM_DIR:-}"' EXIT
+
+source "${SCRIPT_DIR}/mlc_python_env.sh"
 
 MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
 TARGET_ABI="${TARGET_ABI:-x86_64}"
@@ -71,6 +76,18 @@ done
 
 if [[ "${OS:-}" == "Windows_NT" ]] && ! command -v ninja >/dev/null 2>&1; then
   echo "ninja is required on Windows because MLC's Android prepare script uses Ninja there." >&2
+  exit 1
+fi
+
+mlc_add_python_bin_dirs
+mlc_configure_native_library_path
+
+if ! mlc_assert_importable; then
+  echo "mlc_llm is not importable by python3. Install it with:" >&2
+  echo "  bash scripts/install_mlc_llm.sh" >&2
+  python3 -m pip show mlc-llm 2>/dev/null || python3 -m pip show mlc-llm-nightly-cpu 2>/dev/null || true
+  python3 -m pip show mlc-ai-nightly-cpu 2>/dev/null || true
+  python3 -m pip show apache-tvm-ffi 2>/dev/null || true
   exit 1
 fi
 

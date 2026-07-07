@@ -70,10 +70,14 @@ MLC_TVM_SHIM_DIR=""
 
 trap 'rm -rf "${COMPILE_OUTPUT_DIR}" "${MLC_TVM_SHIM_DIR:-}"' EXIT
 
+source "${SCRIPT_DIR}/mlc_python_env.sh"
+
 # ---------------------------------------------------------------------------
 # Checks
 # ---------------------------------------------------------------------------
 echo "🔍  Checking prerequisites …"
+
+mlc_add_python_bin_dirs
 
 # Determine how to invoke mlc_llm.
 #
@@ -156,7 +160,9 @@ fi
 # older site-packages/tvm/libtvm.so layout, so detect both forms and add the
 # containing directory (plus a compatibility shim when required) to
 # LD_LIBRARY_PATH.
-_MLC_TVM_LIB_PATH="$(python3 - 2>/dev/null <<'_PYEOF'
+mlc_configure_native_library_path
+_MLC_TVM_LIB_PATH=""
+: <<'_PYEOF'
 import importlib.util, os, site, sys
 
 def _find():
@@ -212,7 +218,6 @@ def _find():
 
 print(_find())
 _PYEOF
-)"
 
 if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
   _MLC_TVM_LIB_DIR="$(dirname "${_MLC_TVM_LIB_PATH}")"
@@ -235,10 +240,27 @@ if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
   else
     export LD_LIBRARY_PATH="${_MLC_TVM_LD_PATH}"
   fi
-else
+elif false; then
   echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
 fi
 unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME _MLC_TVM_NEEDS_COMPATIBILITY_SHIM
+
+if ! mlc_assert_importable; then
+  echo "âŒ  mlc_llm is installed but its native extension could not be loaded." >&2
+  echo "" >&2
+  echo "Diagnostic info:" >&2
+  echo "  python3  : $(command -v python3 2>/dev/null || echo 'not found')" >&2
+  echo "  pip3     : $(command -v pip3 2>/dev/null || echo 'not found')" >&2
+  echo "  user-bin : $(python3 -m site --user-base 2>/dev/null)/bin" >&2
+  python3 -m pip show mlc-llm 2>/dev/null || python3 -m pip show mlc-llm-nightly-cpu 2>/dev/null || echo "  pip show : package not listed" >&2
+  python3 -m pip show mlc-ai-nightly-cpu 2>/dev/null || true
+  python3 -m pip show apache-tvm-ffi 2>/dev/null || true
+  exit 1
+fi
+
+if [[ -z "${MLC_LLM_CMD}" ]]; then
+  MLC_LLM_CMD="python3 -m mlc_llm"
+fi
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
   # Try common locations, guarding against unset ANDROID_HOME

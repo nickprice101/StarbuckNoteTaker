@@ -72,7 +72,7 @@ jobs:
           git lfs install
 
           echo "📦  Installing mlc-llm …"
-          pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+          bash scripts/install_mlc_llm.sh
           # Ensure the pip-installed entry-point script is on PATH regardless of
           # whether pip used the system or the per-user site-packages directory.
           export PATH="$(python3 -m site --user-base)/bin:${PATH}"
@@ -114,7 +114,7 @@ jobs:
           git lfs install
 
           echo "Installing mlc-llm..."
-          pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+          bash scripts/install_mlc_llm.sh
           export PATH="$(python3 -m site --user-base)/bin:${PATH}"
           export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
 
