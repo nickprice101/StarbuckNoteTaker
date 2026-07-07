@@ -125,12 +125,12 @@ echo ""
 echo "🔍  Verifying TVM shared-library discovery handles tvm_ffi/lib/libtvm_ffi.so …"
 
 FAKE_USER_BASE="$(mktemp -d "${TMPDIR:-/tmp}/mlc_userbase.XXXXXX")"
-PYTHON_MM="$(python3 - <<'PY'
+PYTHON_MAJOR_MINOR="$(python3 - <<'PY'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}")
 PY
 )"
-EXPECTED_TVM_LIB_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib/libtvm_ffi.so"
+EXPECTED_TVM_LIB_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MAJOR_MINOR}/site-packages/tvm_ffi/lib/libtvm_ffi.so"
 mkdir -p "$(dirname "${EXPECTED_TVM_LIB_PATH}")"
 touch "${EXPECTED_TVM_LIB_PATH}"
 

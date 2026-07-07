@@ -218,7 +218,11 @@ if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
   _MLC_TVM_LIB_DIR="$(dirname "${_MLC_TVM_LIB_PATH}")"
   _MLC_TVM_LD_PATH="${_MLC_TVM_LIB_DIR}"
   _MLC_TVM_LIB_BASENAME="$(basename "${_MLC_TVM_LIB_PATH}")"
+  _MLC_TVM_NEEDS_COMPATIBILITY_SHIM=0
   if [[ "${_MLC_TVM_LIB_BASENAME}" == "libtvm_ffi.so" ]] && [[ ! -e "${_MLC_TVM_LIB_DIR}/libtvm.so" ]]; then
+    _MLC_TVM_NEEDS_COMPATIBILITY_SHIM=1
+  fi
+  if [[ "${_MLC_TVM_NEEDS_COMPATIBILITY_SHIM}" == "1" ]]; then
     MLC_TVM_SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_tvm_shim.XXXXXX")"
     ln -s "${_MLC_TVM_LIB_PATH}" "${MLC_TVM_SHIM_DIR}/libtvm.so"
     _MLC_TVM_LD_PATH="${MLC_TVM_SHIM_DIR}:${_MLC_TVM_LD_PATH}"
@@ -234,7 +238,7 @@ if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
 else
   echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
 fi
-unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME
+unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME _MLC_TVM_NEEDS_COMPATIBILITY_SHIM
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
   # Try common locations, guarding against unset ANDROID_HOME
