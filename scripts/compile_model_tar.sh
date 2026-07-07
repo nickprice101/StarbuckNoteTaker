@@ -115,12 +115,10 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
   unset _search_dirs _d
 fi
 
-# 3. Fall back to Python module invocation if the package is importable.
+# 3. Fall back to the compiler wrapper if the compile module is importable.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" 2>/dev/null; then
-    MLC_LLM_CMD="python3 -m mlc_llm"
-  elif python -c "import mlc_llm" 2>/dev/null; then
-    MLC_LLM_CMD="python -m mlc_llm"
+  if mlc_assert_compiler_importable >/dev/null 2>&1; then
+    MLC_LLM_CMD="python3 ${SCRIPT_DIR}/mlc_llm_compile_wrapper.py"
   fi
 fi
 
@@ -139,8 +137,9 @@ fi
 # ---------------------------------------------------------------------------
 # Configure MLC compiler environment
 # ---------------------------------------------------------------------------
-# Build-time compilation still imports MLC's package initializer. Let it load
-# its native extension so TVM object types registered by the extension exist.
+# Build-time compilation imports MLC's package initializer before it reaches the
+# compile CLI. The pinned CPU wheels do not load their native extension cleanly
+# on GitHub runners, so the shared helper keeps that import side effect disabled.
 mlc_configure_compiler_environment
 
 if ! mlc_assert_compiler_importable; then
@@ -157,7 +156,7 @@ if ! mlc_assert_compiler_importable; then
 fi
 
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  MLC_LLM_CMD="python3 -m mlc_llm"
+  MLC_LLM_CMD="python3 ${SCRIPT_DIR}/mlc_llm_compile_wrapper.py"
 fi
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then

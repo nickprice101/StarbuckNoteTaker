@@ -1,44 +1,42 @@
-name: Test mlc-llm install and detection
+name: Test MLC deploy prerequisites
 
-# Runs on every push/PR that touches deploy.yml, the mlc install scripts, or
-# this workflow file itself, as well as on a weekly schedule. The job catches
-# pinned MLC package/environment regressions before the full 30-minute build
-# step is attempted.
+# The default GitHub APK build uses the checked-in arm64 MLC model archive and
+# skips optional x86_64 artifact generation. This workflow catches regressions
+# in that default path without installing the incompatible MLC Python wheel set.
 
 on:
   push:
     paths:
       - '.github/workflows/deploy.yml'
       - '.github/workflows/test-mlc-install.yml'
+      - 'app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar'
       - 'scripts/compile_model_tar.sh'
       - 'scripts/build_mlc_tvm_runtime.sh'
       - 'scripts/install_mlc_llm.sh'
+      - 'scripts/mlc_llm_compile_wrapper.py'
       - 'scripts/mlc_python_env.sh'
       - 'scripts/test_mlc_install.sh'
   pull_request:
     paths:
       - '.github/workflows/deploy.yml'
       - '.github/workflows/test-mlc-install.yml'
+      - 'app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar'
       - 'scripts/compile_model_tar.sh'
       - 'scripts/build_mlc_tvm_runtime.sh'
       - 'scripts/install_mlc_llm.sh'
+      - 'scripts/mlc_llm_compile_wrapper.py'
       - 'scripts/mlc_python_env.sh'
       - 'scripts/test_mlc_install.sh'
   schedule:
-    # Weekly on Monday at 06:00 UTC.
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
 jobs:
-  test-mlc-install:
-    name: Install mlc-llm and verify detection
+  test-mlc-deploy-prereqs:
+    name: Verify default MLC deploy prerequisites
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      WHEEL_INDEX: https://mlc.ai/wheels
-      MLC_LLM_PACKAGE: mlc-llm-nightly-cpu==0.20.dev162
-      MLC_AI_PACKAGE: mlc-ai-nightly-cpu==0.26.dev61
 
     steps:
       - name: Checkout
@@ -49,52 +47,40 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install mlc-llm nightly (CPU) and run detection test
-        run: |
-          set -euo pipefail
-          bash scripts/test_mlc_install.sh
-      - name: Verify compile_model_tar.sh prereq check passes
-        # Run only the prerequisites section of the compile script (exit before
-        # NDK check since NDK is not installed in this lightweight job).
-        # We extract just the mlc_llm detection block and run it in isolation.
+      - name: Verify scripts and checked-in model archive
         run: |
           set -euo pipefail
 
-          source scripts/mlc_python_env.sh
-          mlc_configure_compiler_environment
+          bash -n \
+            scripts/mlc_python_env.sh \
+            scripts/install_mlc_llm.sh \
+            scripts/test_mlc_install.sh \
+            scripts/compile_model_tar.sh \
+            scripts/build_mlc_tvm_runtime.sh
+          python3 -m py_compile scripts/mlc_llm_compile_wrapper.py
 
-          # Source only the detection block of compile_model_tar.sh by running
-          # up to and including the MLC_LLM_CMD assignment, then assert the
-          # variable is non-empty.
-          MLC_LLM_CMD=""
-
-          if command -v mlc_llm &>/dev/null; then
-            MLC_LLM_CMD="mlc_llm"
+          TAR_PATH="app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar"
+          MIN_REAL_BYTES=102400
+          if [[ ! -f "${TAR_PATH}" ]]; then
+            echo "::error::Missing checked-in arm64 MLC model archive: ${TAR_PATH}"
+            exit 1
           fi
-
-          if [[ -z "${MLC_LLM_CMD}" ]]; then
-            for _d in \
-              "$(python3 -m site --user-base 2>/dev/null)/bin" \
-              "$(python3 -c 'import sys; print(sys.prefix)' 2>/dev/null)/bin" \
-              "/usr/local/bin" "/usr/bin"; do
-              if [[ -n "${_d}" && -x "${_d}/mlc_llm" ]]; then
-                MLC_LLM_CMD="${_d}/mlc_llm"
-                break
-              fi
-            done
-          fi
-
-          if [[ -z "${MLC_LLM_CMD}" ]]; then
-            if python3 -c "import mlc_llm" &>/dev/null; then
-              MLC_LLM_CMD="python3 -m mlc_llm"
-            fi
-          fi
-
-          mlc_assert_compiler_importable
-
-          if [[ -z "${MLC_LLM_CMD}" ]]; then
-            echo "::error::compile_model_tar.sh detection would fail in deploy.yml"
+          if [[ "$(stat -c%s "${TAR_PATH}")" -le "${MIN_REAL_BYTES}" ]]; then
+            echo "::error::Checked-in arm64 MLC model archive looks like a stub: ${TAR_PATH}"
             exit 1
           fi
 
-          echo "✅  compile_model_tar.sh detection OK → ${MLC_LLM_CMD}"
+          source scripts/mlc_python_env.sh
+          mlc_configure_compiler_environment
+          if [[ "${SKIP_LOADING_MLCLLM_SO:-}" != "1" ]]; then
+            echo "::error::MLC compiler environment should skip native MLC extension loading"
+            exit 1
+          fi
+
+      - name: Verify optional x86_64 artifact step is opt-in
+        run: |
+          set -euo pipefail
+          if ! grep -q "BUILD_X86_64_MLC_ARTIFACTS == '1'" .github/workflows/deploy.yml; then
+            echo "::error::deploy.yml should keep x86_64 MLC artifact generation opt-in"
+            exit 1
+          fi
