@@ -65,9 +65,10 @@ esac
 MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
 OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
-COMPILE_OUTPUT_DIR="$(mktemp -d /tmp/mlc_compile_XXXXXX)"
+COMPILE_OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_compile.XXXXXX")"
+MLC_TVM_SHIM_DIR=""
 
-trap 'rm -rf "${COMPILE_OUTPUT_DIR}"' EXIT
+trap 'rm -rf "${COMPILE_OUTPUT_DIR}" "${MLC_TVM_SHIM_DIR:-}"' EXIT
 
 # ---------------------------------------------------------------------------
 # Checks
@@ -150,25 +151,40 @@ fi
 # ---------------------------------------------------------------------------
 # Expose libtvm.so via LD_LIBRARY_PATH
 # ---------------------------------------------------------------------------
-# mlc_llm/base.py loads libtvm.so with ctypes.CDLL("libtvm.so").  The library
-# is installed inside the Python package directory (e.g. site-packages/tvm/)
-# rather than in a standard OS library search path, so the linker can't find
-# it unless we explicitly add it to LD_LIBRARY_PATH.
-_MLC_TVM_LIB_DIR="$(python3 - 2>/dev/null <<'_PYEOF'
+# mlc_llm/base.py loads a TVM shared library via ctypes. Upstream nightly wheels
+# may now install that runtime as tvm_ffi/lib/libtvm_ffi.so instead of the
+# older site-packages/tvm/libtvm.so layout, so detect both forms and add the
+# containing directory (plus a compatibility shim when required) to
+# LD_LIBRARY_PATH.
+_MLC_TVM_LIB_PATH="$(python3 - 2>/dev/null <<'_PYEOF'
 import importlib.util, os, site, sys
 
 def _find():
-    # 1. Check the 'tvm' and 'mlc_ai' Python modules for libtvm.so
-    for mod_name in ("tvm", "mlc_ai"):
+    candidate_names = ("libtvm.so", "libtvm_ffi.so")
+
+    # 1. Check likely TVM/MLC module locations first.
+    for mod_name in ("tvm", "tvm_ffi", "mlc_ai", "mlc_llm"):
         try:
             spec = importlib.util.find_spec(mod_name)
-            if spec and spec.origin:
-                d = os.path.dirname(spec.origin)
-                if os.path.isfile(os.path.join(d, "libtvm.so")):
-                    return d
+            if not spec:
+                continue
+            search_dirs = []
+            if spec.origin:
+                search_dirs.append(os.path.dirname(spec.origin))
+            if spec.submodule_search_locations:
+                search_dirs.extend(spec.submodule_search_locations)
+            for directory in search_dirs:
+                for relative_dir in ("", "lib"):
+                    base_dir = os.path.join(directory, relative_dir)
+                    for lib_name in candidate_names:
+                        lib_path = os.path.join(base_dir, lib_name)
+                        if os.path.isfile(lib_path):
+                            return lib_path
         except Exception:
             pass
-    # 2. Shallow scan of every site-packages directory
+
+    # 2. Scan site-packages directories for the legacy flat layout and the
+    # newer nested tvm_ffi/lib layout.
     sp_dirs = []
     try:
         sp_dirs += site.getsitepackages()
@@ -184,8 +200,12 @@ def _find():
         try:
             for entry in os.scandir(sp):
                 if entry.is_dir(follow_symlinks=True):
-                    if os.path.isfile(os.path.join(entry.path, "libtvm.so")):
-                        return entry.path
+                    for relative_dir in ("", "lib"):
+                        base_dir = os.path.join(entry.path, relative_dir)
+                        for lib_name in candidate_names:
+                            lib_path = os.path.join(base_dir, lib_name)
+                            if os.path.isfile(lib_path):
+                                return lib_path
         except OSError:
             pass
     return ""
@@ -194,17 +214,31 @@ print(_find())
 _PYEOF
 )"
 
-if [[ -n "${_MLC_TVM_LIB_DIR}" ]]; then
-  if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
-    export LD_LIBRARY_PATH="${_MLC_TVM_LIB_DIR}:${LD_LIBRARY_PATH}"
-  else
-    export LD_LIBRARY_PATH="${_MLC_TVM_LIB_DIR}"
+if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
+  _MLC_TVM_LIB_DIR="$(dirname "${_MLC_TVM_LIB_PATH}")"
+  _MLC_TVM_LD_PATH="${_MLC_TVM_LIB_DIR}"
+  _MLC_TVM_LIB_BASENAME="$(basename "${_MLC_TVM_LIB_PATH}")"
+  _MLC_TVM_NEEDS_COMPATIBILITY_SHIM=0
+  if [[ "${_MLC_TVM_LIB_BASENAME}" == "libtvm_ffi.so" ]] && [[ ! -e "${_MLC_TVM_LIB_DIR}/libtvm.so" ]]; then
+    _MLC_TVM_NEEDS_COMPATIBILITY_SHIM=1
   fi
-  echo "     libtvm.so : ${_MLC_TVM_LIB_DIR} (added to LD_LIBRARY_PATH)"
+  if [[ "${_MLC_TVM_NEEDS_COMPATIBILITY_SHIM}" == "1" ]]; then
+    MLC_TVM_SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_tvm_shim.XXXXXX")"
+    ln -s "${_MLC_TVM_LIB_PATH}" "${MLC_TVM_SHIM_DIR}/libtvm.so"
+    _MLC_TVM_LD_PATH="${MLC_TVM_SHIM_DIR}:${_MLC_TVM_LD_PATH}"
+    echo "     libtvm.so : ${MLC_TVM_SHIM_DIR}/libtvm.so → ${_MLC_TVM_LIB_PATH}"
+  else
+    echo "     libtvm.so : ${_MLC_TVM_LIB_PATH}"
+  fi
+  if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+    export LD_LIBRARY_PATH="${_MLC_TVM_LD_PATH}:${LD_LIBRARY_PATH}"
+  else
+    export LD_LIBRARY_PATH="${_MLC_TVM_LD_PATH}"
+  fi
 else
   echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
 fi
-unset _MLC_TVM_LIB_DIR
+unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME _MLC_TVM_NEEDS_COMPATIBILITY_SHIM
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
   # Try common locations, guarding against unset ANDROID_HOME
