@@ -7,6 +7,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 /**
@@ -48,6 +49,7 @@ class MLCEngine(deviceType: String = "opencl") {
 
     /** Maps in-flight request IDs to their completion latches and stream callbacks. */
     private val pending = ConcurrentHashMap<String, PendingRequest>()
+    private val backgroundFailure = AtomicReference<Throwable?>(null)
 
     val chat: Chat = Chat()
 
@@ -56,10 +58,10 @@ class MLCEngine(deviceType: String = "opencl") {
             dispatchStreamResult(resultJson)
         }
         thread(isDaemon = true, name = "mlc-background-loop", priority = Thread.MAX_PRIORITY) {
-            jsonFFIEngine.runBackgroundLoop()
+            runBackgroundLoopSafely()
         }
         thread(isDaemon = true, name = "mlc-stream-back-loop") {
-            jsonFFIEngine.runBackgroundStreamBackLoop()
+            runStreamBackLoopSafely()
         }
     }
 
@@ -71,6 +73,7 @@ class MLCEngine(deviceType: String = "opencl") {
      * @param modelPath Absolute path to the model weights directory.
      */
     fun reload(modelLib: String, modelPath: String) {
+        backgroundFailure.set(null)
         val config = JSONObject().apply {
             put("model", modelPath)
             put("model_lib", modelLib)
@@ -78,6 +81,7 @@ class MLCEngine(deviceType: String = "opencl") {
         }.toString()
         Log.i(TAG, "Reloading engine: lib=$modelLib")
         jsonFFIEngine.reload(config)
+        throwIfBackgroundFailed()
         Log.i(TAG, "Engine reload complete")
     }
 
@@ -162,14 +166,43 @@ class MLCEngine(deviceType: String = "opencl") {
 
             val requestJson = serializeRequest(request, requestId)
             Log.d(TAG, "Submitting completion requestId=$requestId")
+            throwIfBackgroundFailed()
             jsonFFIEngine.chatCompletion(requestJson, requestId)
 
             val finished = latch.await(COMPLETION_TIMEOUT_SECS, TimeUnit.SECONDS)
             pending.remove(requestId)
+            throwIfBackgroundFailed()
             if (!finished) {
                 Log.w(TAG, "Completion timed out (requestId=$requestId)")
             }
         }
+    }
+
+    private fun runBackgroundLoopSafely() {
+        try {
+            jsonFFIEngine.runBackgroundLoop()
+        } catch (t: Throwable) {
+            recordBackgroundFailure("MLC background loop failed", t)
+        }
+    }
+
+    private fun runStreamBackLoopSafely() {
+        try {
+            jsonFFIEngine.runBackgroundStreamBackLoop()
+        } catch (t: Throwable) {
+            recordBackgroundFailure("MLC stream-back loop failed", t)
+        }
+    }
+
+    private fun recordBackgroundFailure(message: String, throwable: Throwable) {
+        Log.e(TAG, message, throwable)
+        backgroundFailure.set(throwable)
+        pending.values.forEach { it.latch.countDown() }
+    }
+
+    private fun throwIfBackgroundFailed() {
+        val failure = backgroundFailure.get() ?: return
+        throw IllegalStateException("MLC engine background thread failed: ${failure.message}", failure)
     }
 
     // ------------------------------------------------------------------

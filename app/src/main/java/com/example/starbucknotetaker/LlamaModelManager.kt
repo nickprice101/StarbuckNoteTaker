@@ -477,6 +477,17 @@ class LlamaModelManager(private val context: Context) {
         const val MODEL_LIB_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
 
         /**
+         * Name used by TVM's system-lib registry.
+         *
+         * MLC registers the compiled Android system library under the compiler
+         * module prefix embedded in lib0.o, not under the HuggingFace repo-style
+         * name used for the .so filename. The linked library exposes symbols such
+         * as `llama_q4f16_0___tvm_ffi__library_ctx`, so the system-lib lookup name
+         * must be `llama_q4f16_0`.
+         */
+        const val MODEL_LIB_SYSTEM_NAME = "llama_q4f16_0"
+
+        /**
          * The filename of the compiled model kernel library bundled in the APK's
          * `jniLibs/<abi>/` directory.
          *
@@ -500,7 +511,7 @@ class LlamaModelManager(private val context: Context) {
          * Android TVM runtime).  Passing the `system://` prefix instructs MLC-LLM to call
          * TVM's `runtime.SystemLib()` and retrieve the pre-registered module.
          */
-        const val MODEL_LIB_SYSTEM_HANDLE = "system://$MODEL_LIB_NAME"
+        const val MODEL_LIB_SYSTEM_HANDLE = "system://$MODEL_LIB_SYSTEM_NAME"
 
         /** Human-readable approximate download size shown in the Settings UI. */
         const val MODEL_SIZE_LABEL = "~2.0 GB"
