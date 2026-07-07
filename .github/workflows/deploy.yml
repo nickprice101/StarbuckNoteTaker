@@ -78,7 +78,7 @@ jobs:
           export PATH="$(python3 -m site --user-base)/bin:${PATH}"
 
           echo "🔬  Verifying mlc-llm is importable after install …"
-          python3 -c "import mlc_llm; print('  mlc_llm module OK:', mlc_llm.__file__)" || {
+          SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm; print('  mlc_llm module OK:', mlc_llm.__file__)" || {
             echo "::warning::mlc_llm bare import failed; checking pip package is installed…"
             python3 -m pip show mlc-llm-nightly-cpu || {
               echo "::error::mlc-llm-nightly-cpu pip package is not installed."

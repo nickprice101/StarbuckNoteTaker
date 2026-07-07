@@ -17,12 +17,18 @@ def llamaModelAbiProfiles = [
                 target     : 'aarch64-linux-android26',
                 tarAsset   : "src/main/assets/${llamaModelName}-android.tar",
         ],
-        'x86_64': [
-                clangPrefix: 'x86_64-linux-android',
-                target     : 'x86_64-linux-android26',
-                tarAsset   : "src/main/assets/${llamaModelName}-android-x86_64.tar",
-        ],
 ]
+def x86MlcTar = file("src/main/assets/${llamaModelName}-android-x86_64.tar")
+def x86TvmRuntime = rootProject.file("mlc4j/src/main/jniLibs/x86_64/libtvm4j_runtime_packed.so")
+def includeX86MlcModel = System.getenv('MLC_INCLUDE_X86_64_MODEL') == '1' ||
+        (x86MlcTar.exists() && x86TvmRuntime.exists())
+if (includeX86MlcModel) {
+    llamaModelAbiProfiles['x86_64'] = [
+            clangPrefix: 'x86_64-linux-android',
+            target     : 'x86_64-linux-android26',
+            tarAsset   : "src/main/assets/${llamaModelName}-android-x86_64.tar",
+    ]
+}
 def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
 def abiToLibcxxTriple = [
         'arm64-v8a': 'aarch64-linux-android',
@@ -449,9 +455,13 @@ tasks.register('buildModelLibSo') {
     dependsOn(':mlc4j:downloadTvmRuntime')
 
     def compatSrc = rootProject.file("scripts/tvm_compat.c")
+    def tvmSoDirs = llamaModelAbiProfiles.collectEntries { abi, profile ->
+        [(abi): rootProject.file("mlc4j/src/main/jniLibs/${abi}")]
+    }
     inputs.file(compatSrc)
     llamaModelAbiProfiles.each { abi, profile ->
         inputs.file(file(profile.tarAsset)).withPropertyName("modelTar_${abi}")
+        inputs.file(new File(tvmSoDirs[abi], 'libtvm4j_runtime_packed.so')).withPropertyName("tvmRuntime_${abi}")
         outputs.file(new File(file("src/main/jniLibs/${abi}"), llamaModelSoName))
     }
 
@@ -470,7 +480,7 @@ tasks.register('buildModelLibSo') {
                     "Run TARGET_ABI=${abi} scripts/compile_model_tar.sh or let CI compile it.")
             }
 
-            def tvmSoDir = project(':mlc4j').file("src/main/jniLibs/${abi}")
+            def tvmSoDir = tvmSoDirs[abi]
             def tvmSo = new File(tvmSoDir, 'libtvm4j_runtime_packed.so')
             if (!tvmSo.exists()) {
                 throw new GradleException("TVM runtime not found for ABI ${abi}: ${tvmSo}. " +

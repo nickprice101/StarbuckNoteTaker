@@ -12,6 +12,8 @@ on:
       - '.github/workflows/test-mlc-install.yml'
       - 'scripts/compile_model_tar.sh'
       - 'scripts/build_mlc_tvm_runtime.sh'
+      - 'scripts/install_mlc_llm.sh'
+      - 'scripts/mlc_python_env.sh'
       - 'scripts/test_mlc_install.sh'
   pull_request:
     paths:
@@ -19,6 +21,8 @@ on:
       - '.github/workflows/test-mlc-install.yml'
       - 'scripts/compile_model_tar.sh'
       - 'scripts/build_mlc_tvm_runtime.sh'
+      - 'scripts/install_mlc_llm.sh'
+      - 'scripts/mlc_python_env.sh'
       - 'scripts/test_mlc_install.sh'
   schedule:
     # Weekly on Monday at 06:00 UTC – catches upstream nightly wheel changes.
@@ -55,9 +59,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Add user-base/bin to PATH (mirrors what deploy.yml does).
-          export PATH="$(python3 -m site --user-base)/bin:${PATH}"
-          export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
+          source scripts/mlc_python_env.sh
+          mlc_configure_compiler_environment
 
           # Source only the detection block of compile_model_tar.sh by running
           # up to and including the MLC_LLM_CMD assignment, then assert the
@@ -81,10 +84,12 @@ jobs:
           fi
 
           if [[ -z "${MLC_LLM_CMD}" ]]; then
-            if python3 -c "import mlc_llm" &>/dev/null; then
+            if SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" &>/dev/null; then
               MLC_LLM_CMD="python3 -m mlc_llm"
             fi
           fi
+
+          mlc_assert_compiler_importable
 
           if [[ -z "${MLC_LLM_CMD}" ]]; then
             echo "::error::compile_model_tar.sh detection would fail in deploy.yml"

@@ -79,10 +79,9 @@ if [[ "${OS:-}" == "Windows_NT" ]] && ! command -v ninja >/dev/null 2>&1; then
   exit 1
 fi
 
-mlc_add_python_bin_dirs
-mlc_configure_native_library_path
+mlc_configure_compiler_environment
 
-if ! mlc_assert_importable; then
+if ! mlc_assert_compiler_importable; then
   echo "mlc_llm is not importable by python3. Install it with:" >&2
   echo "  bash scripts/install_mlc_llm.sh" >&2
   python3 -m pip show mlc-llm 2>/dev/null || python3 -m pip show mlc-llm-nightly-cpu 2>/dev/null || true
@@ -91,7 +90,7 @@ if ! mlc_assert_importable; then
   exit 1
 fi
 
-if ! python3 -c "import mlc_llm" 2>/dev/null; then
+if ! SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" 2>/dev/null; then
   # Nightly packages may fail bare import but still work for module subcommands.
   if ! python3 -m pip show mlc-llm-nightly-cpu >/dev/null 2>&1 && \
      ! python3 -m pip show mlc-llm >/dev/null 2>&1; then

@@ -16,12 +16,11 @@ source "${SCRIPT_DIR}/mlc_python_env.sh"
 echo "Installing ${MLC_LLM_PACKAGE} + ${MLC_AI_PACKAGE} from ${WHEEL_INDEX}..."
 python3 -m pip install --pre -f "${WHEEL_INDEX}" "${MLC_LLM_PACKAGE}" "${MLC_AI_PACKAGE}"
 
-mlc_add_python_bin_dirs
-mlc_configure_native_library_path
+mlc_configure_compiler_environment
 
-echo "Verifying mlc_llm native import..."
-if ! mlc_assert_importable; then
-  echo "::error::mlc_llm is installed but its native extension could not be loaded." >&2
+echo "Verifying mlc_llm compile CLI import..."
+if ! mlc_assert_compiler_importable; then
+  echo "::error::mlc_llm is installed but its compile CLI could not be imported." >&2
   python3 -m pip show "${MLC_LLM_PACKAGE%%=*}" || true
   python3 -m pip show "${MLC_AI_PACKAGE%%=*}" || true
   python3 -m pip show apache-tvm-ffi || true

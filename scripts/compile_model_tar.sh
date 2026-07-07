@@ -77,7 +77,7 @@ source "${SCRIPT_DIR}/mlc_python_env.sh"
 # ---------------------------------------------------------------------------
 echo "🔍  Checking prerequisites …"
 
-mlc_add_python_bin_dirs
+mlc_configure_compiler_environment
 
 # Determine how to invoke mlc_llm.
 #
@@ -118,9 +118,9 @@ fi
 
 # 3. Fall back to Python module invocation if the package is importable.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" 2>/dev/null; then
+  if SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" 2>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
-  elif python -c "import mlc_llm" 2>/dev/null; then
+  elif SKIP_LOADING_MLCLLM_SO=1 python -c "import mlc_llm" 2>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
   fi
 fi
@@ -153,72 +153,12 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Expose libtvm.so via LD_LIBRARY_PATH
+# Configure MLC compiler-only mode
 # ---------------------------------------------------------------------------
-# mlc_llm/base.py loads a TVM shared library via ctypes. Upstream nightly wheels
-# may now install that runtime as tvm_ffi/lib/libtvm_ffi.so instead of the
-# older site-packages/tvm/libtvm.so layout, so detect both forms and add the
-# containing directory (plus a compatibility shim when required) to
-# LD_LIBRARY_PATH.
-mlc_configure_native_library_path
+# Build-time compilation does not need the MLC serving runtime .so. Skipping it
+# avoids duplicate TVM FFI registrations in the current nightly wheel set.
+mlc_configure_compiler_environment
 _MLC_TVM_LIB_PATH=""
-: <<'_PYEOF'
-import importlib.util, os, site, sys
-
-def _find():
-    candidate_names = ("libtvm.so", "libtvm_ffi.so")
-
-    # 1. Check likely TVM/MLC module locations first.
-    for mod_name in ("tvm", "tvm_ffi", "mlc_ai", "mlc_llm"):
-        try:
-            spec = importlib.util.find_spec(mod_name)
-            if not spec:
-                continue
-            search_dirs = []
-            if spec.origin:
-                search_dirs.append(os.path.dirname(spec.origin))
-            if spec.submodule_search_locations:
-                search_dirs.extend(spec.submodule_search_locations)
-            for directory in search_dirs:
-                for relative_dir in ("", "lib"):
-                    base_dir = os.path.join(directory, relative_dir)
-                    for lib_name in candidate_names:
-                        lib_path = os.path.join(base_dir, lib_name)
-                        if os.path.isfile(lib_path):
-                            return lib_path
-        except Exception:
-            pass
-
-    # 2. Scan site-packages directories for the legacy flat layout and the
-    # newer nested tvm_ffi/lib layout.
-    sp_dirs = []
-    try:
-        sp_dirs += site.getsitepackages()
-    except AttributeError:
-        pass
-    try:
-        sp_dirs.append(site.getusersitepackages())
-    except Exception:
-        pass
-    for sp in sp_dirs:
-        if not os.path.isdir(sp):
-            continue
-        try:
-            for entry in os.scandir(sp):
-                if entry.is_dir(follow_symlinks=True):
-                    for relative_dir in ("", "lib"):
-                        base_dir = os.path.join(entry.path, relative_dir)
-                        for lib_name in candidate_names:
-                            lib_path = os.path.join(base_dir, lib_name)
-                            if os.path.isfile(lib_path):
-                                return lib_path
-        except OSError:
-            pass
-    return ""
-
-print(_find())
-_PYEOF
-
 if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
   _MLC_TVM_LIB_DIR="$(dirname "${_MLC_TVM_LIB_PATH}")"
   _MLC_TVM_LD_PATH="${_MLC_TVM_LIB_DIR}"
@@ -245,7 +185,7 @@ elif false; then
 fi
 unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME _MLC_TVM_NEEDS_COMPATIBILITY_SHIM
 
-if ! mlc_assert_importable; then
+if ! mlc_assert_compiler_importable; then
   echo "âŒ  mlc_llm is installed but its native extension could not be loaded." >&2
   echo "" >&2
   echo "Diagnostic info:" >&2
