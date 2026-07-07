@@ -119,6 +119,83 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5. Regression test: locate the renamed TVM FFI runtime layout
+# ---------------------------------------------------------------------------
+echo ""
+echo "🔍  Verifying TVM shared-library discovery handles tvm_ffi/lib/libtvm_ffi.so …"
+
+FAKE_USER_BASE="$(mktemp -d /tmp/mlc_userbase_XXXXXX)"
+PYTHON_MM="$(python3 - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+mkdir -p "${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib"
+touch "${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib/libtvm_ffi.so"
+
+TVM_LIB_PATH="$(PYTHONUSERBASE="${FAKE_USER_BASE}" python3 - <<'_PYEOF'
+import importlib.util, os, site
+
+def _find():
+    candidate_names = ("libtvm.so", "libtvm_ffi.so")
+    for mod_name in ("tvm", "tvm_ffi", "mlc_ai", "mlc_llm"):
+        try:
+            spec = importlib.util.find_spec(mod_name)
+            if not spec:
+                continue
+            search_dirs = []
+            if spec.origin:
+                search_dirs.append(os.path.dirname(spec.origin))
+            if spec.submodule_search_locations:
+                search_dirs.extend(spec.submodule_search_locations)
+            for directory in search_dirs:
+                for relative_dir in ("", "lib"):
+                    base_dir = os.path.join(directory, relative_dir)
+                    for lib_name in candidate_names:
+                        lib_path = os.path.join(base_dir, lib_name)
+                        if os.path.isfile(lib_path):
+                            return lib_path
+        except Exception:
+            pass
+    sp_dirs = []
+    try:
+        sp_dirs += site.getsitepackages()
+    except AttributeError:
+        pass
+    try:
+        sp_dirs.append(site.getusersitepackages())
+    except Exception:
+        pass
+    for sp in sp_dirs:
+        if not os.path.isdir(sp):
+            continue
+        try:
+            for entry in os.scandir(sp):
+                if entry.is_dir(follow_symlinks=True):
+                    for relative_dir in ("", "lib"):
+                        base_dir = os.path.join(entry.path, relative_dir)
+                        for lib_name in candidate_names:
+                            lib_path = os.path.join(base_dir, lib_name)
+                            if os.path.isfile(lib_path):
+                                return lib_path
+        except OSError:
+            pass
+    return ""
+
+print(_find())
+_PYEOF
+)"
+
+if [[ "${TVM_LIB_PATH}" == "${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib/libtvm_ffi.so" ]]; then
+  pass "TVM shared-library locator found nested tvm_ffi runtime"
+else
+  fail "TVM shared-library locator missed nested tvm_ffi runtime"
+  echo "     got: ${TVM_LIB_PATH:-<empty>}" >&2
+fi
+
+rm -rf "${FAKE_USER_BASE}"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
