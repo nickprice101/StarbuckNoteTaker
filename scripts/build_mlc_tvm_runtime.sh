@@ -74,10 +74,15 @@ if [[ "${OS:-}" == "Windows_NT" ]] && ! command -v ninja >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! python3 -c "import mlc_llm" >/dev/null 2>&1; then
-  echo "mlc_llm is not importable by python3. Install it with:" >&2
-  echo "  pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu" >&2
-  exit 1
+if ! python3 -c "import mlc_llm" 2>/dev/null; then
+  # Nightly packages may fail bare import but still work for module subcommands.
+  if ! python3 -m pip show mlc-llm-nightly-cpu >/dev/null 2>&1 && \
+     ! python3 -m pip show mlc-llm >/dev/null 2>&1; then
+    echo "mlc_llm is not importable by python3. Install it with:" >&2
+    echo "  pip install --pre -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu" >&2
+    exit 1
+  fi
+  echo "⚠️  'import mlc_llm' failed but pip package is installed; proceeding." >&2
 fi
 
 if [[ ! -f "${MODEL_TAR}" ]]; then
