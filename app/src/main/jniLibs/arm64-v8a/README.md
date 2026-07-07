@@ -1,57 +1,51 @@
-# `jniLibs/arm64-v8a/` — native libraries
+# `jniLibs/arm64-v8a/` - native libraries
 
-This directory is the standard Android location for pre-built native shared
-libraries (`.so` files).  The Gradle build packages everything here into the APK
-automatically.
+This directory is the standard Android location for prebuilt native shared
+libraries (`.so` files). The Gradle build packages everything here into the APK.
 
-## TVM runtime — `libtvm4j_runtime_packed.so`
+## TVM Runtime - `libtvm4j_runtime_packed.so`
 
-This is the packed TVM Android runtime that backs the MLC LLM inference engine
-(`MLCEngine` / `ChatModule`).  It provides all JNI functions declared in
-`mlc4j/src/main/java/ai/mlc/mlcllm/ChatModule.kt`.
+The packed TVM Android runtime is stored in:
 
-**This file is NOT committed to the repository** (it is listed in `.gitignore`).
+```text
+mlc4j/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so
+```
 
-Run the fetch script once before building:
+That runtime is not committed to the repository. Build it from MLC source before
+assembling the app:
 
 ```bash
+bash scripts/install_mlc_llm.sh
 bash scripts/fetch_mlc_native.sh
 ```
 
-The script downloads `mlc-chat.apk` from the MLC LLM binary release
-(`Android-09262024`) and extracts `libtvm4j_runtime_packed.so` from it.
+The runtime must expose TVM FFI system-library support (`ffi.SystemLib` and
+`TVMFFIEnvModRegisterSystemLibSymbol`). The old `Android-09262024` binary APK
+runtime is not compatible with the checked-in Llama archive.
 
-The CI workflow (`deploy.yml`) runs this step automatically.
+## Model Library
 
-## System-lib model archive — `.tar` flow
+The project links the model archive:
 
-The project uses the **modern system-lib `.tar` flow** rather than a compiled
-`.so` for the model library.  The model is distributed as:
-
-```
+```text
 app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
 ```
 
-The archive contains the compiled TVM object files (`lib0.o`,
-`llama_q4f16_0_devc.o`).  On the first inference attempt
-`LlamaModelManager.extractModelLibIfNeeded()` extracts the archive to
-`filesDir/lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android/` and the resulting
-directory path is passed to `MLCEngine.reload()` as `modelLib`.
+into:
 
-To rebuild the real `.tar` from the Llama 3.2 3B weights:
-
-```bash
-bash scripts/compile_model_tar.sh
+```text
+app/src/main/jniLibs/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
 ```
 
-## Model weights (~2 GB)
+Gradle task `buildModelLibSo` performs this link step automatically once the
+compatible TVM runtime is present.
 
-The model weights are **not bundled** in the APK.  They are downloaded at
-runtime via the Settings screen (`LlamaModelManager.downloadModel()`).
+## Model Weights
 
-## Other `.so` files
+The model weights are not bundled in the APK. They are downloaded at runtime via
+the Settings screen (`LlamaModelManager.downloadModel()`).
 
-`libdjl_tokenizer.so` and `libc++_shared.so` are generated automatically by
-the Gradle build tasks (`preparePenguinNativeLibs`, `prepareLibcxxShared`).
-You do not need to place them here manually.
+## Other `.so` Files
 
+`libdjl_tokenizer.so` and `libc++_shared.so` are generated automatically by the
+Gradle build tasks (`preparePenguinNativeLibs`, `prepareLibcxxShared`).

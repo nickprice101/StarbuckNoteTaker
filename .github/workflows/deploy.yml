@@ -44,11 +44,6 @@ jobs:
           fi
           echo "sdk.dir=$SDK_PATH" > local.properties
 
-      - name: Download MLC TVM runtime native library
-        run: |
-          set -euo pipefail
-          bash scripts/fetch_mlc_native.sh
-
       - name: Build MLC model library (.tar) if stub
         run: |
           set -euo pipefail
@@ -72,6 +67,7 @@ jobs:
           echo "⚠️  Stub model library detected ($(du -sh "${TAR_PATH}" 2>/dev/null | cut -f1 || echo 'missing')) — compiling real archive."
 
           echo "📦  Installing git-lfs …"
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends git-lfs
           git lfs install
 
@@ -106,8 +102,40 @@ jobs:
           git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
             "HEAD:${{ github.ref_name }}"
 
+      - name: Build MLC TVM runtime native library
+        run: |
+          set -euo pipefail
+
+          echo "Installing native build prerequisites..."
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git-lfs ninja-build cmake
+          git lfs install
+
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            source "${HOME}/.cargo/env"
+          fi
+
+          echo "Installing mlc-llm..."
+          bash scripts/install_mlc_llm.sh
+          source scripts/mlc_python_env.sh
+          mlc_configure_compiler_environment
+          export PATH="$(python3 -m site --user-base)/bin:${PATH}"
+          export PATH="$(python3 -c 'import sys; print(sys.prefix)')/bin:${PATH}"
+
+          echo "Verifying mlc-llm is importable after install..."
+          mlc_assert_compiler_importable || {
+            echo "::error::mlc_llm compile CLI is installed but cannot be imported."
+            python3 -m pip show mlc-llm-nightly-cpu || true
+            python3 -m pip show mlc-ai-nightly-cpu || true
+            python3 -m pip show apache-tvm-ffi || true
+            python3 -c "import sys; print(sys.path)"
+            exit 1
+          }
+
+          bash scripts/fetch_mlc_native.sh
+
       - name: Build x86_64 MLC model and TVM runtime artifacts
-        if: ${{ vars.BUILD_X86_64_MLC_ARTIFACTS == '1' }}
         run: |
           set -euo pipefail
 
@@ -118,6 +146,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git-lfs ninja-build cmake
           git lfs install
+
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            source "${HOME}/.cargo/env"
+          fi
 
           echo "Installing mlc-llm..."
           bash scripts/install_mlc_llm.sh
@@ -144,7 +177,7 @@ jobs:
             fi
           fi
 
-          TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh
+          TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh
 
       - name: Verify MLC model configuration assets
         run: |

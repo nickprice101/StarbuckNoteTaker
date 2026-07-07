@@ -7,10 +7,10 @@
 #
 #   app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
 #
-# The .tar is bundled inside the APK and extracted at runtime by
-# LlamaModelManager.extractModelLibIfNeeded().  It contains:
-#   lib0.o                   — TVM runtime support code
-#   llama_q4f16_0_devc.o     — quantised Llama device code
+# The .tar is a Gradle build input. buildModelLibSo links its object files into
+# an ABI-specific native .so under app/src/main/jniLibs/<abi>/. It contains:
+#   lib0.o                   - TVM runtime support code
+#   llama_q4f16_0_devc.o     - quantized Llama device code
 #
 # Usage (from repository root):
 #   bash scripts/compile_model_tar.sh
