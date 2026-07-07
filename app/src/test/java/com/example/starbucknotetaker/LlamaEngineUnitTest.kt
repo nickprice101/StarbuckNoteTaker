@@ -197,6 +197,14 @@ class LlamaEngineUnitTest {
     }
 
     @Test
+    fun modelManager_systemLibHandle_usesMlcNormalizedName() {
+        assertEquals(
+            "system://llama_q4f16_0",
+            LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE,
+        )
+    }
+
+    @Test
     fun modelManager_supportedModelAbis_includeX8664Emulator() {
         assertTrue(LlamaModelManager.SUPPORTED_MODEL_ABIS.contains("arm64-v8a"))
         assertTrue(LlamaModelManager.SUPPORTED_MODEL_ABIS.contains("x86_64"))
