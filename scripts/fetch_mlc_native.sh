@@ -2,83 +2,101 @@
 # =============================================================================
 # fetch_mlc_native.sh
 #
-# Downloads libtvm4j_runtime_packed.so from the MLC LLM binary release APK
-# and places it in mlc4j/src/main/jniLibs/arm64-v8a/ where the Gradle build
-# expects to find it.
+# Ensures libtvm4j_runtime_packed.so is present under mlc4j/src/main/jniLibs/<abi>/.
 #
-# Usage (from repository root):
+# The checked-in Llama-3.2-3B-Instruct-q4f16_0-MLC model archive is produced by
+# a newer TVM/MLC compiler that uses TVM FFI system-library metadata
+# (__tvm_ffi_* symbols plus library_bin/library_ctx). The older Android-09262024
+# binary APK runtime does not include ffi.SystemLib and cannot load that archive.
+# By default this script therefore builds the Android runtime from MLC source.
+#
+# Usage:
 #   bash scripts/fetch_mlc_native.sh
+#   TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh
 #
-# The .so is extracted directly from mlc-chat.apk (which is a ZIP archive)
-# without unpacking anything else.  If the file is already present the script
-# exits cleanly without re-downloading.
+# Legacy escape hatch:
+#   MLC_USE_ANDROID_BINARY_RUNTIME=1 bash scripts/fetch_mlc_native.sh
 #
-# Requirements: curl, unzip (both available on standard Linux/macOS)
+# Requirements for the default path:
+#   - git, cmake, ninja, rustup
+#   - Python with mlc_llm importable
+#   - Android NDK, with ANDROID_NDK set or discoverable under ANDROID_HOME
 # =============================================================================
 
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Configuration — update the tag if a newer release is available.
-# See https://github.com/mlc-ai/binary-mlc-llm-libs/releases
-# ---------------------------------------------------------------------------
 RELEASE_TAG="Android-09262024"
 TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
 APK_URL="https://github.com/mlc-ai/binary-mlc-llm-libs/releases/download/${RELEASE_TAG}/mlc-chat.apk"
 SO_INSIDE_APK="lib/arm64-v8a/libtvm4j_runtime_packed.so"
-DEST_DIR="mlc4j/src/main/jniLibs/arm64-v8a"
+DEST_DIR="mlc4j/src/main/jniLibs/${TARGET_ABI}"
 DEST_FILE="${DEST_DIR}/libtvm4j_runtime_packed.so"
+USE_LEGACY_BINARY_RUNTIME="${MLC_USE_ANDROID_BINARY_RUNTIME:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-if [[ "${TARGET_ABI}" == "x86_64" ]]; then
-  echo "The upstream ${RELEASE_TAG} mlc-chat.apk does not contain an x86_64 TVM runtime."
-  echo "Building x86_64 from MLC source instead."
-  exec bash "${SCRIPT_DIR}/build_mlc_tvm_runtime.sh"
-elif [[ "${TARGET_ABI}" != "arm64-v8a" ]]; then
-  echo "Unsupported TARGET_ABI: ${TARGET_ABI}" >&2
-  echo "Supported values: arm64-v8a, x86_64" >&2
-  exit 1
-fi
-
 DEST_PATH="${REPO_ROOT}/${DEST_FILE}"
 
-# ---------------------------------------------------------------------------
-# Early-exit if already present
-# ---------------------------------------------------------------------------
-if [[ -f "${DEST_PATH}" ]]; then
-  echo "✅  libtvm4j_runtime_packed.so already present at ${DEST_FILE} — nothing to do."
+runtime_supports_tvm_ffi_system_lib() {
+  local runtime_path="$1"
+  [[ -f "${runtime_path}" ]] || return 1
+  grep -a -q "ffi.SystemLib" "${runtime_path}" &&
+    grep -a -q "TVMFFIEnvModRegisterSystemLibSymbol" "${runtime_path}"
+}
+
+case "${TARGET_ABI}" in
+  arm64-v8a|x86_64) ;;
+  *)
+    echo "Unsupported TARGET_ABI: ${TARGET_ABI}" >&2
+    echo "Supported values: arm64-v8a, x86_64" >&2
+    exit 1
+    ;;
+esac
+
+if runtime_supports_tvm_ffi_system_lib "${DEST_PATH}"; then
+  echo "Compatible libtvm4j_runtime_packed.so already present at ${DEST_FILE}."
   exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Download APK to a temp file
-# ---------------------------------------------------------------------------
+if [[ "${USE_LEGACY_BINARY_RUNTIME}" != "1" ]]; then
+  if [[ -f "${DEST_PATH}" ]]; then
+    echo "Existing runtime at ${DEST_FILE} lacks TVM FFI system-lib support; rebuilding."
+  else
+    echo "Runtime missing at ${DEST_FILE}; building from MLC source."
+  fi
+  export TARGET_ABI
+  exec bash "${SCRIPT_DIR}/build_mlc_tvm_runtime.sh"
+fi
+
+if [[ "${TARGET_ABI}" != "arm64-v8a" ]]; then
+  echo "The ${RELEASE_TAG} mlc-chat.apk only contains an arm64-v8a runtime." >&2
+  echo "Unset MLC_USE_ANDROID_BINARY_RUNTIME or run scripts/build_mlc_tvm_runtime.sh." >&2
+  exit 1
+fi
+
+if [[ -f "${DEST_PATH}" ]]; then
+  echo "Existing legacy runtime left in place at ${DEST_FILE}."
+  exit 0
+fi
+
 TMP_APK="$(mktemp /tmp/mlc-chat-XXXXXX.apk)"
 trap 'rm -f "${TMP_APK}"' EXIT
 
-echo "⬇️   Downloading mlc-chat.apk (release ${RELEASE_TAG}) …"
-echo "     URL: ${APK_URL}"
+echo "Downloading legacy mlc-chat.apk runtime (release ${RELEASE_TAG})."
+echo "This runtime is only for legacy model archives, not the current bundled Llama archive."
+echo "URL: ${APK_URL}"
 curl --fail --location --progress-bar --output "${TMP_APK}" "${APK_URL}"
-echo "     Downloaded: $(du -sh "${TMP_APK}" | cut -f1)"
 
-# ---------------------------------------------------------------------------
-# Extract libtvm4j_runtime_packed.so from the APK (which is a ZIP)
-# ---------------------------------------------------------------------------
 mkdir -p "${DEST_PATH%/*}"
-
-echo "📦  Extracting ${SO_INSIDE_APK} …"
+echo "Extracting ${SO_INSIDE_APK}."
 unzip -p "${TMP_APK}" "${SO_INSIDE_APK}" > "${DEST_PATH}"
 
 if [[ ! -s "${DEST_PATH}" ]]; then
-  echo "❌  Extraction failed — ${SO_INSIDE_APK} not found in APK." >&2
+  echo "Extraction failed: ${SO_INSIDE_APK} not found in APK." >&2
   rm -f "${DEST_PATH}"
   exit 1
 fi
 
-echo "✅  Saved libtvm4j_runtime_packed.so → ${DEST_FILE} ($(du -sh "${DEST_PATH}" | cut -f1))"
-echo ""
-echo "Next steps:"
-echo "  1. Run TARGET_ABI=${TARGET_ABI} scripts/compile_model_tar.sh to build the real model library .tar"
-echo "  2. Run ./gradlew assembleDebug"
+echo "Saved legacy libtvm4j_runtime_packed.so -> ${DEST_FILE} ($(du -sh "${DEST_PATH}" | cut -f1))"
+echo "For the current Llama archive, run:"
+echo "  TARGET_ABI=${TARGET_ABI} bash scripts/build_mlc_tvm_runtime.sh"

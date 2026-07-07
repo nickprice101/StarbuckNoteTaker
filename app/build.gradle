@@ -132,6 +132,38 @@ def ensurePlaceholderResValuesAction = { File outputDir ->
     }
 }
 
+def nativeLibraryContainsAscii = { File library, String needle ->
+    if (library == null || !library.exists()) {
+        return false
+    }
+    byte[] pattern = needle.getBytes(java.nio.charset.StandardCharsets.US_ASCII)
+    if (pattern.length == 0) {
+        return true
+    }
+    int matched = 0
+    boolean found = false
+    library.withInputStream { stream ->
+        int next
+        while (!found && (next = stream.read()) != -1) {
+            byte value = (byte) (next & 0xff)
+            if (value == pattern[matched]) {
+                matched++
+                if (matched == pattern.length) {
+                    found = true
+                }
+            } else {
+                matched = (value == pattern[0]) ? 1 : 0
+            }
+        }
+    }
+    return found
+}
+
+def runtimeSupportsTvmFfiSystemLib = { File runtime ->
+    nativeLibraryContainsAscii(runtime, 'ffi.SystemLib') &&
+            nativeLibraryContainsAscii(runtime, 'TVMFFIEnvModRegisterSystemLibSymbol')
+}
+
 android {
     namespace 'com.example.starbucknotetaker'
     compileSdk 34
@@ -350,17 +382,15 @@ tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }
 }
 
 // ---------------------------------------------------------------------------
-// Task: buildModelLibSo
+// Task: buildModelLibSoArm64Legacy
 //
-// Links the Llama 3.2 3B model kernel .o files (extracted from the bundled
-// .tar asset) together with a TVM API compatibility shim into a single
-// arm64-v8a shared library that is packaged in the APK's jniLibs.
+// Disabled reference path for the old Android-09262024 runtime. The active
+// buildModelLibSo task below requires a TVM FFI-capable runtime and links the
+// model objects directly against it.
 //
-// The compatibility shim (scripts/tvm_compat.c) bridges the TVMFFI* symbols
-// required by the model .o files (compiled with newer TVM) to the TVMBackend*
-// API exported by the September-2024 libtvm4j_runtime_packed.so runtime.
-//
-// The task runs once and caches the result; re-run by deleting the output .so.
+// The legacy shim can link the object files against the older runtime, but that
+// runtime cannot process the newer library_bin metadata needed to expose
+// vm_load_executable.
 // ---------------------------------------------------------------------------
 tasks.register('buildModelLibSoArm64Legacy') {
     group = 'setup'
@@ -450,15 +480,13 @@ tasks.register('buildModelLibSoArm64Legacy') {
 
 tasks.register('buildModelLibSo') {
     group = 'setup'
-    description = 'Compiles TVM compat shim and links ABI-specific model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
+    description = 'Links ABI-specific model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
 
     dependsOn(':mlc4j:downloadTvmRuntime')
 
-    def compatSrc = rootProject.file("scripts/tvm_compat.c")
     def tvmSoDirs = llamaModelAbiProfiles.collectEntries { abi, profile ->
         [(abi): rootProject.file("mlc4j/src/main/jniLibs/${abi}")]
     }
-    inputs.file(compatSrc)
     llamaModelAbiProfiles.each { abi, profile ->
         inputs.file(file(profile.tarAsset)).withPropertyName("modelTar_${abi}")
         inputs.file(new File(tvmSoDirs[abi], 'libtvm4j_runtime_packed.so')).withPropertyName("tvmRuntime_${abi}")
@@ -466,10 +494,6 @@ tasks.register('buildModelLibSo') {
     }
 
     doLast {
-        if (!compatSrc.exists()) {
-            throw new GradleException("TVM compat shim not found: ${compatSrc}")
-        }
-
         def ndkDir  = android.ndkDirectory
         def hostTag = resolveNdkHostTag(ndkDir)
 
@@ -485,6 +509,11 @@ tasks.register('buildModelLibSo') {
             if (!tvmSo.exists()) {
                 throw new GradleException("TVM runtime not found for ABI ${abi}: ${tvmSo}. " +
                     "Run TARGET_ABI=${abi} scripts/fetch_mlc_native.sh or scripts/build_mlc_tvm_runtime.sh.")
+            }
+            if (!runtimeSupportsTvmFfiSystemLib(tvmSo)) {
+                throw new GradleException("TVM runtime for ABI ${abi} does not support TVM FFI system libraries: ${tvmSo}. " +
+                    "The bundled Llama archive requires ffi.SystemLib to load library_bin and expose vm_load_executable. " +
+                    "Run TARGET_ABI=${abi} scripts/fetch_mlc_native.sh to rebuild libtvm4j_runtime_packed.so from MLC source.")
             }
 
             def clangBaseName = "${profile.clangPrefix}26-clang"
@@ -519,15 +548,6 @@ tasks.register('buildModelLibSo') {
                 throw new GradleException("No model object files found in ${tarAsset}")
             }
 
-            def compatObj = new File(tmpDir, 'tvm_compat.o')
-            exec {
-                commandLine clang.absolutePath,
-                    '-target', profile.target,
-                    '-fPIC', '-O2',
-                    '-c', compatSrc.absolutePath,
-                    '-o', compatObj.absolutePath
-            }
-
             def outputDir = file("src/main/jniLibs/${abi}")
             def outputSo = new File(outputDir, llamaModelSoName)
             outputDir.mkdirs()
@@ -544,7 +564,6 @@ tasks.register('buildModelLibSo') {
             ]
             linkCommand.addAll(modelObjects.collect { it.absolutePath })
             linkCommand.addAll([
-                compatObj.absolutePath,
                 "-L${tvmSoDir.absolutePath}",
                 '-ltvm4j_runtime_packed',
                 '-llog', '-lm', '-lc', '-ldl'

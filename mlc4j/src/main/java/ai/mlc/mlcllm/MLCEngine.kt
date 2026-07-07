@@ -18,13 +18,13 @@ import kotlin.concurrent.thread
  * Before building, two native artifacts must be present:
  *
  * 1. **`libtvm4j_runtime_packed.so`** in `mlc4j/src/main/jniLibs/<abi>/`
- *    — the packed TVM runtime.  Run `scripts/fetch_mlc_native.sh` for arm64
- *    or `TARGET_ABI=x86_64 scripts/build_mlc_tvm_runtime.sh` for the emulator.
+ *    - the packed TVM runtime. Run `scripts/fetch_mlc_native.sh` for arm64 or
+ *    `TARGET_ABI=x86_64 scripts/fetch_mlc_native.sh` for an x86_64 emulator.
  *
  * 2. **`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`** in `app/src/main/jniLibs/<abi>/`
- *    — the compiled model kernel library.  The Gradle task `buildModelLibSo`
+ *    - the compiled model kernel library. The Gradle task `buildModelLibSo`
  *    creates this automatically during the build by linking the `.o` files
- *    from the bundled `.tar` asset with a compatibility shim.
+ *    from the bundled `.tar` asset against the TVM FFI-capable runtime.
  *
  * The ~2 GB model **weights** are NOT bundled in the APK; they are downloaded
  * at runtime.
@@ -33,12 +33,13 @@ import kotlin.concurrent.thread
  *
  * ```
  * LlamaEngine.ensureEngineLoaded(modelPath)
- *   → MLCEngine.reload(modelSoPath, weightsDir)
- *       → jsonFFIEngine.reload(config)            // loads model via TVM
+ *   -> System.load(modelSoPath)
+ *   -> MLCEngine.reload("system://llama_q4f16_0", weightsDir)
+ *       -> jsonFFIEngine.reload(config)            // loads model via TVM
  *
  * LlamaEngine.generateWithMlc(...)
- *   → MLCEngine.chat.completions.create(request, callback)
- *       → jsonFFIEngine.chatCompletion(json, id)  // streams tokens via callback
+ *   -> MLCEngine.chat.completions.create(request, callback)
+ *       -> jsonFFIEngine.chatCompletion(json, id)  // streams tokens via callback
  * ```
  */
 class MLCEngine(deviceType: String = "opencl") {
@@ -234,7 +235,12 @@ class MLCEngine(deviceType: String = "opencl") {
             ?: return OpenAIProtocol.ChatCompletionStreamResponse()
         val choices = (0 until choicesArr.length()).map { i ->
             val c = choicesArr.getJSONObject(i)
-            val content = c.optJSONObject("delta")?.optString("content", null)
+            val delta = c.optJSONObject("delta")
+            val content = if (delta != null && delta.has("content") && !delta.isNull("content")) {
+                delta.getString("content")
+            } else {
+                null
+            }
             OpenAIProtocol.ChatCompletionStreamResponseChoice(
                 delta = OpenAIProtocol.ChatCompletionMessageDelta(content = content),
             )

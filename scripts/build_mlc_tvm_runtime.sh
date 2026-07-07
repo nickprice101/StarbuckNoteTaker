@@ -2,19 +2,22 @@
 # =============================================================================
 # build_mlc_tvm_runtime.sh
 #
-# Builds a real Android libtvm4j_runtime_packed.so for an ABI that is not
-# published in the upstream mlc-chat.apk release. This is required for x86_64
-# emulator builds because mlc-ai/binary-mlc-llm-libs Android APKs only publish
-# arm64-v8a TVM runtimes.
+# Builds a real Android libtvm4j_runtime_packed.so for the requested ABI.
+#
+# The bundled Llama model archive uses TVM FFI system-library metadata, so the
+# runtime must come from a matching MLC/TVM source generation. The older
+# Android-09262024 binary runtime is intentionally not used by default because
+# it lacks ffi.SystemLib and fails to load library_bin.
 #
 # Usage:
+#   TARGET_ABI=arm64-v8a bash scripts/build_mlc_tvm_runtime.sh
 #   TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh
 #
 # Prerequisites:
 #   - git, rustup, cmake, ninja
 #   - Python with mlc_llm importable
 #   - Android NDK, with ANDROID_NDK set or discoverable under ANDROID_HOME
-#   - app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar
+#   - app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android*.tar
 # =============================================================================
 
 set -euo pipefail
@@ -25,9 +28,9 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/mlc_python_env.sh"
 
 MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
-TARGET_ABI="${TARGET_ABI:-x86_64}"
+TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
 MLC_LLM_REPO_URL="${MLC_LLM_REPO_URL:-https://github.com/mlc-ai/mlc-llm.git}"
-MLC_LLM_COMMIT="${MLC_LLM_COMMIT:-32087e8301775f62dcd198540b4862fbac6e79c0}"
+MLC_LLM_COMMIT="${MLC_LLM_COMMIT:-d1ea69a87280e821611643958bfec385b62dafd3}"
 MLC_SOURCE_DIR="${MLC_SOURCE_DIR:-${REPO_ROOT}/build/mlc-llm-${MLC_LLM_COMMIT}}"
 
 case "${TARGET_ABI}" in
@@ -64,17 +67,12 @@ if [[ -z "${ANDROID_NDK:-}" || ! -d "${ANDROID_NDK}" ]]; then
   exit 1
 fi
 
-for tool in git cmake rustup; do
+for tool in git cmake ninja rustup; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
     echo "Required tool not found on PATH: ${tool}" >&2
     exit 1
   fi
 done
-
-if [[ "${OS:-}" == "Windows_NT" ]] && ! command -v ninja >/dev/null 2>&1; then
-  echo "ninja is required on Windows because MLC's Android prepare script uses Ninja there." >&2
-  exit 1
-fi
 
 mlc_configure_compiler_environment
 

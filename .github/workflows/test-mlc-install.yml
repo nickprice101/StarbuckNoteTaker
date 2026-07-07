@@ -1,8 +1,8 @@
 name: Test MLC deploy prerequisites
 
 # The default GitHub APK build uses the checked-in arm64 MLC model archive and
-# skips optional x86_64 artifact generation. This workflow catches regressions
-# in that default path without installing the incompatible MLC Python wheel set.
+# builds x86_64 artifacts for the API 36 web emulator. This workflow catches
+# regressions in the scripts that prepare the MLC compiler and native runtime.
 
 on:
   push:
@@ -11,6 +11,7 @@ on:
       - '.github/workflows/test-mlc-install.yml'
       - 'app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar'
       - 'scripts/compile_model_tar.sh'
+      - 'scripts/fetch_mlc_native.sh'
       - 'scripts/build_mlc_tvm_runtime.sh'
       - 'scripts/install_mlc_llm.sh'
       - 'scripts/mlc_llm_compile_wrapper.py'
@@ -22,6 +23,7 @@ on:
       - '.github/workflows/test-mlc-install.yml'
       - 'app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar'
       - 'scripts/compile_model_tar.sh'
+      - 'scripts/fetch_mlc_native.sh'
       - 'scripts/build_mlc_tvm_runtime.sh'
       - 'scripts/install_mlc_llm.sh'
       - 'scripts/mlc_llm_compile_wrapper.py'
@@ -56,6 +58,7 @@ jobs:
             scripts/install_mlc_llm.sh \
             scripts/test_mlc_install.sh \
             scripts/compile_model_tar.sh \
+            scripts/fetch_mlc_native.sh \
             scripts/build_mlc_tvm_runtime.sh
           python3 -m py_compile scripts/mlc_llm_compile_wrapper.py
 
@@ -77,10 +80,14 @@ jobs:
             exit 1
           fi
 
-      - name: Verify optional x86_64 artifact step is opt-in
+      - name: Verify x86_64 web emulator artifacts are built
         run: |
           set -euo pipefail
-          if ! grep -q "BUILD_X86_64_MLC_ARTIFACTS == '1'" .github/workflows/deploy.yml; then
-            echo "::error::deploy.yml should keep x86_64 MLC artifact generation opt-in"
+          if grep -q "BUILD_X86_64_MLC_ARTIFACTS" .github/workflows/deploy.yml; then
+            echo "::error::deploy.yml should build x86_64 MLC artifacts by default for the API 36 web emulator"
+            exit 1
+          fi
+          if ! grep -q "TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh" .github/workflows/deploy.yml; then
+            echo "::error::deploy.yml should build the x86_64 TVM runtime through scripts/fetch_mlc_native.sh"
             exit 1
           fi

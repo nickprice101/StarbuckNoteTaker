@@ -29,19 +29,20 @@ import java.util.concurrent.TimeUnit
  *   - `tokenizer_config.json`  — tokenizer hyper-parameters
  *   - `params_shard_*.bin`     — actual model weights (many shards)
  *
- * **Modern `.tar` flow:**
- * The compiled model library is distributed as [TAR_ASSET_NAME], bundled inside
- * the APK's `assets/` directory.  The `.tar` contains the MLC system-library object
- * files (`lib0.o` plus model object files) that the TVM runtime links at runtime.
- * On the first call to [extractModelLibIfNeeded] the archive is extracted to
- * `filesDir/[MODEL_LIB_EXTRACT_SUBDIR]/` and that directory path is passed to
- * [ai.mlc.mlcllm.MLCEngine.reload] as `modelLib` instead of a JNI library name.
+ * **Model library flow:**
+ * The compiled model library starts as [TAR_ASSET_NAME], bundled inside the APK's
+ * `assets/` directory. The Gradle task `buildModelLibSo` links the object files
+ * from that archive into a native `.so` under `jniLibs/<abi>/`.
+ *
+ * At runtime [LlamaEngine] loads the linked `.so` with `System.load(path)` and
+ * passes [MODEL_LIB_SYSTEM_HANDLE] to [ai.mlc.mlcllm.MLCEngine.reload]. The
+ * [extractModelLibIfNeeded] helper is retained for validating or inspecting the
+ * archive contents, but it is not part of the active inference load path.
  *
  * Usage:
  * ```
  * val manager = LlamaModelManager(context)
- * manager.modelStatus.collect { status -> … }
- * val libPath = manager.extractModelLibIfNeeded()   // extract .tar on first launch
+ * manager.modelStatus.collect { status -> /* update UI */ }
  * manager.downloadModel { pct -> updateProgress(pct) }
  * ```
  */
@@ -230,12 +231,12 @@ class LlamaModelManager(private val context: Context) {
 
     /**
      * Extracts the bundled model library `.tar` from APK assets into internal storage
-     * if it has not already been extracted.
+     * for diagnostics or archive validation.
      *
-     * The `.tar` (see [TAR_ASSET_NAME]) is packaged inside the APK's `assets/`
-     * directory and contains the compiled MLC system-library object files
-     * (`lib0.o` plus model object files).  Extraction is skipped when the
-     * sentinel file `[MODEL_LIB_EXTRACT_SUBDIR]/.extracted` already exists.
+     * The active inference path uses the Gradle-linked `.so` in `jniLibs/<abi>/`
+     * and [MODEL_LIB_SYSTEM_HANDLE], not this extracted directory. Extraction is
+     * skipped when the sentinel file `[MODEL_LIB_EXTRACT_SUBDIR]/.extracted`
+     * already exists and the expected object files are still present.
      *
      * @return The absolute path to the extracted library directory, or `null` on failure.
      */
@@ -444,17 +445,16 @@ class LlamaModelManager(private val context: Context) {
         const val UNKNOWN_ABI = "unknown"
 
         /**
-         * Asset file name of the `.tar` that bundles the compiled MLC model library.
-         * The archive is packaged in `assets/` and extracted at runtime by
-         * [extractModelLibIfNeeded].
+         * Asset file name of the `.tar` used to build the compiled MLC model library.
+         * The archive is packaged in `assets/` and linked into a `.so` by Gradle;
+         * [extractModelLibIfNeeded] can also unpack it for diagnostics.
          */
         const val TAR_ASSET_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar"
         const val TAR_ASSET_NAME_X86_64 = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar"
 
         /**
-         * Sub-directory inside `filesDir` where the model library `.tar` is extracted.
-         * The absolute path to this directory is passed to [ai.mlc.mlcllm.MLCEngine.reload]
-         * as `modelLib` in the modern `.tar` flow.
+         * Sub-directory inside `filesDir` where the model library `.tar` can be
+         * extracted for diagnostics or archive validation.
          */
         const val MODEL_LIB_EXTRACT_SUBDIR = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android"
         const val MODEL_LIB_EXTRACT_SUBDIR_X86_64 = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64"
@@ -492,12 +492,12 @@ class LlamaModelManager(private val context: Context) {
          * `jniLibs/<abi>/` directory.
          *
          * Android extracts this file to {@code applicationInfo.nativeLibraryDir} at install time.
-         * The library is loaded via {@code System.load(path)} so that the model kernel functions
-         * are registered with TVM's global system-lib registry via the {@code tvm_compat.c} shim.
+         * The library is loaded via {@code System.load(path)} so that the model's TVM FFI
+         * system-library metadata is registered with the packed TVM runtime.
          *
          * The library is built by the Gradle task `buildModelLibSo`, which links the
-         * `.o` files from [TAR_ASSET_NAME] together with a TVM API compatibility shim
-         * into a single `.so` that works with the bundled `libtvm4j_runtime_packed.so`.
+         * `.o` files from [TAR_ASSET_NAME] into a single `.so` that works with the
+         * source-built, TVM FFI-capable `libtvm4j_runtime_packed.so`.
          */
         const val MODEL_SO_FILENAME = "lib$MODEL_LIB_NAME.so"
 
@@ -506,10 +506,9 @@ class LlamaModelManager(private val context: Context) {
          *
          * After the model kernel library has been loaded via {@code System.load} (which registers
          * all kernel functions with TVM's system-lib registry), MLC-LLM must be told to access
-         * those functions through the system-lib mechanism rather than via TVM's file loader
-         * (which would require `runtime.module.loadfile_so` — not available in the bundled
-         * Android TVM runtime).  Passing the `system://` prefix instructs MLC-LLM to call
-         * TVM's `runtime.SystemLib()` and retrieve the pre-registered module.
+         * those functions through the system-lib mechanism rather than via TVM's file loader.
+         * Passing the `system://` prefix instructs MLC-LLM to call `ffi.SystemLib()` and
+         * retrieve the pre-registered module.
          */
         const val MODEL_LIB_SYSTEM_HANDLE = "system://$MODEL_LIB_SYSTEM_NAME"
 
