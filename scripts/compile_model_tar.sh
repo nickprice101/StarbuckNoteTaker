@@ -147,6 +147,61 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Expose libtvm.so via LD_LIBRARY_PATH
+# ---------------------------------------------------------------------------
+# mlc_llm/base.py loads libtvm.so with ctypes.CDLL("libtvm.so").  The library
+# is installed inside the Python package directory (e.g. site-packages/tvm/)
+# rather than in a standard OS library search path, so the linker can't find
+# it unless we explicitly add it to LD_LIBRARY_PATH.
+_MLC_TVM_LIB_DIR="$(python3 - 2>/dev/null <<'_PYEOF'
+import importlib.util, os, site, sys
+
+def _find():
+    # 1. Check the 'tvm' and 'mlc_ai' Python modules for libtvm.so
+    for mod_name in ("tvm", "mlc_ai"):
+        try:
+            spec = importlib.util.find_spec(mod_name)
+            if spec and spec.origin:
+                d = os.path.dirname(spec.origin)
+                if os.path.isfile(os.path.join(d, "libtvm.so")):
+                    return d
+        except Exception:
+            pass
+    # 2. Shallow scan of every site-packages directory
+    sp_dirs: list = []
+    try:
+        sp_dirs += site.getsitepackages()
+    except AttributeError:
+        pass
+    try:
+        sp_dirs.append(site.getusersitepackages())
+    except Exception:
+        pass
+    for sp in sp_dirs:
+        if not os.path.isdir(sp):
+            continue
+        try:
+            for entry in os.scandir(sp):
+                if entry.is_dir(follow_symlinks=True):
+                    if os.path.isfile(os.path.join(entry.path, "libtvm.so")):
+                        return entry.path
+        except OSError:
+            pass
+    return ""
+
+print(_find())
+_PYEOF
+)"
+
+if [[ -n "${_MLC_TVM_LIB_DIR}" ]]; then
+  export LD_LIBRARY_PATH="${_MLC_TVM_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+  echo "     libtvm.so : ${_MLC_TVM_LIB_DIR} (added to LD_LIBRARY_PATH)"
+else
+  echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
+fi
+unset _MLC_TVM_LIB_DIR
+
 if [[ -z "${ANDROID_NDK:-}" ]]; then
   # Try common locations, guarding against unset ANDROID_HOME
   ndk_candidates=()
