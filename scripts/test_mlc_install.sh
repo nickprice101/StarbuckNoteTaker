@@ -50,9 +50,8 @@ if [[ "${SKIP_INSTALL}" != "1" ]]; then
 fi
 
 # Add user-base and sys.prefix bin dirs so we catch entry-points wherever pip
-# decided to put them, then expose the MLC-bundled TVM runtime as libtvm.so.
-mlc_add_python_bin_dirs
-mlc_configure_native_library_path
+# decided to put them, and run MLC CLI checks in compiler-only mode.
+mlc_configure_compiler_environment
 
 # ---------------------------------------------------------------------------
 # 2. Package listing
@@ -72,11 +71,11 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "🔍  Checking Python importability …"
-if python3 -c "import mlc_llm; print('     mlc_llm.__file__:', mlc_llm.__file__)" 2>/dev/null; then
-  pass "python3 -c 'import mlc_llm'"
+if mlc_assert_compiler_importable 2>/dev/null; then
+  pass "mlc_llm compile module import"
 else
-  fail "python3 -c 'import mlc_llm' failed"
-  python3 -c "import mlc_llm" 2>&1 | sed 's/^/     /' || true
+  fail "mlc_llm compile module import failed"
+  mlc_assert_compiler_importable 2>&1 | sed 's/^/     /' || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -109,10 +108,10 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
 fi
 
 if [[ -z "${MLC_LLM_CMD}" ]]; then
-  if python3 -c "import mlc_llm" &>/dev/null; then
+  if SKIP_LOADING_MLCLLM_SO=1 python3 -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python3 -m mlc_llm"
     pass "python3 -c 'import mlc_llm' → will use: python3 -m mlc_llm"
-  elif python -c "import mlc_llm" &>/dev/null; then
+  elif SKIP_LOADING_MLCLLM_SO=1 python -c "import mlc_llm" &>/dev/null; then
     MLC_LLM_CMD="python -m mlc_llm"
     pass "python -c 'import mlc_llm' → will use: python -m mlc_llm"
   fi
