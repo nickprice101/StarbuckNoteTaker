@@ -169,7 +169,7 @@ def _find():
         except Exception:
             pass
     # 2. Shallow scan of every site-packages directory
-    sp_dirs: list = []
+    sp_dirs = []
     try:
         sp_dirs += site.getsitepackages()
     except AttributeError:
@@ -195,7 +195,11 @@ _PYEOF
 )"
 
 if [[ -n "${_MLC_TVM_LIB_DIR}" ]]; then
-  export LD_LIBRARY_PATH="${_MLC_TVM_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+  if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+    export LD_LIBRARY_PATH="${_MLC_TVM_LIB_DIR}:${LD_LIBRARY_PATH}"
+  else
+    export LD_LIBRARY_PATH="${_MLC_TVM_LIB_DIR}"
+  fi
   echo "     libtvm.so : ${_MLC_TVM_LIB_DIR} (added to LD_LIBRARY_PATH)"
 else
   echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
