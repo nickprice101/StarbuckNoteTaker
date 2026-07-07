@@ -18,10 +18,6 @@ import types
 def _bootstrap_mlc_package() -> None:
     os.environ["SKIP_LOADING_MLCLLM_SO"] = "1"
 
-    import tvm_ffi.registry as tvm_ffi_registry  # pylint: disable=import-outside-toplevel
-
-    tvm_ffi_registry._SKIP_UNKNOWN_OBJECTS = True  # pylint: disable=protected-access
-
     spec = importlib.util.find_spec("mlc_llm")
     if spec is None or spec.submodule_search_locations is None:
         raise RuntimeError("Cannot find installed mlc_llm package")
