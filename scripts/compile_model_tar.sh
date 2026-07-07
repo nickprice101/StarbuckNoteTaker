@@ -65,7 +65,7 @@ esac
 MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
 OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
-COMPILE_OUTPUT_DIR="$(mktemp -d /tmp/mlc_compile_XXXXXX)"
+COMPILE_OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_compile.XXXXXX")"
 MLC_TVM_SHIM_DIR=""
 
 trap 'rm -rf "${COMPILE_OUTPUT_DIR}" "${MLC_TVM_SHIM_DIR:-}"' EXIT
@@ -217,8 +217,9 @@ _PYEOF
 if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
   _MLC_TVM_LIB_DIR="$(dirname "${_MLC_TVM_LIB_PATH}")"
   _MLC_TVM_LD_PATH="${_MLC_TVM_LIB_DIR}"
-  if [[ "$(basename "${_MLC_TVM_LIB_PATH}")" == "libtvm_ffi.so" ]] && [[ ! -e "${_MLC_TVM_LIB_DIR}/libtvm.so" ]]; then
-    MLC_TVM_SHIM_DIR="$(mktemp -d /tmp/mlc_tvm_shim_XXXXXX)"
+  _MLC_TVM_LIB_BASENAME="$(basename "${_MLC_TVM_LIB_PATH}")"
+  if [[ "${_MLC_TVM_LIB_BASENAME}" == "libtvm_ffi.so" ]] && [[ ! -e "${_MLC_TVM_LIB_DIR}/libtvm.so" ]]; then
+    MLC_TVM_SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_tvm_shim.XXXXXX")"
     ln -s "${_MLC_TVM_LIB_PATH}" "${MLC_TVM_SHIM_DIR}/libtvm.so"
     _MLC_TVM_LD_PATH="${MLC_TVM_SHIM_DIR}:${_MLC_TVM_LD_PATH}"
     echo "     libtvm.so : ${MLC_TVM_SHIM_DIR}/libtvm.so → ${_MLC_TVM_LIB_PATH}"
@@ -233,7 +234,7 @@ if [[ -n "${_MLC_TVM_LIB_PATH}" ]]; then
 else
   echo "     libtvm.so : not found in Python site-packages; ctypes may fail to load it" >&2
 fi
-unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH
+unset _MLC_TVM_LIB_PATH _MLC_TVM_LIB_DIR _MLC_TVM_LD_PATH _MLC_TVM_LIB_BASENAME
 
 if [[ -z "${ANDROID_NDK:-}" ]]; then
   # Try common locations, guarding against unset ANDROID_HOME

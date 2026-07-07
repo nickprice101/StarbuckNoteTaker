@@ -124,14 +124,15 @@ fi
 echo ""
 echo "🔍  Verifying TVM shared-library discovery handles tvm_ffi/lib/libtvm_ffi.so …"
 
-FAKE_USER_BASE="$(mktemp -d /tmp/mlc_userbase_XXXXXX)"
+FAKE_USER_BASE="$(mktemp -d "${TMPDIR:-/tmp}/mlc_userbase.XXXXXX")"
 PYTHON_MM="$(python3 - <<'PY'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}")
 PY
 )"
-mkdir -p "${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib"
-touch "${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib/libtvm_ffi.so"
+EXPECTED_TVM_LIB_PATH="${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib/libtvm_ffi.so"
+mkdir -p "$(dirname "${EXPECTED_TVM_LIB_PATH}")"
+touch "${EXPECTED_TVM_LIB_PATH}"
 
 TVM_LIB_PATH="$(PYTHONUSERBASE="${FAKE_USER_BASE}" python3 - <<'_PYEOF'
 import importlib.util, os, site
@@ -186,7 +187,7 @@ print(_find())
 _PYEOF
 )"
 
-if [[ "${TVM_LIB_PATH}" == "${FAKE_USER_BASE}/lib/python${PYTHON_MM}/site-packages/tvm_ffi/lib/libtvm_ffi.so" ]]; then
+if [[ "${TVM_LIB_PATH}" == "${EXPECTED_TVM_LIB_PATH}" ]]; then
   pass "TVM shared-library locator found nested tvm_ffi runtime"
 else
   fail "TVM shared-library locator missed nested tvm_ffi runtime"
