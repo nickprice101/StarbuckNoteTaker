@@ -63,7 +63,7 @@ def _check_import_lightweight() -> int:
         from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
         print("     mlc_llm compile module OK:", compile_cli.__file__)
         return 0
-    except Exception as exc:  # pylint: disable=broad-except
+    except (ImportError, RuntimeError, OSError) as exc:
         print(f"     FAIL: mlc_llm.cli.compile import error: {exc}", file=sys.stderr)
         return 1
 
