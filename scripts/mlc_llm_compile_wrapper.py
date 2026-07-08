@@ -38,20 +38,44 @@ def _patch_tirx_well_formed_checks() -> None:
     if not package_paths:
         return
 
-    attach_sampler = Path(package_paths[0]) / "compiler_pass" / "attach_sampler.py"
-    if not attach_sampler.is_file():
-        return
+    def patch_file(path: Path, replacements: list[tuple[str, str]]) -> None:
+        if not path.is_file():
+            return
 
-    text = attach_sampler.read_text(encoding="utf-8")
-    patched = text.replace(
-        "@T.prim_func\ndef full",
-        "@T.prim_func(check_well_formed=False)\ndef full",
-    ).replace(
-        "    @T.prim_func\n    def sampler_take_probs_tir",
-        "    @T.prim_func(check_well_formed=False)\n    def sampler_take_probs_tir",
+        text = path.read_text(encoding="utf-8")
+        patched = text
+        for old, new in replacements:
+            patched = patched.replace(old, new)
+        if patched != text:
+            path.write_text(patched, encoding="utf-8")
+
+    compiler_pass_dir = Path(package_paths[0]) / "compiler_pass"
+    patch_file(
+        compiler_pass_dir / "attach_sampler.py",
+        [
+            (
+                "@T.prim_func\ndef full",
+                "@T.prim_func(check_well_formed=False)\ndef full",
+            ),
+            (
+                "    @T.prim_func\n    def sampler_take_probs_tir",
+                "    @T.prim_func(check_well_formed=False)\n    def sampler_take_probs_tir",
+            ),
+        ],
     )
-    if patched != text:
-        attach_sampler.write_text(patched, encoding="utf-8")
+    patch_file(
+        compiler_pass_dir / "attach_softmax_with_temperature.py",
+        [
+            (
+                "    @T.prim_func\n    def chunk_lse",
+                "    @T.prim_func(s_tir=True)\n    def chunk_lse",
+            ),
+            (
+                "    @T.prim_func\n    def softmax_with_chunked_sum",
+                "    @T.prim_func(s_tir=True)\n    def softmax_with_chunked_sum",
+            ),
+        ],
+    )
 
 
 def _install_missing_tvm_contrib_stubs() -> None:
