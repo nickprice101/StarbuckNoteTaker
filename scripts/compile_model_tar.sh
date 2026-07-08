@@ -241,6 +241,8 @@ echo "     MLC device   : ${MLC_DEVICE}"
 echo "     Host triple  : ${HOST_TRIPLE}"
 echo "     System prefix: ${MLC_SYSTEM_LIB_PREFIX}"
 
+export TVM_BACKTRACE="${TVM_BACKTRACE:-1}"
+
 ${MLC_LLM_CMD} compile \
   "${WEIGHTS_DIR}" \
   --device "${MLC_DEVICE}" \
