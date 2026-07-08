@@ -53,6 +53,23 @@ def _patch_tirx_well_formed_checks() -> None:
         attach_sampler.write_text(patched, encoding="utf-8")
 
 
+def _install_missing_tvm_ndk_stub() -> None:
+    try:
+        import tvm.contrib as tvm_contrib  # pylint: disable=import-outside-toplevel
+        import tvm.contrib.ndk  # pylint: disable=unused-import,import-outside-toplevel
+    except ImportError:
+        import tvm.contrib as tvm_contrib  # pylint: disable=import-outside-toplevel
+
+        ndk = types.ModuleType("tvm.contrib.ndk")
+
+        def create_shared(*_args, **_kwargs):
+            raise RuntimeError("tvm.contrib.ndk is unavailable in this mlc-ai-nightly-cpu wheel")
+
+        ndk.create_shared = create_shared
+        tvm_contrib.ndk = ndk
+        sys.modules["tvm.contrib.ndk"] = ndk
+
+
 def _check_import_lightweight() -> int:
     """Verify mlc_llm.cli.compile is reachable without triggering TVM native init.
 
@@ -116,6 +133,7 @@ def main(argv: list[str]) -> int:
 
     _bootstrap_mlc_package()
     _patch_tirx_well_formed_checks()
+    _install_missing_tvm_ndk_stub()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
     _preserve_explicit_system_lib_prefix(compile_cli)
