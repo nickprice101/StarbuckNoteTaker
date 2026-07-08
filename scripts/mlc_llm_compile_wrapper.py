@@ -71,14 +71,14 @@ def _check_import_lightweight() -> int:
 def main(argv: list[str]) -> int:
     if argv == ["--check-import"]:
         return _check_import_lightweight()
+    if argv == ["--version"]:
+        print("mlc_llm compile wrapper")
+        return 0
 
     _bootstrap_mlc_package()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
 
-    if argv == ["--version"]:
-        print("mlc_llm compile wrapper")
-        return 0
     if argv[:1] == ["compile"]:
         argv = argv[1:]
 

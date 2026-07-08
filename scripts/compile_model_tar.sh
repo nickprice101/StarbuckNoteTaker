@@ -80,6 +80,8 @@ mlc_configure_compiler_environment
 
 # Determine how to invoke mlc_llm.
 #
+# Superseded context: the original entry-point-first notes below are kept only
+# for history; the CI note and wrapper-first code below are authoritative.
 # Strategy (in order of preference):
 #  1. Entry-point script already on PATH.
 #  2. Entry-point script in any well-known pip prefix directory.
@@ -91,14 +93,23 @@ mlc_configure_compiler_environment
 #       implement the --version flag and would exit non-zero even when the
 #       package is perfectly usable.
 
+# CI note: prefer the local wrapper by default. The installed entry point is
+# still available with MLC_USE_INSTALLED_ENTRYPOINT=1 for local debugging.
 MLC_LLM_CMD=""
 
-# 1. Check PATH first (covers system-wide installs, e.g. /usr/local/bin).
-if command -v mlc_llm &>/dev/null; then
+# 1. Prefer the lightweight compile wrapper whenever the compile module exists.
+if [[ "${MLC_USE_INSTALLED_ENTRYPOINT:-0}" != "1" ]]; then
+  if mlc_assert_compiler_importable >/dev/null 2>&1; then
+    MLC_LLM_CMD="python3 ${SCRIPT_DIR}/mlc_llm_compile_wrapper.py"
+  fi
+fi
+
+# 2. Optional escape hatch: use the installed entry point.
+if [[ -z "${MLC_LLM_CMD}" ]] && command -v mlc_llm &>/dev/null; then
   MLC_LLM_CMD="mlc_llm"
 fi
 
-# 2. If not on PATH, search common pip-prefix bin directories.
+# 3. If not on PATH, search common pip-prefix bin directories.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
   _search_dirs=(
     "$(python3 -m site --user-base 2>/dev/null)/bin"   # ~/.local/bin
@@ -115,7 +126,7 @@ if [[ -z "${MLC_LLM_CMD}" ]]; then
   unset _search_dirs _d
 fi
 
-# 3. Fall back to the compiler wrapper if the compile module is importable.
+# 4. Last fallback to the compiler wrapper if the compile module is importable.
 if [[ -z "${MLC_LLM_CMD}" ]]; then
   if mlc_assert_compiler_importable >/dev/null 2>&1; then
     MLC_LLM_CMD="python3 ${SCRIPT_DIR}/mlc_llm_compile_wrapper.py"
