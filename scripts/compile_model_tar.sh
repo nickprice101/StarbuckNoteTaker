@@ -25,7 +25,8 @@
 #   TARGET_ABI   Android ABI to compile for: arm64-v8a or x86_64.
 #                Defaults to arm64-v8a.
 #   MLC_DEVICE   MLC target/device hint. Defaults to android for arm64-v8a and
-#                explicit Android LLVM x86_64 for emulator builds.
+#                explicit JSON Android LLVM x86_64 for emulator builds.
+#   MLC_HOST     MLC host target. Defaults to JSON Android LLVM for TARGET_ABI.
 #   MLC_SYSTEM_LIB_PREFIX
 #                TVM system-lib module prefix. Defaults to auto for arm64-v8a
 #                and llama_q4f16_0 for x86_64.
@@ -58,7 +59,7 @@ case "${TARGET_ABI}" in
     HOST_TRIPLE="x86_64-linux-android"
     # Avoid MLC's CPU auto-target path in CI. The pinned CPU wheel's TVM build
     # tries to canonicalize unsupported Arm profiles during Target.from_device.
-    DEFAULT_MLC_DEVICE="llvm -mtriple=${HOST_TRIPLE}"
+    DEFAULT_MLC_DEVICE="{\"kind\":\"llvm\",\"mtriple\":\"${HOST_TRIPLE}\"}"
     DEFAULT_SYSTEM_LIB_PREFIX="llama_q4f16_0"
     OUTPUT_SUFFIX="android-x86_64"
     ;;
@@ -69,7 +70,9 @@ case "${TARGET_ABI}" in
     ;;
 esac
 
+DEFAULT_MLC_HOST="{\"kind\":\"llvm\",\"mtriple\":\"${HOST_TRIPLE}\"}"
 MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
+MLC_HOST="${MLC_HOST:-${DEFAULT_MLC_HOST}}"
 MLC_SYSTEM_LIB_PREFIX="${MLC_SYSTEM_LIB_PREFIX:-${DEFAULT_SYSTEM_LIB_PREFIX}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
 OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
@@ -239,6 +242,7 @@ echo ""
 echo "     Target ABI   : ${TARGET_ABI}"
 echo "     MLC device   : ${MLC_DEVICE}"
 echo "     Host triple  : ${HOST_TRIPLE}"
+echo "     MLC host     : ${MLC_HOST}"
 echo "     System prefix: ${MLC_SYSTEM_LIB_PREFIX}"
 
 export TVM_BACKTRACE="${TVM_BACKTRACE:-1}"
@@ -246,7 +250,7 @@ export TVM_BACKTRACE="${TVM_BACKTRACE:-1}"
 ${MLC_LLM_CMD} compile \
   "${WEIGHTS_DIR}" \
   --device "${MLC_DEVICE}" \
-  --host "${HOST_TRIPLE}" \
+  --host "${MLC_HOST}" \
   --system-lib-prefix "${MLC_SYSTEM_LIB_PREFIX}" \
   --output "${COMPILE_OUTPUT_DIR}/model.tar"
 
