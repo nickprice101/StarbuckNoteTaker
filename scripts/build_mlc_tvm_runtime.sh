@@ -110,14 +110,10 @@ git -C "${MLC_SOURCE_DIR}" submodule update --init --recursive
 MLC4J_DIR="${MLC_SOURCE_DIR}/android/mlc4j"
 PREPARE_LIBS="${MLC4J_DIR}/prepare_libs.py"
 
-python3 - <<PY
-from pathlib import Path
-path = Path("${PREPARE_LIBS}")
-text = path.read_text(encoding="utf-8")
-text = text.replace('-DANDROID_ABI=arm64-v8a', '-DANDROID_ABI=${TARGET_ABI}')
-text = text.replace('rustup", "target", "add", "aarch64-linux-android"', 'rustup", "target", "add", "${RUST_TARGET}"')
-path.write_text(text, encoding="utf-8")
-PY
+python3 "${SCRIPT_DIR}/patch_mlc_prepare_libs.py" \
+  --prepare-libs "${PREPARE_LIBS}" \
+  --target-abi "${TARGET_ABI}" \
+  --rust-target "${RUST_TARGET}"
 
 BUILD_DIR="${MLC4J_DIR}/build"
 MODEL_OBJ_DIR="${BUILD_DIR}/model_objs/${TARGET_ABI}"
