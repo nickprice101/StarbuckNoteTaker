@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import tarfile
 import types
 from pathlib import Path
 
@@ -53,21 +54,54 @@ def _patch_tirx_well_formed_checks() -> None:
         attach_sampler.write_text(patched, encoding="utf-8")
 
 
-def _install_missing_tvm_ndk_stub() -> None:
-    try:
-        import tvm.contrib as tvm_contrib  # pylint: disable=import-outside-toplevel
-        import tvm.contrib.ndk  # pylint: disable=unused-import,import-outside-toplevel
-    except ImportError:
-        import tvm.contrib as tvm_contrib  # pylint: disable=import-outside-toplevel
+def _install_missing_tvm_contrib_stubs() -> None:
+    import tvm.contrib as tvm_contrib  # pylint: disable=import-outside-toplevel
 
-        ndk = types.ModuleType("tvm.contrib.ndk")
+    def _module_available(name: str) -> bool:
+        try:
+            __import__(f"tvm.contrib.{name}")
+            return True
+        except ImportError:
+            return False
+
+    if not _module_available("tar"):
+        tar_mod = types.ModuleType("tvm.contrib.tar")
+
+        def create_tar(output, files):
+            seen = set()
+            with tarfile.open(output, "w") as archive:
+                for filename in files:
+                    basename = os.path.basename(filename)
+                    if basename in seen:
+                        raise ValueError(f"duplicate file name {basename}")
+                    seen.add(basename)
+                    archive.add(filename, arcname=basename)
+
+        create_tar.output_format = "tar"
+        tar_mod.tar = create_tar
+        tvm_contrib.tar = tar_mod
+        sys.modules["tvm.contrib.tar"] = tar_mod
+
+    if not _module_available("ndk"):
+        ndk_mod = types.ModuleType("tvm.contrib.ndk")
 
         def create_shared(*_args, **_kwargs):
             raise RuntimeError("tvm.contrib.ndk is unavailable in this mlc-ai-nightly-cpu wheel")
 
-        ndk.create_shared = create_shared
-        tvm_contrib.ndk = ndk
-        sys.modules["tvm.contrib.ndk"] = ndk
+        ndk_mod.create_shared = create_shared
+        tvm_contrib.ndk = ndk_mod
+        sys.modules["tvm.contrib.ndk"] = ndk_mod
+
+    if not _module_available("xcode"):
+        xcode_mod = types.ModuleType("tvm.contrib.xcode")
+
+        def unavailable(*_args, **_kwargs):
+            raise RuntimeError("tvm.contrib.xcode is unavailable in this mlc-ai-nightly-cpu wheel")
+
+        xcode_mod.compile_metal = unavailable
+        xcode_mod.create_dylib = unavailable
+        tvm_contrib.xcode = xcode_mod
+        sys.modules["tvm.contrib.xcode"] = xcode_mod
 
 
 def _check_import_lightweight() -> int:
@@ -133,7 +167,7 @@ def main(argv: list[str]) -> int:
 
     _bootstrap_mlc_package()
     _patch_tirx_well_formed_checks()
-    _install_missing_tvm_ndk_stub()
+    _install_missing_tvm_contrib_stubs()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
     _preserve_explicit_system_lib_prefix(compile_cli)
