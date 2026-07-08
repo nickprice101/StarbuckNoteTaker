@@ -13,6 +13,7 @@ import importlib.util
 import os
 import sys
 import types
+from pathlib import Path
 
 
 def _bootstrap_mlc_package() -> None:
@@ -28,6 +29,28 @@ def _bootstrap_mlc_package() -> None:
     package.__package__ = "mlc_llm"
     package.__spec__ = spec
     sys.modules["mlc_llm"] = package
+
+
+def _patch_tirx_well_formed_checks() -> None:
+    package = sys.modules.get("mlc_llm")
+    package_paths = getattr(package, "__path__", [])
+    if not package_paths:
+        return
+
+    attach_sampler = Path(package_paths[0]) / "compiler_pass" / "attach_sampler.py"
+    if not attach_sampler.is_file():
+        return
+
+    text = attach_sampler.read_text(encoding="utf-8")
+    patched = text.replace(
+        "@T.prim_func\ndef full",
+        "@T.prim_func(check_well_formed=False)\ndef full",
+    ).replace(
+        "    @T.prim_func\n    def sampler_take_probs_tir",
+        "    @T.prim_func(check_well_formed=False)\n    def sampler_take_probs_tir",
+    )
+    if patched != text:
+        attach_sampler.write_text(patched, encoding="utf-8")
 
 
 def _check_import_lightweight() -> int:
@@ -92,6 +115,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     _bootstrap_mlc_package()
+    _patch_tirx_well_formed_checks()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
     _preserve_explicit_system_lib_prefix(compile_cli)
