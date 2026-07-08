@@ -68,6 +68,22 @@ def _check_import_lightweight() -> int:
         return 1
 
 
+def _preserve_explicit_system_lib_prefix(compile_cli: types.ModuleType) -> None:
+    original = compile_cli.detect_system_lib_prefix
+
+    def detect_system_lib_prefix(
+        target_hint: str,
+        prefix_hint: str,
+        model_name: str,
+        quantization: str,
+    ) -> str:
+        if prefix_hint not in ("", "auto"):
+            return prefix_hint
+        return original(target_hint, prefix_hint, model_name, quantization)
+
+    compile_cli.detect_system_lib_prefix = detect_system_lib_prefix
+
+
 def main(argv: list[str]) -> int:
     if argv == ["--check-import"]:
         return _check_import_lightweight()
@@ -78,6 +94,7 @@ def main(argv: list[str]) -> int:
     _bootstrap_mlc_package()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
+    _preserve_explicit_system_lib_prefix(compile_cli)
 
     if argv[:1] == ["compile"]:
         argv = argv[1:]

@@ -24,8 +24,11 @@
 # Optional env vars:
 #   TARGET_ABI   Android ABI to compile for: arm64-v8a or x86_64.
 #                Defaults to arm64-v8a.
-#   MLC_DEVICE   MLC target device hint. Defaults to android for arm64-v8a and
-#                cpu for x86_64 emulator builds.
+#   MLC_DEVICE   MLC target/device hint. Defaults to android for arm64-v8a and
+#                explicit Android LLVM x86_64 for emulator builds.
+#   MLC_SYSTEM_LIB_PREFIX
+#                TVM system-lib module prefix. Defaults to auto for arm64-v8a
+#                and llama_q4f16_0 for x86_64.
 #   WEIGHTS_DIR   Path to pre-downloaded quantised weights directory.
 #                 Defaults to ./Llama-3.2-3B-Instruct-q4f16_0-MLC (current dir).
 #   OUTPUT_TAR    Destination path for the compiled .tar.
@@ -48,11 +51,15 @@ case "${TARGET_ABI}" in
   arm64-v8a)
     HOST_TRIPLE="aarch64-linux-android"
     DEFAULT_MLC_DEVICE="android"
+    DEFAULT_SYSTEM_LIB_PREFIX="auto"
     OUTPUT_SUFFIX="android"
     ;;
   x86_64)
     HOST_TRIPLE="x86_64-linux-android"
-    DEFAULT_MLC_DEVICE="cpu"
+    # Avoid MLC's CPU auto-target path in CI. The pinned CPU wheel's TVM build
+    # tries to canonicalize unsupported Arm profiles during Target.from_device.
+    DEFAULT_MLC_DEVICE="llvm -mtriple=${HOST_TRIPLE}"
+    DEFAULT_SYSTEM_LIB_PREFIX="llama_q4f16_0"
     OUTPUT_SUFFIX="android-x86_64"
     ;;
   *)
@@ -63,6 +70,7 @@ case "${TARGET_ABI}" in
 esac
 
 MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
+MLC_SYSTEM_LIB_PREFIX="${MLC_SYSTEM_LIB_PREFIX:-${DEFAULT_SYSTEM_LIB_PREFIX}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
 OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
 COMPILE_OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_compile.XXXXXX")"
@@ -231,11 +239,13 @@ echo ""
 echo "     Target ABI   : ${TARGET_ABI}"
 echo "     MLC device   : ${MLC_DEVICE}"
 echo "     Host triple  : ${HOST_TRIPLE}"
+echo "     System prefix: ${MLC_SYSTEM_LIB_PREFIX}"
 
 ${MLC_LLM_CMD} compile \
   "${WEIGHTS_DIR}" \
   --device "${MLC_DEVICE}" \
   --host "${HOST_TRIPLE}" \
+  --system-lib-prefix "${MLC_SYSTEM_LIB_PREFIX}" \
   --output "${COMPILE_OUTPUT_DIR}/model.tar"
 
 # ---------------------------------------------------------------------------
@@ -270,9 +280,10 @@ if ! echo "${TAR_CONTENTS}" | grep -q "^lib0\.o$"; then
 fi
 
 # Model code — the exact filenames vary across mlc_llm versions, runtimes, and
-# target devices, especially between OpenCL arm64 and CPU x86_64 builds. Accept
-# any non-lib0 object file so all model objects produced by MLC are linked.
-if ! echo "${TAR_CONTENTS}" | grep -Ev '(^|/)lib0\.o$' | grep -q "\.o$"; then
+# target devices. OpenCL arm64 emits a device object alongside lib0.o; LLVM CPU
+# x86_64 may place all compiled functions in lib0.o.
+if [[ "${TARGET_ABI}" != "x86_64" ]] &&
+   ! echo "${TAR_CONTENTS}" | grep -Ev '(^|/)lib0\.o$' | grep -q "\.o$"; then
   MISSING+=("model .o  (no object file other than lib0.o found)")
 fi
 

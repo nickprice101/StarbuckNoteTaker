@@ -544,8 +544,10 @@ tasks.register('buildModelLibSo') {
             if (lib0 == null) {
                 throw new GradleException("lib0.o not found in ${tarAsset}")
             }
-            if (modelObjects.isEmpty()) {
+            if (modelObjects.isEmpty() && abi != 'x86_64') {
                 throw new GradleException("No model object files found in ${tarAsset}")
+            } else if (modelObjects.isEmpty()) {
+                logger.lifecycle("buildModelLibSo: ${abi} archive has lib0.o only; linking CPU model objects from lib0.o")
             }
 
             def outputDir = file("src/main/jniLibs/${abi}")
