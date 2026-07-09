@@ -171,6 +171,16 @@ def _install_missing_tvm_contrib_stubs() -> None:
         sys.modules["tvm.contrib.xcode"] = xcode_mod
 
 
+def _install_missing_tvm_ir_helpers() -> None:
+    import tvm.ir  # pylint: disable=import-outside-toplevel
+    import tvm_ffi  # pylint: disable=import-outside-toplevel
+
+    if not hasattr(tvm.ir, "structural_equal"):
+        tvm.ir.structural_equal = tvm_ffi.structural_equal
+    if not hasattr(tvm.ir, "structural_hash"):
+        tvm.ir.structural_hash = tvm_ffi.structural_hash
+
+
 def _check_import_lightweight() -> int:
     """Verify mlc_llm.cli.compile is reachable without triggering TVM native init.
 
@@ -235,6 +245,7 @@ def main(argv: list[str]) -> int:
     _bootstrap_mlc_package()
     _patch_tirx_well_formed_checks()
     _install_missing_tvm_contrib_stubs()
+    _install_missing_tvm_ir_helpers()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
     _preserve_explicit_system_lib_prefix(compile_cli)
