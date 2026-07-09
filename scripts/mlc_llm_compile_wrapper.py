@@ -10,7 +10,6 @@ mlc_llm.cli.compile.
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import os
 import sys
 import tarfile
@@ -39,12 +38,12 @@ def _patch_tirx_well_formed_checks() -> None:
     if not package_paths:
         return
 
-    try:
-        from tvm.script import tirx as T  # pylint: disable=import-outside-toplevel
-
-        supports_s_tir = "s_tir" in inspect.signature(T.prim_func).parameters
-    except (ImportError, ValueError, TypeError):
-        supports_s_tir = False
+    tvm_spec = importlib.util.find_spec("tvm")
+    tvm_paths = getattr(tvm_spec, "submodule_search_locations", []) if tvm_spec else []
+    tirx_entry = Path(tvm_paths[0]) / "tirx" / "script" / "parser" / "entry.py" if tvm_paths else None
+    supports_s_tir = bool(
+        tirx_entry and tirx_entry.is_file() and "s_tir" in tirx_entry.read_text(encoding="utf-8")
+    )
 
     softmax_decorator = (
         "@T.prim_func(s_tir=True)"
@@ -192,11 +191,14 @@ def _install_missing_tvm_contrib_stubs() -> None:
 
 def _install_missing_tvm_ir_helpers() -> None:
     import tvm.ir  # pylint: disable=import-outside-toplevel
-    import tvm_ffi  # pylint: disable=import-outside-toplevel
 
     if not hasattr(tvm.ir, "structural_equal"):
+        import tvm_ffi  # pylint: disable=import-outside-toplevel
+
         tvm.ir.structural_equal = tvm_ffi.structural_equal
     if not hasattr(tvm.ir, "structural_hash"):
+        import tvm_ffi  # pylint: disable=import-outside-toplevel
+
         tvm.ir.structural_hash = tvm_ffi.structural_hash
 
 
