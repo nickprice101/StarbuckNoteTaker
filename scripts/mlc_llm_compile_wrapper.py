@@ -76,6 +76,49 @@ def _patch_tirx_well_formed_checks() -> None:
             ),
         ],
     )
+    patch_file(
+        compiler_pass_dir / "attach_logit_processor.py",
+        [
+            (
+                "    @T.prim_func\n    def _apply_logit_bias_inplace",
+                "    @T.prim_func(check_well_formed=False)\n    def _apply_logit_bias_inplace",
+            ),
+            (
+                "    @T.prim_func\n    def _apply_penalty_inplace",
+                "    @T.prim_func(check_well_formed=False)\n    def _apply_penalty_inplace",
+            ),
+            (
+                "    @T.prim_func\n    def _apply_bitmask_inplace",
+                "    @T.prim_func(check_well_formed=False)\n    def _apply_bitmask_inplace",
+            ),
+        ],
+    )
+    patch_file(
+        compiler_pass_dir / "attach_spec_decode_aux_funcs.py",
+        [
+            (
+                "    @T.prim_func\n    def _scatter_2d",
+                "    @T.prim_func(check_well_formed=False)\n    def _scatter_2d",
+            ),
+            (
+                "    @T.prim_func\n    def _gather_2d",
+                "    @T.prim_func(check_well_formed=False)\n    def _gather_2d",
+            ),
+        ],
+    )
+    patch_file(
+        compiler_pass_dir / "fuse_add_norm.py",
+        [
+            (
+                "    @T.prim_func(private=True)\n    def decode_add_rms",
+                "    @T.prim_func(private=True, s_tir=True)\n    def decode_add_rms",
+            ),
+            (
+                "    @T.prim_func(private=True)\n    def prefill_add_rms",
+                "    @T.prim_func(private=True, s_tir=True)\n    def prefill_add_rms",
+            ),
+        ],
+    )
 
 
 def _install_missing_tvm_contrib_stubs() -> None:
