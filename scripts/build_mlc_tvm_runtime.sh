@@ -117,6 +117,12 @@ python3 "${SCRIPT_DIR}/patch_mlc_prepare_libs.py" \
 
 BUILD_DIR="${MLC4J_DIR}/build"
 MODEL_OBJ_DIR="${BUILD_DIR}/model_objs/${TARGET_ABI}"
+
+# prepare_libs.py uses a fixed android/mlc4j/build directory. CI builds arm64
+# first and x86_64 second in the same checkout, so stale static archives from
+# the first ABI can otherwise be linked into the second ABI's runtime.
+rm -rf "${BUILD_DIR}"
+
 mkdir -p "${BUILD_DIR}/lib" "${MODEL_OBJ_DIR}"
 rm -f "${BUILD_DIR}/lib/libmodel_android.a"
 rm -rf "${MODEL_OBJ_DIR:?}/"*
