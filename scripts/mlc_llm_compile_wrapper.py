@@ -10,6 +10,7 @@ mlc_llm.cli.compile.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import os
 import sys
 import tarfile
@@ -37,6 +38,24 @@ def _patch_tirx_well_formed_checks() -> None:
     package_paths = getattr(package, "__path__", [])
     if not package_paths:
         return
+
+    try:
+        from tvm.script import tirx as T  # pylint: disable=import-outside-toplevel
+
+        supports_s_tir = "s_tir" in inspect.signature(T.prim_func).parameters
+    except (ImportError, ValueError, TypeError):
+        supports_s_tir = False
+
+    softmax_decorator = (
+        "@T.prim_func(s_tir=True)"
+        if supports_s_tir
+        else "@T.prim_func(check_well_formed=False)"
+    )
+    add_norm_decorator = (
+        "@T.prim_func(private=True, s_tir=True)"
+        if supports_s_tir
+        else "@T.prim_func(private=True, check_well_formed=False)"
+    )
 
     def patch_file(path: Path, replacements: list[tuple[str, str]]) -> None:
         if not path.is_file():
@@ -68,11 +87,11 @@ def _patch_tirx_well_formed_checks() -> None:
         [
             (
                 "    @T.prim_func\n    def chunk_lse",
-                "    @T.prim_func(s_tir=True)\n    def chunk_lse",
+                f"    {softmax_decorator}\n    def chunk_lse",
             ),
             (
                 "    @T.prim_func\n    def softmax_with_chunked_sum",
-                "    @T.prim_func(s_tir=True)\n    def softmax_with_chunked_sum",
+                f"    {softmax_decorator}\n    def softmax_with_chunked_sum",
             ),
         ],
     )
@@ -111,11 +130,11 @@ def _patch_tirx_well_formed_checks() -> None:
         [
             (
                 "    @T.prim_func(private=True)\n    def decode_add_rms",
-                "    @T.prim_func(private=True, s_tir=True)\n    def decode_add_rms",
+                f"    {add_norm_decorator}\n    def decode_add_rms",
             ),
             (
                 "    @T.prim_func(private=True)\n    def prefill_add_rms",
-                "    @T.prim_func(private=True, s_tir=True)\n    def prefill_add_rms",
+                f"    {add_norm_decorator}\n    def prefill_add_rms",
             ),
         ],
     )

@@ -11,7 +11,7 @@ jobs:
     env:
       WHEEL_INDEX: https://mlc.ai/wheels
       MLC_LLM_PACKAGE: mlc-llm-nightly-cpu==0.20.dev162
-      MLC_AI_PACKAGE: mlc-ai-nightly-cpu==0.26.dev61
+      MLC_AI_PACKAGE: mlc-ai-cpu==0.20.0
 
     steps:
       - name: Checkout
