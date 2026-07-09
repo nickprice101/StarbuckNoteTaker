@@ -12,6 +12,8 @@ jobs:
       WHEEL_INDEX: https://mlc.ai/wheels
       MLC_LLM_PACKAGE: mlc-llm-nightly-cpu==0.20.dev162
       MLC_AI_PACKAGE: mlc-ai-cpu==0.20.0
+      MLC_FFI_PACKAGE: apache-tvm-ffi==0.1.11
+      MLC_EXTRA_PACKAGES: pytest
 
     steps:
       - name: Checkout
