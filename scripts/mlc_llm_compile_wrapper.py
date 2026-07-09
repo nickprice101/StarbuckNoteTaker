@@ -12,7 +12,9 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import tarfile
 import types
+from pathlib import Path
 
 
 def _bootstrap_mlc_package() -> None:
@@ -28,6 +30,176 @@ def _bootstrap_mlc_package() -> None:
     package.__package__ = "mlc_llm"
     package.__spec__ = spec
     sys.modules["mlc_llm"] = package
+
+
+def _patch_tirx_well_formed_checks() -> None:
+    package = sys.modules.get("mlc_llm")
+    package_paths = getattr(package, "__path__", [])
+    if not package_paths:
+        return
+
+    tvm_spec = importlib.util.find_spec("tvm")
+    tvm_paths = getattr(tvm_spec, "submodule_search_locations", []) if tvm_spec else []
+    tirx_entry = Path(tvm_paths[0]) / "tirx" / "script" / "parser" / "entry.py" if tvm_paths else None
+    supports_s_tir = bool(
+        tirx_entry and tirx_entry.is_file() and "s_tir" in tirx_entry.read_text(encoding="utf-8")
+    )
+
+    softmax_decorator = (
+        "@T.prim_func(s_tir=True)"
+        if supports_s_tir
+        else "@T.prim_func(check_well_formed=False)"
+    )
+    add_norm_decorator = (
+        "@T.prim_func(private=True, s_tir=True)"
+        if supports_s_tir
+        else "@T.prim_func(private=True, check_well_formed=False)"
+    )
+
+    def patch_file(path: Path, replacements: list[tuple[str, str]]) -> None:
+        if not path.is_file():
+            return
+
+        text = path.read_text(encoding="utf-8")
+        patched = text
+        for old, new in replacements:
+            patched = patched.replace(old, new)
+        if patched != text:
+            path.write_text(patched, encoding="utf-8")
+
+    compiler_pass_dir = Path(package_paths[0]) / "compiler_pass"
+    patch_file(
+        compiler_pass_dir / "attach_sampler.py",
+        [
+            (
+                "@T.prim_func\ndef full",
+                "@T.prim_func(check_well_formed=False)\ndef full",
+            ),
+            (
+                "    @T.prim_func\n    def sampler_take_probs_tir",
+                "    @T.prim_func(check_well_formed=False)\n    def sampler_take_probs_tir",
+            ),
+        ],
+    )
+    patch_file(
+        compiler_pass_dir / "attach_softmax_with_temperature.py",
+        [
+            (
+                "    @T.prim_func\n    def chunk_lse",
+                f"    {softmax_decorator}\n    def chunk_lse",
+            ),
+            (
+                "    @T.prim_func\n    def softmax_with_chunked_sum",
+                f"    {softmax_decorator}\n    def softmax_with_chunked_sum",
+            ),
+        ],
+    )
+    patch_file(
+        compiler_pass_dir / "attach_logit_processor.py",
+        [
+            (
+                "    @T.prim_func\n    def _apply_logit_bias_inplace",
+                "    @T.prim_func(check_well_formed=False)\n    def _apply_logit_bias_inplace",
+            ),
+            (
+                "    @T.prim_func\n    def _apply_penalty_inplace",
+                "    @T.prim_func(check_well_formed=False)\n    def _apply_penalty_inplace",
+            ),
+            (
+                "    @T.prim_func\n    def _apply_bitmask_inplace",
+                "    @T.prim_func(check_well_formed=False)\n    def _apply_bitmask_inplace",
+            ),
+        ],
+    )
+    patch_file(
+        compiler_pass_dir / "attach_spec_decode_aux_funcs.py",
+        [
+            (
+                "    @T.prim_func\n    def _scatter_2d",
+                "    @T.prim_func(check_well_formed=False)\n    def _scatter_2d",
+            ),
+            (
+                "    @T.prim_func\n    def _gather_2d",
+                "    @T.prim_func(check_well_formed=False)\n    def _gather_2d",
+            ),
+        ],
+    )
+    patch_file(
+        compiler_pass_dir / "fuse_add_norm.py",
+        [
+            (
+                "    @T.prim_func(private=True)\n    def decode_add_rms",
+                f"    {add_norm_decorator}\n    def decode_add_rms",
+            ),
+            (
+                "    @T.prim_func(private=True)\n    def prefill_add_rms",
+                f"    {add_norm_decorator}\n    def prefill_add_rms",
+            ),
+        ],
+    )
+
+
+def _install_missing_tvm_contrib_stubs() -> None:
+    import tvm.contrib as tvm_contrib  # pylint: disable=import-outside-toplevel
+
+    def _module_available(name: str) -> bool:
+        try:
+            __import__(f"tvm.contrib.{name}")
+            return True
+        except ImportError:
+            return False
+
+    if not _module_available("tar"):
+        tar_mod = types.ModuleType("tvm.contrib.tar")
+
+        def create_tar(output, files):
+            seen = set()
+            with tarfile.open(output, "w") as archive:
+                for filename in files:
+                    basename = os.path.basename(filename)
+                    if basename in seen:
+                        raise ValueError(f"duplicate file name {basename}")
+                    seen.add(basename)
+                    archive.add(filename, arcname=basename)
+
+        create_tar.output_format = "tar"
+        tar_mod.tar = create_tar
+        tvm_contrib.tar = tar_mod
+        sys.modules["tvm.contrib.tar"] = tar_mod
+
+    if not _module_available("ndk"):
+        ndk_mod = types.ModuleType("tvm.contrib.ndk")
+
+        def create_shared(*_args, **_kwargs):
+            raise RuntimeError("tvm.contrib.ndk is unavailable in this mlc-ai-nightly-cpu wheel")
+
+        ndk_mod.create_shared = create_shared
+        tvm_contrib.ndk = ndk_mod
+        sys.modules["tvm.contrib.ndk"] = ndk_mod
+
+    if not _module_available("xcode"):
+        xcode_mod = types.ModuleType("tvm.contrib.xcode")
+
+        def unavailable(*_args, **_kwargs):
+            raise RuntimeError("tvm.contrib.xcode is unavailable in this mlc-ai-nightly-cpu wheel")
+
+        xcode_mod.compile_metal = unavailable
+        xcode_mod.create_dylib = unavailable
+        tvm_contrib.xcode = xcode_mod
+        sys.modules["tvm.contrib.xcode"] = xcode_mod
+
+
+def _install_missing_tvm_ir_helpers() -> None:
+    import tvm.ir  # pylint: disable=import-outside-toplevel
+
+    if not hasattr(tvm.ir, "structural_equal"):
+        import tvm_ffi  # pylint: disable=import-outside-toplevel
+
+        tvm.ir.structural_equal = tvm_ffi.structural_equal
+    if not hasattr(tvm.ir, "structural_hash"):
+        import tvm_ffi  # pylint: disable=import-outside-toplevel
+
+        tvm.ir.structural_hash = tvm_ffi.structural_hash
 
 
 def _check_import_lightweight() -> int:
@@ -68,17 +240,37 @@ def _check_import_lightweight() -> int:
         return 1
 
 
+def _preserve_explicit_system_lib_prefix(compile_cli: types.ModuleType) -> None:
+    original = compile_cli.detect_system_lib_prefix
+
+    def detect_system_lib_prefix(
+        target_hint: str,
+        prefix_hint: str,
+        model_name: str,
+        quantization: str,
+    ) -> str:
+        if prefix_hint not in ("", "auto"):
+            return prefix_hint
+        return original(target_hint, prefix_hint, model_name, quantization)
+
+    compile_cli.detect_system_lib_prefix = detect_system_lib_prefix
+
+
 def main(argv: list[str]) -> int:
     if argv == ["--check-import"]:
         return _check_import_lightweight()
-
-    _bootstrap_mlc_package()
-
-    from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
-
     if argv == ["--version"]:
         print("mlc_llm compile wrapper")
         return 0
+
+    _bootstrap_mlc_package()
+    _patch_tirx_well_formed_checks()
+    _install_missing_tvm_contrib_stubs()
+    _install_missing_tvm_ir_helpers()
+
+    from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
+    _preserve_explicit_system_lib_prefix(compile_cli)
+
     if argv[:1] == ["compile"]:
         argv = argv[1:]
 

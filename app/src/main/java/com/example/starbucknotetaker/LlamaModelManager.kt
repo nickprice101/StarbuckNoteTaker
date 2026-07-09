@@ -251,7 +251,7 @@ class LlamaModelManager(private val context: Context) {
         val sentinel = File(libDir, ".extracted")
         // Only skip extraction when the sentinel exists AND the expected object files are present,
         // so a partial or corrupt previous extraction is always retried.
-        if (sentinel.exists() && hasRequiredModelObjects(libDir)) {
+        if (sentinel.exists() && hasRequiredModelObjects(libDir, profile.abi)) {
             Log.d(TAG, "Model lib already extracted at ${libDir.absolutePath}")
             return libDir.absolutePath
         }
@@ -263,7 +263,7 @@ class LlamaModelManager(private val context: Context) {
                 TarExtractor.extract(input, libDir)
             }
             // Verify extraction before writing the sentinel so a corrupt archive is retried.
-            if (!hasRequiredModelObjects(libDir)) {
+            if (!hasRequiredModelObjects(libDir, profile.abi)) {
                 Log.e(TAG, "Model lib extraction incomplete")
                 return null
             }
@@ -325,10 +325,11 @@ class LlamaModelManager(private val context: Context) {
         return ModelStatus.Present(path, sizeBytes, profile.abi)
     }
 
-    private fun hasRequiredModelObjects(libDir: File): Boolean {
+    private fun hasRequiredModelObjects(libDir: File, abi: String): Boolean {
         val files = libDir.listFiles()?.filter { it.isFile } ?: return false
-        return files.any { it.name == "lib0.o" } &&
-            files.any { it.name != "lib0.o" && it.name.endsWith(".o") }
+        val hasLib0 = files.any { it.name == "lib0.o" }
+        val hasModelObject = files.any { it.name != "lib0.o" && it.name.endsWith(".o") }
+        return hasLib0 && (abi == ABI_X86_64 || hasModelObject)
     }
 
     private fun unsupportedStatus(): ModelStatus.Unsupported {

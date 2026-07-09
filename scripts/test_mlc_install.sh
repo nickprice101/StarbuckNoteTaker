@@ -85,7 +85,12 @@ echo "🔍  Simulating compile_model_tar.sh mlc_llm discovery logic …"
 
 MLC_LLM_CMD=""
 
-if command -v mlc_llm &>/dev/null; then
+if [[ "${MLC_USE_INSTALLED_ENTRYPOINT:-0}" != "1" ]] && mlc_assert_compiler_importable &>/dev/null; then
+  MLC_LLM_CMD="python3 ${SCRIPT_DIR}/mlc_llm_compile_wrapper.py"
+  pass "compile wrapper import check -> will use: ${MLC_LLM_CMD}"
+fi
+
+if [[ -z "${MLC_LLM_CMD}" ]] && command -v mlc_llm &>/dev/null; then
   MLC_LLM_CMD="mlc_llm"
   pass "command -v mlc_llm → $(command -v mlc_llm)"
 fi
