@@ -307,6 +307,9 @@ class LlamaModelManager(private val context: Context) {
             }
         }
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val tvmRuntimeSo = java.io.File(nativeLibDir, TVM_RUNTIME_SO_FILENAME)
+        sb.appendLine("TVM runtime .so: ${tvmRuntimeSo.absolutePath} (exists=${tvmRuntimeSo.exists()}," +
+            " size=${if (tvmRuntimeSo.exists()) "%.1f MB".format(tvmRuntimeSo.length() / (1024.0 * 1024.0)) else "n/a"})")
         val modelSo = java.io.File(nativeLibDir, MODEL_SO_FILENAME)
         sb.appendLine("Model .so: ${modelSo.absolutePath} (exists=${modelSo.exists()}," +
             " size=${if (modelSo.exists()) "%.1f MB".format(modelSo.length() / (1024.0 * 1024.0)) else "n/a"})")
@@ -501,6 +504,7 @@ class LlamaModelManager(private val context: Context) {
          * source-built, TVM FFI-capable `libtvm4j_runtime_packed.so`.
          */
         const val MODEL_SO_FILENAME = "lib$MODEL_LIB_NAME.so"
+        const val TVM_RUNTIME_SO_FILENAME = "libtvm4j_runtime_packed.so"
 
         /**
          * The system-library handle passed to [ai.mlc.mlcllm.MLCEngine.reload] as `modelLib`.
