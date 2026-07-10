@@ -197,6 +197,14 @@ class LlamaEngineUnitTest {
     }
 
     @Test
+    fun modelManager_debugInfo_reportsTvmRuntimeLibrary() {
+        val manager = LlamaModelManager(appContext)
+        val debugInfo = manager.debugModelDirInfo()
+
+        assertTrue(debugInfo.contains(LlamaModelManager.TVM_RUNTIME_SO_FILENAME))
+    }
+
+    @Test
     fun modelManager_systemLibHandle_usesMlcNormalizedName() {
         assertEquals(
             "system://llama_q4f16_0",

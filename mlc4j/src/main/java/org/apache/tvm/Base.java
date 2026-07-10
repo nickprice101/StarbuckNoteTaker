@@ -79,6 +79,15 @@ public final class Base {
     }
 
     /**
+     * Forces the TVM native runtime to be loaded and initialised.
+     *
+     * <p>Callers that load native modules linked against {@code libtvm4j_runtime_packed.so}
+     * should invoke this before loading those modules so Android registers the packed runtime
+     * as a JVM native library, not merely as a transitive linker dependency.
+     */
+    public static void ensureInitialized() {}
+
+    /**
      * Checks a TVM return code and throws {@link TVMError} on failure.
      *
      * @param code Return code from a JNI call (0 = success, non-zero = error).

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.apache.tvm.Base
 
 /**
  * On-device LLM inference engine backed by MLC LLM ([MLCEngine]) running
@@ -230,6 +231,10 @@ class LlamaEngine(private val context: Context) {
         Log.i(TAG, "Loading MLCEngine: lib=$modelSoPath path=$modelPath")
         Log.d(TAG, modelManager.debugModelDirInfo())
         try {
+            // Load and initialise TVM before the model library. If Android only loads the
+            // packed runtime as a DT_NEEDED dependency of the model .so, TVM's JNI entry
+            // points are not registered for org.apache.tvm.LibInfo.
+            Base.ensureInitialized()
             // Load the model kernel library via Android's native linker. This registers the
             // model's TVM FFI system-library metadata with the packed TVM runtime.
             // Must happen before reload() so ffi.SystemLib can find the model module.
