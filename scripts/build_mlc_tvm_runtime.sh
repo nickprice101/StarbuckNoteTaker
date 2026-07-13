@@ -73,6 +73,7 @@ if [[ -z "${ANDROID_NDK:-}" || ! -d "${ANDROID_NDK}" ]]; then
   echo "Android NDK not found. Set ANDROID_NDK=/path/to/android-ndk." >&2
   exit 1
 fi
+export ANDROID_NDK_HOME="${ANDROID_NDK}"
 
 if [[ -n "${ANDROID_HOME:-}" && -d "${ANDROID_HOME}/cmake" ]]; then
   sdk_cmake_dir="$(find "${ANDROID_HOME}/cmake" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
@@ -87,6 +88,11 @@ for tool in git cmake ninja rustup; do
     exit 1
   fi
 done
+
+# TVM's CUDA-oriented submodules include generated documentation files with very
+# long names. They are not used by the Android CPU/OpenCL runtime build, but Git
+# still checks them out while recursing submodules on Windows.
+git config --global core.longpaths true || true
 
 mlc_configure_compiler_environment
 
@@ -113,13 +119,14 @@ echo "  NDK        : ${ANDROID_NDK}"
 
 if [[ ! -d "${MLC_SOURCE_DIR}/.git" ]]; then
   mkdir -p "$(dirname "${MLC_SOURCE_DIR}")"
-  git clone --recursive "${MLC_LLM_REPO_URL}" "${MLC_SOURCE_DIR}"
+  git -c core.longpaths=true clone "${MLC_LLM_REPO_URL}" "${MLC_SOURCE_DIR}"
 fi
 
+git -C "${MLC_SOURCE_DIR}" config core.longpaths true || true
 git -C "${MLC_SOURCE_DIR}" fetch --tags --quiet
 git -C "${MLC_SOURCE_DIR}" checkout --quiet "${MLC_LLM_COMMIT}"
 git -C "${MLC_SOURCE_DIR}" reset --hard --quiet "${MLC_LLM_COMMIT}"
-git -C "${MLC_SOURCE_DIR}" submodule update --init --recursive
+git -C "${MLC_SOURCE_DIR}" -c core.longpaths=true submodule update --init --recursive
 
 MLC4J_DIR="${MLC_SOURCE_DIR}/android/mlc4j"
 PREPARE_LIBS="${MLC4J_DIR}/prepare_libs.py"
@@ -128,6 +135,9 @@ python3 "${SCRIPT_DIR}/patch_mlc_prepare_libs.py" \
   --prepare-libs "${PREPARE_LIBS}" \
   --target-abi "${TARGET_ABI}" \
   --rust-target "${RUST_TARGET}"
+
+python3 "${SCRIPT_DIR}/patch_mlc_runtime_compat.py" \
+  --mlc-source-dir "${MLC_SOURCE_DIR}"
 
 BUILD_DIR="${MLC4J_DIR}/build"
 MODEL_OBJ_DIR="${BUILD_DIR}/model_objs/${TARGET_ABI}"

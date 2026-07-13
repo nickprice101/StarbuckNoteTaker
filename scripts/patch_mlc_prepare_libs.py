@@ -32,6 +32,23 @@ def patch_prepare_libs(path: Path, target_abi: str, rust_target: str) -> None:
         '"rustup", "target", "add", "aarch64-linux-android"',
         f'"rustup", "target", "add", "{rust_target}"',
     )
+    text = text.replace(
+        '    android_ndk_path = (\n'
+        '        Path(os.environ["ANDROID_NDK"]) / "build" / "cmake" / "android.toolchain.cmake"\n'
+        '    )\n',
+        '    android_ndk_root = Path(os.environ["ANDROID_NDK"]).resolve()\n'
+        '    os.environ["ANDROID_NDK"] = android_ndk_root.as_posix()\n'
+        '    os.environ["ANDROID_NDK_HOME"] = android_ndk_root.as_posix()\n'
+        '    android_ndk_path = android_ndk_root / "build" / "cmake" / "android.toolchain.cmake"\n',
+    )
+    text = text.replace(
+        '        str(mlc4j_path),\n',
+        '        mlc4j_path.resolve().as_posix(),\n',
+    )
+    text = text.replace(
+        '        f"-DCMAKE_TOOLCHAIN_FILE={str(android_ndk_path)}",\n',
+        '        f"-DCMAKE_TOOLCHAIN_FILE={android_ndk_path.as_posix()}",\n',
+    )
 
     if "from mlc_llm.support import logging" in text:
         raise RuntimeError("prepare_libs.py still imports mlc_llm.support.logging")

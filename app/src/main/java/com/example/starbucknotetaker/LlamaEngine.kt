@@ -5,6 +5,7 @@ import ai.mlc.mlcllm.OpenAIProtocol
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
+import android.system.Os
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -106,15 +107,23 @@ class LlamaEngine(private val context: Context) {
      * Summarises [text] in 1–3 concise lines.
      * Falls back to rule-based heuristics when the model is unavailable.
      */
-    suspend fun summarise(text: String, taskId: String = newTaskId()): String =
-        infer(Mode.SUMMARISE, text, taskId = taskId)
+    suspend fun summarise(
+        text: String,
+        taskId: String = newTaskId(),
+        maxTokensOverride: Int? = null,
+    ): String =
+        infer(Mode.SUMMARISE, text, taskId = taskId, maxTokensOverride = maxTokensOverride)
 
     /**
      * Rewrites [text] in a cleaner, more professional style.
      * Falls back to returning the original text when the model is unavailable.
      */
-    suspend fun rewrite(text: String, taskId: String = newTaskId()): String =
-        infer(Mode.REWRITE, text, taskId = taskId)
+    suspend fun rewrite(
+        text: String,
+        taskId: String = newTaskId(),
+        maxTokensOverride: Int? = null,
+    ): String =
+        infer(Mode.REWRITE, text, taskId = taskId, maxTokensOverride = maxTokensOverride)
 
     /**
      * Answers [question] using [context] as optional grounding material.
@@ -124,7 +133,8 @@ class LlamaEngine(private val context: Context) {
         question: String,
         context: String? = null,
         taskId: String = newTaskId(),
-    ): String = infer(Mode.QUESTION, question, context, taskId)
+        maxTokensOverride: Int? = null,
+    ): String = infer(Mode.QUESTION, question, context, taskId, maxTokensOverride)
 
     /** Unloads the model from memory and releases engine resources. */
     fun close() {
@@ -143,6 +153,7 @@ class LlamaEngine(private val context: Context) {
         primaryText: String,
         secondaryText: String? = null,
         taskId: String,
+        maxTokensOverride: Int? = null,
     ): String = withContext(Dispatchers.Default) {
         inferenceMutex.withLock {
             // Skip the model entirely on devices that do not meet the RAM threshold
@@ -171,7 +182,7 @@ class LlamaEngine(private val context: Context) {
 
             runCatching {
                 ensureEngineLoaded(modelPath)
-                generateWithMlc(mode, primaryText, secondaryText, taskId)
+                generateWithMlc(mode, primaryText, secondaryText, taskId, maxTokensOverride)
             }.getOrElse { e ->
                 if (e is CancellationException) throw e
                 val diagInfo = modelManager.debugModelDirInfo()
@@ -233,6 +244,7 @@ class LlamaEngine(private val context: Context) {
         Log.i(TAG, "Loading MLCEngine: lib=$modelSoPath path=$modelPath")
         Log.d(TAG, modelManager.debugModelDirInfo())
         try {
+            configureCpuThreadingIfNeeded()
             // Load and initialise TVM before the model library. If Android only loads the
             // packed runtime as a DT_NEEDED dependency of the model .so, TVM's JNI entry
             // points are not registered for org.apache.tvm.LibInfo.
@@ -244,7 +256,11 @@ class LlamaEngine(private val context: Context) {
             // Pass the system:// handle so MLC-LLM retrieves the pre-registered module via
             // TVM's system-lib mechanism instead of trying to load the .so through TVM's
             // file-loader.
-            mlcEngine.reload(LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE, modelPath)
+            mlcEngine.reload(
+                LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE,
+                modelPath,
+                mode = modelManager.getRuntimeMlcEngineMode() ?: "interactive",
+            )
         } catch (e: Throwable) {
             val diagInfo = modelManager.debugModelDirInfo()
             Log.e(TAG, "MLCEngine.reload failed [${e::class.qualifiedName}]: ${e.message}\n$diagInfo", e)
@@ -255,14 +271,40 @@ class LlamaEngine(private val context: Context) {
         Log.i(TAG, "MLCEngine loaded successfully")
     }
 
+    private fun configureCpuThreadingIfNeeded() {
+        if (modelManager.getRuntimeMlcDeviceType() != "cpu") return
+        val requestedThreads = maxOf(1, Runtime.getRuntime().availableProcessors() * 2)
+        runCatching {
+            Os.setenv("TVM_NUM_THREADS", requestedThreads.toString(), true)
+            Os.setenv("OMP_NUM_THREADS", requestedThreads.toString(), true)
+            Os.setenv("TVM_EXCLUDE_WORKER0", "0", true)
+        }.onSuccess {
+            Log.i(TAG, "Configured TVM CPU threading: requestedThreads=$requestedThreads")
+        }.onFailure {
+            Log.w(TAG, "Failed to configure TVM CPU threading", it)
+        }
+    }
+
     private fun generateWithMlc(
         mode: Mode,
         primaryText: String,
         secondaryText: String?,
         taskId: String,
+        maxTokensOverride: Int?,
     ): String {
         val messages = buildMessages(mode, primaryText, secondaryText)
-        val maxTokens = if (isThermallyThrottled()) MAX_TOKENS_THROTTLED else MAX_TOKENS_NORMAL
+        val modeMaxTokens = when (mode) {
+            Mode.SUMMARISE -> MAX_TOKENS_SUMMARISE
+            Mode.REWRITE -> MAX_TOKENS_REWRITE
+            Mode.QUESTION -> MAX_TOKENS_QUESTION
+        }
+        val thermalMaxTokens = if (isThermallyThrottled()) {
+            maxOf(MIN_MAX_TOKENS, modeMaxTokens / 2)
+        } else {
+            modeMaxTokens
+        }
+        val maxTokens = maxTokensOverride?.coerceIn(MIN_MAX_TOKENS, thermalMaxTokens)
+            ?: thermalMaxTokens
         val request = OpenAIProtocol.ChatCompletionRequest(
             messages = messages,
             model = LlamaModelManager.MODEL_DISPLAY_NAME,
@@ -382,8 +424,10 @@ class LlamaEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "LlamaEngine"
-        private const val MAX_TOKENS_NORMAL    = 512
-        private const val MAX_TOKENS_THROTTLED = 256
+        private const val MIN_MAX_TOKENS       = 1
+        private const val MAX_TOKENS_SUMMARISE = 96
+        private const val MAX_TOKENS_REWRITE   = 256
+        private const val MAX_TOKENS_QUESTION  = 192
         private const val MAX_CONTEXT_CHARS    = 3000
         private const val MAX_QUESTION_CHARS   = 500
         private const val THERMAL_HEADROOM_THROTTLE_THRESHOLD = 0.15f

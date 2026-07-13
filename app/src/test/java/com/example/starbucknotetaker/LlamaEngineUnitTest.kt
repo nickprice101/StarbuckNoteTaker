@@ -11,6 +11,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 /**
  * Unit tests for [LlamaEngine] and [Summarizer] when running without the MLC LLM
@@ -29,6 +30,8 @@ class LlamaEngineUnitTest {
     @Before
     fun setUp() {
         appContext = ApplicationProvider.getApplicationContext()
+        appContext.applicationInfo.nativeLibraryDir = "/data/app/example/lib/x86_64"
+        File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR).deleteRecursively()
     }
 
     // ------------------------------------------------------------------
@@ -170,6 +173,48 @@ class LlamaEngineUnitTest {
     }
 
     @Test
+    fun modelManager_getModelPath_returnsNull_whenManifestShardIsMissing() {
+        val dir = createModelMetadata(
+            """
+            {
+              "records": [
+                { "dataPath": "params_shard_0.bin", "nbytes": 3 },
+                { "dataPath": "params_shard_1.bin", "nbytes": 5 }
+              ]
+            }
+            """.trimIndent(),
+        )
+        File(dir, "params_shard_0.bin").writeText("abc")
+
+        val manager = LlamaModelManager(appContext)
+
+        assertTrue(
+            "Expected null path when ndarray-cache.json lists a missing shard",
+            manager.getModelPath() == null,
+        )
+    }
+
+    @Test
+    fun modelManager_getModelPath_returnsPath_whenManifestShardsAreComplete() {
+        val dir = createModelMetadata(
+            """
+            {
+              "records": [
+                { "dataPath": "params_shard_0.bin", "nbytes": 3 },
+                { "dataPath": "params_shard_1.bin", "nbytes": 5 }
+              ]
+            }
+            """.trimIndent(),
+        )
+        File(dir, "params_shard_0.bin").writeText("abc")
+        File(dir, "params_shard_1.bin").writeText("12345")
+
+        val manager = LlamaModelManager(appContext)
+
+        assertEquals(dir.absolutePath, manager.getModelPath())
+    }
+
+    @Test
     fun modelManager_isModelPresent_returnsFalse_whenMissing() {
         val manager = LlamaModelManager(appContext)
         assertFalse(manager.isModelPresent())
@@ -246,5 +291,13 @@ class LlamaEngineUnitTest {
         )
 
         assertEquals("arm64-v8a", abi)
+    }
+
+    private fun createModelMetadata(ndarrayCacheJson: String): File {
+        val dir = File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR).also { it.mkdirs() }
+        File(dir, "mlc-chat-config.json").writeText("{}")
+        File(dir, "ndarray-cache.json").writeText(ndarrayCacheJson)
+        File(dir, "tokenizer.json").writeText("{}")
+        return dir
     }
 }

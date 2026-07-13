@@ -41,7 +41,8 @@ runtime_supports_tvm_ffi_system_lib() {
   local runtime_path="$1"
   [[ -f "${runtime_path}" ]] || return 1
   grep -a -q "ffi.SystemLib" "${runtime_path}" &&
-    grep -a -q "TVMFFIEnvModRegisterSystemLibSymbol" "${runtime_path}"
+    grep -a -q "TVMFFIEnvModRegisterSystemLibSymbol" "${runtime_path}" &&
+    grep -a -q "starbuck_runtime_compat_prefixed_logit_processor_lookup" "${runtime_path}"
 }
 
 case "${TARGET_ABI}" in

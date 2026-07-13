@@ -7,6 +7,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -72,15 +73,16 @@ class MLCEngine(deviceType: String = "opencl") {
      * @param modelLib  Absolute path to the compiled model `.so`, or a
      *                  `system://name` handle for pre-loaded system-lib modules.
      * @param modelPath Absolute path to the model weights directory.
+     * @param mode      MLC engine mode: "interactive", "local", or "server".
      */
-    fun reload(modelLib: String, modelPath: String) {
+    fun reload(modelLib: String, modelPath: String, mode: String = "interactive") {
         backgroundFailure.set(null)
         val config = JSONObject().apply {
             put("model", modelPath)
             put("model_lib", modelLib)
-            put("mode", "interactive")
+            put("mode", mode)
         }.toString()
-        Log.i(TAG, "Reloading engine: lib=$modelLib")
+        Log.i(TAG, "Reloading engine: lib=$modelLib mode=$mode")
         jsonFFIEngine.reload(config)
         throwIfBackgroundFailed()
         Log.i(TAG, "Engine reload complete")
@@ -90,8 +92,9 @@ class MLCEngine(deviceType: String = "opencl") {
      * Unloads the current model, stops background threads, and frees GPU memory.
      */
     fun unload() {
-        runCatching { jsonFFIEngine.unload() }
         runCatching { jsonFFIEngine.exitBackgroundLoop() }
+            .onFailure { Log.w(TAG, "Failed to signal MLC background loop exit", it) }
+        runNativeTeardown("unload") { jsonFFIEngine.unload() }
     }
 
     /**
@@ -168,13 +171,21 @@ class MLCEngine(deviceType: String = "opencl") {
             val requestJson = serializeRequest(request, requestId)
             Log.d(TAG, "Submitting completion requestId=$requestId")
             throwIfBackgroundFailed()
-            jsonFFIEngine.chatCompletion(requestJson, requestId)
+            try {
+                jsonFFIEngine.chatCompletion(requestJson, requestId)
 
-            val finished = latch.await(COMPLETION_TIMEOUT_SECS, TimeUnit.SECONDS)
-            pending.remove(requestId)
-            throwIfBackgroundFailed()
-            if (!finished) {
-                Log.w(TAG, "Completion timed out (requestId=$requestId)")
+                val finished = latch.await(COMPLETION_TIMEOUT_SECS, TimeUnit.SECONDS)
+                throwIfBackgroundFailed()
+                if (!finished) {
+                    Log.w(TAG, "Completion timed out; aborting requestId=$requestId")
+                    runCatching { jsonFFIEngine.abort(requestId) }
+                        .onFailure { Log.w(TAG, "Failed to abort timed-out requestId=$requestId", it) }
+                    throw TimeoutException(
+                        "MLC completion timed out after $COMPLETION_TIMEOUT_SECS seconds"
+                    )
+                }
+            } finally {
+                pending.remove(requestId)
             }
         }
     }
@@ -204,6 +215,22 @@ class MLCEngine(deviceType: String = "opencl") {
     private fun throwIfBackgroundFailed() {
         val failure = backgroundFailure.get() ?: return
         throw IllegalStateException("MLC engine background thread failed: ${failure.message}", failure)
+    }
+
+    private fun runNativeTeardown(name: String, block: () -> Unit) {
+        val failure = AtomicReference<Throwable?>(null)
+        val worker = thread(isDaemon = true, name = "mlc-$name-teardown") {
+            try {
+                block()
+            } catch (t: Throwable) {
+                failure.set(t)
+            }
+        }
+        worker.join(NATIVE_TEARDOWN_TIMEOUT_MS)
+        failure.get()?.let { Log.w(TAG, "MLC native $name failed", it) }
+        if (worker.isAlive) {
+            Log.w(TAG, "MLC native $name did not finish within ${NATIVE_TEARDOWN_TIMEOUT_MS}ms")
+        }
     }
 
     // ------------------------------------------------------------------
@@ -256,6 +283,7 @@ class MLCEngine(deviceType: String = "opencl") {
     )
 
     companion object {
-        private const val COMPLETION_TIMEOUT_SECS = 120L
+        private const val COMPLETION_TIMEOUT_SECS = 600L
+        private const val NATIVE_TEARDOWN_TIMEOUT_MS = 5_000L
     }
 }
