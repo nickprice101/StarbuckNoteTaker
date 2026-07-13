@@ -4,7 +4,6 @@ public final class TVMValueLong extends TVMValue {
     private final long value;
 
     public TVMValueLong(long value) {
-        super(ArgTypeCode.INT);
         this.value = value;
     }
 

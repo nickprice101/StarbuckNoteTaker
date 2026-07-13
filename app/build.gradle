@@ -19,9 +19,7 @@ def llamaModelAbiProfiles = [
         ],
 ]
 def x86MlcTar = file("src/main/assets/${llamaModelName}-android-x86_64.tar")
-def x86TvmRuntime = rootProject.file("mlc4j/src/main/jniLibs/x86_64/libtvm4j_runtime_packed.so")
-def includeX86MlcModel = System.getenv('MLC_INCLUDE_X86_64_MODEL') == '1' ||
-        (x86MlcTar.exists() && x86TvmRuntime.exists())
+def includeX86MlcModel = System.getenv('MLC_ARM64_ONLY_RUNTIME') != '1' && x86MlcTar.exists()
 if (includeX86MlcModel) {
     llamaModelAbiProfiles['x86_64'] = [
             clangPrefix: 'x86_64-linux-android',

@@ -1,38 +1,39 @@
 package org.apache.tvm;
 
-/**
- * Wraps a TVM module handle.
- *
- * Modules hold a collection of TVM packed functions (e.g. the compiled model
- * kernels).  Get individual functions with {@link #getFunction}.
- */
-public class Module extends TVMValue {
-    public final long handle;
-    private boolean isReleased;
+import java.util.HashMap;
+import java.util.Map;
 
-    @Override
-    public long asHandle() { return handle; }
+/** Wraps a TVM module handle. */
+public class Module extends TVMObject {
+    private static final ThreadLocal<Map<String, Function>> apiFuncs =
+            ThreadLocal.withInitial(HashMap::new);
 
-    @Override
-    public Module asModule() { return this; }
+    private Function entry;
+    private final String entryName = "main";
 
     Module(long handle) {
-        super(ArgTypeCode.MODULE_HANDLE);
-        this.isReleased = false;
-        this.handle = handle;
+        super(handle, TypeIndex.kTVMFFIModule);
     }
 
     @Override
-    protected void finalize() throws Throwable {
-        release();
-        super.finalize();
+    public long asHandle() {
+        return handle;
     }
 
     @Override
-    public void release() {
-        if (isReleased) return;
-        Base.checkCall(Base._LIB.tvmModFree(handle));
-        isReleased = true;
+    public Module asModule() {
+        return this;
+    }
+
+    private static Function getApi(String name) {
+        return apiFuncs.get().computeIfAbsent(name, Function::getFunction);
+    }
+
+    public Function entryFunc() {
+        if (entry == null) {
+            entry = getFunction(entryName);
+        }
+        return entry;
     }
 
     /** Returns the named function from this module (does not search imports). */
@@ -40,24 +41,22 @@ public class Module extends TVMValue {
         return getFunction(name, false);
     }
 
-    /**
-     * Returns the named function from this module.
-     *
-     * @param name         Function name.
-     * @param queryImports Whether to search imported modules as well.
-     */
     public Function getFunction(String name, boolean queryImports) {
-        Base.RefLong ref = new Base.RefLong();
-        Base.checkCall(Base._LIB.tvmModGetFunction(handle, name, queryImports ? 1 : 0, ref));
-        if (ref.value == 0) {
-            throw new IllegalArgumentException("Module has no function: " + name);
-        }
-        return new Function(ref.value, false);
+        TVMValue ret = getApi("ffi.ModuleGetFunction")
+                .pushArg(this)
+                .pushArg(name)
+                .pushArg(queryImports ? 1 : 0)
+                .invoke();
+        return ret.asFunction();
     }
 
     /** Imports another module into this one. */
     public void importModule(Module dep) {
-        Base.checkCall(Base._LIB.tvmModImport(handle, dep.handle));
+        getApi("ffi.ModuleImportModule").pushArg(this).pushArg(dep).invoke();
+    }
+
+    public String typeKey() {
+        return getApi("ffi.ModuleGetTypeKind").pushArg(this).invoke().asString();
     }
 
     /** Loads a module from a file (format inferred from extension). */
@@ -67,10 +66,10 @@ public class Module extends TVMValue {
 
     /** Loads a module from a file with an explicit format string. */
     public static Module load(String path, String format) {
-        Function loader = Function.getFunction("runtime.ModuleLoadFromFile");
-        if (loader == null) {
-            throw new RuntimeException("TVM function 'runtime.ModuleLoadFromFile' not found");
-        }
-        return loader.pushArg(path).pushArg(format).invoke().asModule();
+        return getApi("ffi.ModuleLoadFromFile").pushArg(path).pushArg(format).invoke().asModule();
+    }
+
+    public static boolean enabled(String target) {
+        return getApi("runtime.RuntimeEnabled").pushArg(target).invoke().asLong() != 0;
     }
 }

@@ -14,12 +14,28 @@ import java.io.IOException;
 public final class Base {
     public static final LibInfo _LIB = new LibInfo();
 
+    /** Mutable reference to an int value used as an output parameter in JNI calls. */
+    public static class RefInt {
+        public int value;
+
+        public RefInt(int v) { this.value = v; }
+        public RefInt()      { this(0); }
+    }
+
     /** Mutable reference to a long value used as an output parameter in JNI calls. */
     public static class RefLong {
         public long value;
 
         public RefLong(long v) { this.value = v; }
         public RefLong()       { this(0L); }
+    }
+
+    /** Mutable reference to a string value used as an output parameter in JNI calls. */
+    public static class RefString {
+        public String value;
+
+        public RefString(String v) { this.value = v; }
+        public RefString()         { this(null); }
     }
 
     /** Mutable reference to a {@link TVMValue} used as an output parameter in JNI calls. */
@@ -72,7 +88,7 @@ public final class Base {
             }
         } else {
             // Android packed runtime: initialise with null (self-contained).
-            _LIB.nativeLibInit(null);
+            checkCall(_LIB.nativeLibInit(null));
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread(_LIB::shutdown, "tvm4j-shutdown"));
@@ -94,7 +110,7 @@ public final class Base {
      */
     public static void checkCall(int code) throws TVMError {
         if (code != 0) {
-            throw new TVMError(_LIB.tvmGetLastError());
+            throw new TVMError(_LIB.tvmFFIGetLastError());
         }
     }
 

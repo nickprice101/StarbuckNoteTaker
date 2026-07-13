@@ -190,11 +190,11 @@ class ReminderAlarmService : Service() {
         }
 
         fun dismiss(context: Context, payload: ReminderPayload) {
-            ContextCompat.startForegroundService(context, createServiceIntent(context, ACTION_DISMISS, payload))
+            context.startService(createServiceIntent(context, ACTION_DISMISS, payload))
         }
 
         fun snooze(context: Context, payload: ReminderPayload) {
-            ContextCompat.startForegroundService(context, createServiceIntent(context, ACTION_SNOOZE, payload))
+            context.startService(createServiceIntent(context, ACTION_SNOOZE, payload))
         }
 
         private fun createServiceIntent(context: Context, action: String, payload: ReminderPayload): Intent {
