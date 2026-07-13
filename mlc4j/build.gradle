@@ -62,6 +62,38 @@ def tvmRuntimeDownloadSoName = tvmRuntimeSoName
 def tvmRuntimeDownloadLocalPath = tvmRuntimeLocalPath
 def tvmRuntimeSourceCommitValue = mlcRuntimeSourceCommit
 
+def nativeLibraryContainsAscii = { File library, String needle ->
+    if (library == null || !library.exists()) {
+        return false
+    }
+    byte[] pattern = needle.getBytes(java.nio.charset.StandardCharsets.US_ASCII)
+    if (pattern.length == 0) {
+        return true
+    }
+    int matched = 0
+    boolean found = false
+    library.withInputStream { stream ->
+        int next
+        while (!found && (next = stream.read()) != -1) {
+            byte value = (byte) (next & 0xff)
+            if (value == pattern[matched]) {
+                matched++
+                if (matched == pattern.length) {
+                    found = true
+                }
+            } else {
+                matched = (value == pattern[0]) ? 1 : 0
+            }
+        }
+    }
+    return found
+}
+
+def runtimeSupportsTvmFfiSystemLib = { File runtime ->
+    nativeLibraryContainsAscii(runtime, 'ffi.SystemLib') &&
+            nativeLibraryContainsAscii(runtime, 'TVMFFIEnvModRegisterSystemLibSymbol')
+}
+
 tasks.register('downloadArm64TvmRuntime') {
     notCompatibleWithConfigurationCache('Checks for a generated native runtime file during task execution')
 
@@ -72,16 +104,20 @@ tasks.register('downloadArm64TvmRuntime') {
     outputs.file(soFile)
 
     onlyIf {
-        if (soFile.exists()) {
-            logger.lifecycle("${tvmRuntimeDownloadSoName} already present at ${soFile} - skipping generation check.")
+        if (runtimeSupportsTvmFfiSystemLib(soFile)) {
+            logger.lifecycle("Compatible ${tvmRuntimeDownloadSoName} already present at ${soFile} - skipping generation check.")
             return false
+        }
+        if (soFile.exists()) {
+            logger.lifecycle("${tvmRuntimeDownloadSoName} at ${soFile} lacks TVM FFI system-library support.")
         }
         return true
     }
 
     doLast {
         throw new GradleException(
-            "Missing ${tvmRuntimeDownloadSoName} at ${tvmRuntimeDownloadLocalPath}. " +
+            "Missing or incompatible ${tvmRuntimeDownloadSoName} at ${tvmRuntimeDownloadLocalPath}. " +
+            "The runtime must expose ffi.SystemLib and TVMFFIEnvModRegisterSystemLibSymbol. " +
             "Run `TARGET_ABI=arm64-v8a bash scripts/fetch_mlc_native.sh` to build the TVM FFI-capable " +
             "runtime from MLC source commit ${tvmRuntimeSourceCommitValue}."
         )

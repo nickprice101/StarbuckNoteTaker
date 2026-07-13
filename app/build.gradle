@@ -381,6 +381,10 @@ tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }
     dependsOn(preparePenguinNativeLibs, prepareLibcxxShared, 'buildModelLibSo')
 }
 
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('JniLibFolders') }.configureEach {
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared, 'buildModelLibSo')
+}
+
 // ---------------------------------------------------------------------------
 // Task: buildModelLibSoArm64Legacy
 //
