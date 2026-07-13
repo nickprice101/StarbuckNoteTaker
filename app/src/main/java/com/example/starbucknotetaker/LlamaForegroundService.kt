@@ -12,7 +12,9 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -34,8 +36,10 @@ import kotlinx.coroutines.launch
 class LlamaForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var inferenceJob: Job? = null
+    private val activeJobLock = Any()
+    private val inferenceJobs = mutableMapOf<Int, Job>()
     private var phraseJob: Job? = null
+    private var thermalProgressJob: Job? = null
     private lateinit var notificationManager: NotificationManager
     private lateinit var engine: LlamaEngine
     private var currentPhraseIndex = 0
@@ -87,10 +91,10 @@ class LlamaForegroundService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        startPhraseCycler()
+        ensurePhraseCycler()
+        ensureThermalProgressCollector()
 
-        inferenceJob?.cancel()
-        inferenceJob = serviceScope.launch {
+        val job = serviceScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val result = when (mode) {
                     LlamaEngine.Mode.SUMMARISE -> engine.summarise(text, requestId)
@@ -98,33 +102,40 @@ class LlamaForegroundService : Service() {
                     LlamaEngine.Mode.QUESTION  -> engine.answer(text, context, requestId)
                 }
                 broadcastResult(requestId, noteId, mode, result, isError = false)
+            } catch (e: CancellationException) {
+                Log.i(TAG, "Inference cancelled for requestId=$requestId")
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Inference failed for requestId=$requestId", e)
                 val errorDetail = "[${e::class.simpleName}] ${e.message ?: "Inference failed"}"
                 broadcastResult(requestId, noteId, mode, errorDetail, isError = true)
             } finally {
-                phraseJob?.cancel()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf(startId)
-            }
-        }
-
-        // Observe thermal throttle events and update the notification
-        serviceScope.launch {
-            engine.progress.collect { progress ->
-                if (progress is LlamaEngine.InferenceProgress.Throttled) {
-                    updateNotification(THROTTLE_MESSAGE)
+                val noActiveJobs = synchronized(activeJobLock) {
+                    inferenceJobs.remove(startId)
+                    inferenceJobs.isEmpty()
+                }
+                if (noActiveJobs) {
+                    stopProgressUpdates()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
                 }
             }
         }
+        synchronized(activeJobLock) {
+            inferenceJobs[startId] = job
+        }
+        job.start()
 
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        phraseJob?.cancel()
-        inferenceJob?.cancel()
+        stopProgressUpdates()
+        synchronized(activeJobLock) {
+            inferenceJobs.values.forEach { it.cancel() }
+            inferenceJobs.clear()
+        }
         serviceScope.cancel()
         engine.close()
     }
@@ -162,8 +173,8 @@ class LlamaForegroundService : Service() {
         notificationManager.notify(NOTIFICATION_ID, buildNotification(phrase))
     }
 
-    private fun startPhraseCycler() {
-        phraseJob?.cancel()
+    private fun ensurePhraseCycler() {
+        if (phraseJob?.isActive == true) return
         phraseJob = serviceScope.launch {
             while (true) {
                 delay(PHRASE_CYCLE_MS)
@@ -171,6 +182,24 @@ class LlamaForegroundService : Service() {
                 updateNotification(PHRASES[currentPhraseIndex])
             }
         }
+    }
+
+    private fun ensureThermalProgressCollector() {
+        if (thermalProgressJob?.isActive == true) return
+        thermalProgressJob = serviceScope.launch {
+            engine.progress.collect { progress ->
+                if (progress is LlamaEngine.InferenceProgress.Throttled) {
+                    updateNotification(THROTTLE_MESSAGE)
+                }
+            }
+        }
+    }
+
+    private fun stopProgressUpdates() {
+        phraseJob?.cancel()
+        phraseJob = null
+        thermalProgressJob?.cancel()
+        thermalProgressJob = null
     }
 
     // ------------------------------------------------------------------
