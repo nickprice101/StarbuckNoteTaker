@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -172,6 +173,7 @@ class LlamaEngine(private val context: Context) {
                 ensureEngineLoaded(modelPath)
                 generateWithMlc(mode, primaryText, secondaryText, taskId)
             }.getOrElse { e ->
+                if (e is CancellationException) throw e
                 val diagInfo = modelManager.debugModelDirInfo()
                 Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId " +
                     "[${e::class.simpleName}]: ${e.message}\n$diagInfo", e)
