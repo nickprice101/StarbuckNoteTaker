@@ -18,6 +18,13 @@
 #   - Python with mlc_llm importable
 #   - Android NDK, with ANDROID_NDK set or discoverable under ANDROID_HOME
 #   - app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android*.tar
+#
+# Windows note:
+#   Run this script from Git Bash. If the MSVC Rust host linker is unavailable,
+#   install/use the GNU Rust host toolchain, for example:
+#     rustup toolchain install stable-x86_64-pc-windows-gnu
+#     rustup target add x86_64-linux-android --toolchain stable-x86_64-pc-windows-gnu
+#     RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh
 # =============================================================================
 
 set -euo pipefail
@@ -65,6 +72,13 @@ fi
 if [[ -z "${ANDROID_NDK:-}" || ! -d "${ANDROID_NDK}" ]]; then
   echo "Android NDK not found. Set ANDROID_NDK=/path/to/android-ndk." >&2
   exit 1
+fi
+
+if [[ -n "${ANDROID_HOME:-}" && -d "${ANDROID_HOME}/cmake" ]]; then
+  sdk_cmake_dir="$(find "${ANDROID_HOME}/cmake" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+  if [[ -n "${sdk_cmake_dir}" && -d "${sdk_cmake_dir}/bin" ]]; then
+    export PATH="${sdk_cmake_dir}/bin:${PATH}"
+  fi
 fi
 
 for tool in git cmake ninja rustup; do

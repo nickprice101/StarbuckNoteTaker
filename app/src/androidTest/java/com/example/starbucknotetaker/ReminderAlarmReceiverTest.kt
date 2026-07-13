@@ -1,9 +1,12 @@
 package com.example.starbucknotetaker
 
+import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -19,6 +22,7 @@ class ReminderAlarmReceiverTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        grantNotificationPermissionIfNeeded()
         notificationManager = context.getSystemService(NotificationManager::class.java)
         notificationManager.cancelAll()
     }
@@ -46,6 +50,14 @@ class ReminderAlarmReceiverTest {
         val intent = ReminderAlarmReceiver.createIntent(context, payload)
         ReminderAlarmReceiver().onReceive(context, intent)
         val active = notificationManager.activeNotifications
-        assertTrue(active.any { it.id == payload.noteId.hashCode() })
+        assertTrue(active.any { it.id == payload.requestCode() })
+    }
+
+    private fun grantNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
+            context.packageName,
+            Manifest.permission.POST_NOTIFICATIONS
+        )
     }
 }

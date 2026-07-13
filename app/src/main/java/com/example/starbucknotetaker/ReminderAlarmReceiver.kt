@@ -56,7 +56,7 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
                     lock.release()
                 }
             }
-            pendingResult.finish()
+            pendingResult?.finish()
         }
     }
 

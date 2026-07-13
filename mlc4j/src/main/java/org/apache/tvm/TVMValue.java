@@ -1,44 +1,44 @@
 package org.apache.tvm;
 
 /** Base class for values returned from TVM packed functions. */
-public abstract class TVMValue {
-    public final ArgTypeCode typeCode;
-
-    protected TVMValue(ArgTypeCode typeCode) {
-        this.typeCode = typeCode;
-    }
+public class TVMValue {
+    protected TVMValue() {}
 
     public long asLong() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to long");
+        throw new UnsupportedOperationException();
     }
 
     public double asDouble() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to double");
+        throw new UnsupportedOperationException();
     }
 
     public String asString() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to String");
+        throw new UnsupportedOperationException();
     }
 
     public byte[] asBytes() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to bytes");
+        throw new UnsupportedOperationException();
     }
 
     public Module asModule() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to Module");
+        throw new UnsupportedOperationException();
     }
 
     public Function asFunction() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to Function");
+        throw new UnsupportedOperationException();
     }
 
     public NDArrayBase asNDArray() {
-        throw new UnsupportedOperationException("Cannot convert " + typeCode + " to NDArray");
+        throw new UnsupportedOperationException();
+    }
+
+    public TensorBase asTensor() {
+        throw new UnsupportedOperationException();
     }
 
     /** Return the native handle value for handle-typed values. */
     long asHandle() {
-        throw new UnsupportedOperationException("Cannot get handle from " + typeCode);
+        throw new UnsupportedOperationException();
     }
 
     /** Release any native resources held by this value. Default is a no-op. */

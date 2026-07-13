@@ -17,7 +17,11 @@ class StarbuckNoteTakerApp : Application() {
         super.onCreate()
         val processName = resolveProcessName()
         if (processName == null || processName == packageName) {
-            QspmServiceInitializer.warmUp(this)
+            if (QspmDeviceDetector.shouldWarmUpCurrentDevice()) {
+                QspmServiceInitializer.warmUp(this)
+            } else {
+                Log.d(TAG, "Skipping QSPM warm up on non-Qualcomm device")
+            }
         } else {
             Log.d(TAG, "Skipping main process initialisation for $processName")
         }

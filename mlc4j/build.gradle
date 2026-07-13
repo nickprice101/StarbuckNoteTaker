@@ -15,9 +15,9 @@ ext {
     tvmRuntimeSoName = 'libtvm4j_runtime_packed.so'
     tvmRuntimeLocalDir = "src/main/jniLibs/arm64-v8a"
     tvmRuntimeLocalPath = "${tvmRuntimeLocalDir}/${tvmRuntimeSoName}"
-    tvmRuntimeRequiredAbis = System.getenv('MLC_REQUIRE_X86_64_RUNTIME') == '1' ?
-            ['arm64-v8a', 'x86_64'] :
-            ['arm64-v8a']
+    tvmRuntimeRequiredAbis = System.getenv('MLC_ARM64_ONLY_RUNTIME') == '1' ?
+            ['arm64-v8a'] :
+            ['arm64-v8a', 'x86_64']
 }
 
 android {
