@@ -93,6 +93,9 @@ class LlamaEngine(private val context: Context) {
     @Volatile
     private var engineLoaded = false
 
+    val isWarm: Boolean
+        get() = engineLoaded
+
     /**
      * `null`  = not yet tested
      * `true`  = library loaded successfully at least once
@@ -419,7 +422,8 @@ class LlamaEngine(private val context: Context) {
             Mode.QUESTION ->
                 if (secondary != null) {
                     "You are a helpful assistant. " +
-                    "Answer the user's question using the provided context. Be concise and direct."
+                    "Answer the user's question using the provided context. Be concise and direct. " +
+                    "If web lookup sources are included, use them only when relevant and cite URLs."
                 } else {
                     "You are a helpful assistant. Answer the question concisely and accurately."
                 }

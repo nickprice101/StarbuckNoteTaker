@@ -39,10 +39,12 @@ class LlamaForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val activeJobLock = Any()
     private val inferenceJobs = mutableMapOf<Int, Job>()
+    private val activeModes = mutableMapOf<String, LlamaEngine.Mode>()
     private var phraseJob: Job? = null
     private var progressJob: Job? = null
     private lateinit var notificationManager: NotificationManager
     private lateinit var engine: LlamaEngine
+    private lateinit var webLookup: AssistantWebLookup
     private var currentPhraseIndex = 0
 
     // ------------------------------------------------------------------
@@ -53,6 +55,7 @@ class LlamaForegroundService : Service() {
         super.onCreate()
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         engine = LlamaEngineProvider.acquire(applicationContext)
+        webLookup = AssistantWebLookup()
         createNotificationChannel()
     }
 
@@ -98,9 +101,16 @@ class LlamaForegroundService : Service() {
         val job = serviceScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val result = when (mode) {
-                    LlamaEngine.Mode.SUMMARISE -> engine.summarise(text, requestId)
-                    LlamaEngine.Mode.REWRITE   -> engine.rewrite(text, requestId)
-                    LlamaEngine.Mode.QUESTION  -> engine.answer(text, context, requestId)
+                    LlamaEngine.Mode.SUMMARISE -> {
+                        broadcastProgress(requestId, "", "Preparing summary", mode)
+                        engine.summarise(text, requestId)
+                    }
+                    LlamaEngine.Mode.REWRITE -> {
+                        broadcastProgress(requestId, "", "Refining formatted note", mode)
+                        engine.rewrite(text, requestId)
+                    }
+                    LlamaEngine.Mode.QUESTION ->
+                        answerQuestion(text, context, requestId)
                 }
                 broadcastResult(requestId, noteId, mode, result, isError = false)
             } catch (e: CancellationException) {
@@ -113,6 +123,7 @@ class LlamaForegroundService : Service() {
             } finally {
                 val noActiveJobs = synchronized(activeJobLock) {
                     inferenceJobs.remove(startId)
+                    activeModes.remove(requestId)
                     inferenceJobs.isEmpty()
                 }
                 if (noActiveJobs) {
@@ -124,10 +135,79 @@ class LlamaForegroundService : Service() {
         }
         synchronized(activeJobLock) {
             inferenceJobs[startId] = job
+            activeModes[requestId] = mode
         }
         job.start()
 
         return START_NOT_STICKY
+    }
+
+    private suspend fun answerQuestion(
+        question: String,
+        noteContext: String?,
+        requestId: String,
+    ): String {
+        var webResult: WebLookupResult? = null
+        var enrichedContext = noteContext
+
+        if (AssistantWebLookup.shouldLookup(question)) {
+            broadcastProgress(requestId, "", "Looking up web context", LlamaEngine.Mode.QUESTION)
+            val lookup = webLookup.lookup(question)
+            if (lookup.results.isNotEmpty()) {
+                webResult = lookup
+                enrichedContext = AssistantWebLookup.mergeWithNoteContext(noteContext, lookup)
+                broadcastProgress(
+                    requestId = requestId,
+                    partialText = lookup.progressPreview(),
+                    status = "Found web context",
+                    mode = LlamaEngine.Mode.QUESTION,
+                )
+
+                if (!engine.isWarm) {
+                    return AssistantWebLookup.quickAnswer(question, lookup)
+                }
+            } else {
+                broadcastProgress(
+                    requestId = requestId,
+                    partialText = "",
+                    status = "Web lookup unavailable; using local context",
+                    mode = LlamaEngine.Mode.QUESTION,
+                )
+            }
+        }
+
+        broadcastProgress(requestId, "", "Preparing on-device model", LlamaEngine.Mode.QUESTION)
+        val answer = engine.answer(question, enrichedContext, requestId)
+        val lookup = webResult ?: return answer
+        return if (answer.shouldUseWebFallback()) {
+            AssistantWebLookup.quickAnswer(question, lookup)
+        } else {
+            appendWebSources(answer, lookup)
+        }
+    }
+
+    private fun appendWebSources(answer: String, webLookup: WebLookupResult): String {
+        val cleanAnswer = answer.trim()
+        if (webLookup.results.isEmpty()) return cleanAnswer
+        if (cleanAnswer.contains("Sources:", ignoreCase = true)) return cleanAnswer
+        val sources = webLookup.results.take(3).joinToString("\n") { result ->
+            "- ${result.title}: ${result.url}"
+        }
+        return buildString {
+            append(cleanAnswer)
+            if (cleanAnswer.isNotBlank()) appendLine().appendLine()
+            appendLine("Sources:")
+            append(sources)
+        }.trim()
+    }
+
+    private fun String.shouldUseWebFallback(): Boolean {
+        val lower = lowercase(java.util.Locale.US)
+        return lower.contains("not yet downloaded") ||
+            lower.contains("not available") ||
+            lower.contains("does not meet the minimum") ||
+            lower.contains("did not produce output") ||
+            lower.contains("failed to run")
     }
 
     override fun onDestroy() {
@@ -136,6 +216,7 @@ class LlamaForegroundService : Service() {
         synchronized(activeJobLock) {
             inferenceJobs.values.forEach { it.cancel() }
             inferenceJobs.clear()
+            activeModes.clear()
         }
         serviceScope.cancel()
         LlamaEngineProvider.releaseAfterIdle()
@@ -193,6 +274,9 @@ class LlamaForegroundService : Service() {
             engine.progress.collect { progress ->
                 when (progress) {
                     is LlamaEngine.InferenceProgress.Thinking -> {
+                        val mode = synchronized(activeJobLock) {
+                            activeModes[progress.taskId] ?: LlamaEngine.Mode.QUESTION
+                        }
                         val now = SystemClock.elapsedRealtime()
                         val lastAt = lastBroadcastAt[progress.taskId] ?: 0L
                         val lastText = lastBroadcastText[progress.taskId].orEmpty()
@@ -205,7 +289,8 @@ class LlamaForegroundService : Service() {
                             broadcastProgress(
                                 requestId = progress.taskId,
                                 partialText = progress.partialText,
-                                status = "Generating answer",
+                                status = progressStatusFor(mode),
+                                mode = mode,
                             )
                         }
                     }
@@ -213,10 +298,14 @@ class LlamaForegroundService : Service() {
                         updateNotification(THROTTLE_MESSAGE)
                     }
                     is LlamaEngine.InferenceProgress.Error -> {
+                        val mode = synchronized(activeJobLock) {
+                            activeModes[progress.taskId] ?: LlamaEngine.Mode.QUESTION
+                        }
                         broadcastProgress(
                             requestId = progress.taskId,
                             partialText = "",
                             status = progress.message,
+                            mode = mode,
                         )
                     }
                     is LlamaEngine.InferenceProgress.Done,
@@ -259,15 +348,23 @@ class LlamaForegroundService : Service() {
         requestId: String,
         partialText: String,
         status: String,
+        mode: LlamaEngine.Mode = LlamaEngine.Mode.QUESTION,
     ) {
         val broadcastIntent = Intent(ACTION_PROGRESS).apply {
             putExtra(EXTRA_REQUEST_ID, requestId)
-            putExtra(EXTRA_MODE, LlamaEngine.Mode.QUESTION.name)
+            putExtra(EXTRA_MODE, mode.name)
             putExtra(EXTRA_PROGRESS_TEXT, partialText)
             putExtra(EXTRA_PROGRESS_STATUS, status)
         }
         LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(broadcastIntent)
     }
+
+    private fun progressStatusFor(mode: LlamaEngine.Mode): String =
+        when (mode) {
+            LlamaEngine.Mode.SUMMARISE -> "Generating summary"
+            LlamaEngine.Mode.REWRITE -> "Refining formatted note"
+            LlamaEngine.Mode.QUESTION -> "Generating answer"
+        }
 
     companion object {
         private const val TAG = "LlamaForegroundService"

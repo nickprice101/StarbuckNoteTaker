@@ -136,4 +136,38 @@ class SummarizerFallbackTest {
         assertTrue(summary.contains("tooth sensitivity", ignoreCase = true))
         assertTrue(summary.contains("lunch hour", ignoreCase = true))
     }
+
+    @Test
+    fun fastSummaryForLongProjectNoteIsConciseAndSpecific() = runTest {
+        val summarizer = Summarizer(appContext)
+
+        val summary = summarizer.summarize(
+            "Project Apollo launch prep: finalize login migration by Friday, " +
+                "ask Nina to validate the QA checklist, update support docs before launch, " +
+                "and move the lower-priority budget review notes into next week's planning doc. " +
+                "The staging deploy already passed smoke tests this morning."
+        )
+
+        assertTrue("Expected concise summary, got ${summary.length} chars: $summary", summary.length <= 140)
+        assertTrue(summary.contains("login migration", ignoreCase = true))
+        assertTrue(summary.contains("Nina", ignoreCase = true))
+        assertFalse(summary.contains("lower-priority budget review", ignoreCase = true))
+    }
+
+    @Test
+    fun fastSummaryDoesNotEchoWholeLongParagraph() = runTest {
+        val summarizer = Summarizer(appContext)
+        val note = (
+            "Garden plan: replace the cracked tomato cages, move basil starts near the south fence, " +
+                "water seedlings before breakfast, buy compost on Saturday, and check drip irrigation " +
+                "timer batteries after work because the back bed dried out twice last week."
+            )
+
+        val summary = summarizer.summarize(note)
+
+        assertTrue("Expected concise summary, got ${summary.length} chars: $summary", summary.length <= 140)
+        assertFalse("Summary should not echo the whole note", summary.contains(note.take(170)))
+        assertTrue(summary.contains("tomato cages", ignoreCase = true))
+        assertTrue(summary.contains("basil", ignoreCase = true))
+    }
 }
