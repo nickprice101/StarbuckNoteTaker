@@ -91,6 +91,8 @@ class NoteViewModel(
     val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress> = _inferenceProgress
     private val pendingAnswerNoteIds = mutableMapOf<String, Long>()
     private val pendingAnswerQuestions = mutableMapOf<String, String>()
+    private val pendingAnswerStatusHistory = mutableMapOf<String, MutableList<String>>()
+    private val pendingRewriteNoteIds = mutableMapOf<String, Long>()
 
     private var llamaBroadcastReceiver: BroadcastReceiver? = null
     private var llamaModelManager: LlamaModelManager? = null
@@ -233,6 +235,7 @@ class NoteViewModel(
         const val PENDING_OPEN_NOTE_ID_KEY = "pending_open_note_id"
         const val PENDING_UNLOCK_NAVIGATION_NOTE_ID_KEY = "pending_unlock_navigation_note_id"
         const val SUMMARY_DEBOUNCE_MS = 250L
+        const val MAX_ANSWER_STATUS_HISTORY = 6
     }
 
     fun updateChecklistItems(id: Long, items: List<ChecklistItem>) {
@@ -839,17 +842,35 @@ class NoteViewModel(
         if (text.isBlank()) return
 
         val requestId = java.util.UUID.randomUUID().toString()
+        val localRewrite = ProfessionalNoteFormatter.format(text).ifBlank { text }
+        pendingRewriteNoteIds[requestId] = noteId
+        _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
+        applyRewriteToNote(
+            noteId = noteId,
+            rewrittenContent = localRewrite,
+            summaryOverride = "AI rewrite: quick cleanup applied",
+            launchSummaryRefresh = false,
+        )
+        updateRewriteStatus(requestId, "Quick cleanup applied")
+
         val intent = LlamaForegroundService.buildIntent(
             context = ctx,
             mode = LlamaEngine.Mode.REWRITE,
-            text = text,
+            text = localRewrite,
             noteId = noteId,
             requestId = requestId,
         )
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            ctx.startForegroundService(intent)
-        } else {
-            ctx.startService(intent)
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                ctx.startForegroundService(intent)
+            } else {
+                ctx.startService(intent)
+            }
+        }.onFailure { throwable ->
+            val message = throwable.message ?: "Unable to start rewrite refinement"
+            _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, message)
+            updateRewriteStatus(requestId, "Model refinement unavailable; local rewrite kept")
+            pendingRewriteNoteIds.remove(requestId)
         }
     }
 
@@ -864,13 +885,21 @@ class NoteViewModel(
         val trimmedQuestion = question.trim()
         if (trimmedQuestion.isBlank()) return
 
+        if (ProfessionalNoteFormatter.isRewriteRequest(trimmedQuestion)) {
+            rewriteNote(noteId)
+            return
+        }
+
         val requestId = java.util.UUID.randomUUID().toString()
+        rememberAnswerStatus(requestId, "Received question")
+        rememberAnswerStatus(requestId, "Checking for quick answer")
         createAnswerNote(
             sourceNoteId = noteId,
             answer = buildAnswerProgressContent(
                 question = trimmedQuestion,
                 partialAnswer = "",
-                status = "Starting on-device assistant",
+                status = "Checking for quick answer",
+                events = answerStatusHistory(requestId),
             ),
             summary = "AI answer in progress",
         )?.let { answerNoteId ->
@@ -878,6 +907,31 @@ class NoteViewModel(
             pendingAnswerQuestions[requestId] = trimmedQuestion
         }
         _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
+
+        val quickAnswer = QuickAssistantAnswerer.answer(trimmedQuestion, note.content)
+        if (quickAnswer != null) {
+            rememberAnswerStatus(requestId, quickAnswer.status)
+            updatePendingAnswerProgress(
+                requestId = requestId,
+                partialAnswer = quickAnswer.answer,
+                status = quickAnswer.status,
+            )
+            _inferenceProgress.value = LlamaEngine.InferenceProgress.Done(requestId, quickAnswer.answer)
+            finishAnswerNote(
+                requestId = requestId,
+                sourceNoteId = noteId,
+                answer = quickAnswer.answer,
+                isError = false,
+            )
+            return
+        }
+
+        rememberAnswerStatus(requestId, "Starting assistant service")
+        updatePendingAnswerProgress(
+            requestId = requestId,
+            partialAnswer = "",
+            status = "Starting assistant service",
+        )
         val intent = LlamaForegroundService.buildIntent(
             context = ctx,
             mode = LlamaEngine.Mode.QUESTION,
@@ -894,6 +948,7 @@ class NoteViewModel(
             }
         }.onFailure { throwable ->
             val message = throwable.message ?: "Unable to start on-device assistant"
+            rememberAnswerStatus(requestId, message)
             _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, message)
             finishAnswerNote(
                 requestId = requestId,
@@ -939,6 +994,11 @@ class NoteViewModel(
                 if (isError) {
                     Log.e("NoteViewModel", "LLM error for requestId=$requestId: $result")
                     _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, result)
+                    if (mode == LlamaEngine.Mode.REWRITE) {
+                        updateRewriteStatus(requestId, "Model refinement failed; local rewrite kept")
+                        pendingRewriteNoteIds.remove(requestId)
+                        return
+                    }
                     // Write the error into the Answer note for QUESTION mode so the user
                     // can read and copy the full error message for debugging.
                     if (mode == LlamaEngine.Mode.QUESTION && noteId != -1L) {
@@ -963,7 +1023,12 @@ class NoteViewModel(
                         if (noteId != -1L) updateNoteSummary(noteId, result)
                     }
                     LlamaEngine.Mode.REWRITE -> {
-                        if (noteId != -1L) applyRewriteToNote(noteId, result)
+                        if (noteId != -1L) {
+                            if (!applyRewriteToNote(noteId, result)) {
+                                updateRewriteStatus(requestId, "Model returned no refinement; local rewrite kept")
+                            }
+                            pendingRewriteNoteIds.remove(requestId)
+                        }
                     }
                     LlamaEngine.Mode.QUESTION -> {
                         if (noteId != -1L && pendingAnswerNoteIds.containsKey(requestId)) {
@@ -992,16 +1057,43 @@ class NoteViewModel(
 
     private fun handleLlamaProgress(intent: Intent) {
         val requestId = intent.getStringExtra(LlamaForegroundService.EXTRA_REQUEST_ID) ?: return
+        val mode = intent.getStringExtra(LlamaForegroundService.EXTRA_MODE)
+            ?.let { runCatching { LlamaEngine.Mode.valueOf(it) }.getOrNull() }
         val partialText = intent.getStringExtra(LlamaForegroundService.EXTRA_PROGRESS_TEXT).orEmpty()
         val status = intent.getStringExtra(LlamaForegroundService.EXTRA_PROGRESS_STATUS)
-            ?: "Generating answer"
+            ?: when (mode) {
+                LlamaEngine.Mode.REWRITE -> "Refining formatted note"
+                LlamaEngine.Mode.SUMMARISE -> "Generating summary"
+                else -> "Generating answer"
+            }
+
+        if (mode == LlamaEngine.Mode.REWRITE) {
+            updateRewriteStatus(requestId, status)
+            _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking(partialText, requestId)
+            return
+        }
+
+        rememberAnswerStatus(requestId, status)
         _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking(partialText, requestId)
 
+        updatePendingAnswerProgress(requestId, partialText, status)
+    }
+
+    private fun updatePendingAnswerProgress(
+        requestId: String,
+        partialAnswer: String,
+        status: String,
+    ) {
         val answerNoteId = pendingAnswerNoteIds[requestId] ?: return
         val question = pendingAnswerQuestions[requestId] ?: return
         updateAnswerNote(
             noteId = answerNoteId,
-            content = buildAnswerProgressContent(question, partialText, status),
+            content = buildAnswerProgressContent(
+                question = question,
+                partialAnswer = partialAnswer,
+                status = status,
+                events = answerStatusHistory(requestId),
+            ),
             summary = "AI answer in progress",
         )
     }
@@ -1039,18 +1131,66 @@ class NoteViewModel(
     private fun clearPendingAnswer(requestId: String) {
         pendingAnswerNoteIds.remove(requestId)
         pendingAnswerQuestions.remove(requestId)
+        pendingAnswerStatusHistory.remove(requestId)
     }
 
-    private fun applyRewriteToNote(noteId: Long, rewrittenContent: String) {
+    private fun rememberAnswerStatus(requestId: String, status: String) {
+        val cleaned = status.trim()
+        if (cleaned.isBlank()) return
+        val history = pendingAnswerStatusHistory.getOrPut(requestId) { mutableListOf() }
+        if (history.lastOrNull() != cleaned) {
+            history += cleaned
+        }
+        while (history.size > MAX_ANSWER_STATUS_HISTORY) {
+            history.removeAt(0)
+        }
+    }
+
+    private fun answerStatusHistory(requestId: String): List<String> =
+        pendingAnswerStatusHistory[requestId].orEmpty()
+
+    private fun updateRewriteStatus(requestId: String, status: String) {
+        val noteId = pendingRewriteNoteIds[requestId] ?: return
         val index = _notes.indexOfFirst { it.id == noteId }
         if (index == -1) return
-        val note = _notes[index]
-        val styled = com.example.starbucknotetaker.richtext.RichTextDocument.fromPlainText(rewrittenContent)
-        _notes[index] = note.copy(
-            content = rewrittenContent.trim(),
-            styledContent = styled.trimmed(),
-        )
+        val summary = sanitizeSummary("AI rewrite: $status").take(200)
+        if (_notes[index].summary == summary) return
+        _notes[index] = _notes[index].copy(summary = summary)
         pin?.let { store?.saveNotes(_notes, it) }
+    }
+
+    private fun applyRewriteToNote(
+        noteId: Long,
+        rewrittenContent: String,
+        summaryOverride: String? = null,
+        launchSummaryRefresh: Boolean = true,
+    ): Boolean {
+        val index = _notes.indexOfFirst { it.id == noteId }
+        if (index == -1) return false
+        val cleanedContent = rewrittenContent.trim()
+        if (cleanedContent.isBlank()) return false
+        val note = _notes[index]
+        val styled = RichTextDocument.fromPlainText(cleanedContent)
+        val summarizerSource = if (isSummarizerEnabled() && note.checklistItems == null) {
+            buildSummarizerSource(note.title, cleanedContent, note.event)
+        } else {
+            null
+        }
+        val summary = summaryOverride
+            ?.let(::sanitizeSummary)
+            ?: summarizerSource?.let(::synchronousSummaryPlaceholder)
+            ?: manualSummaryFromContent(cleanedContent)
+        val updated = note.copy(
+            content = cleanedContent,
+            styledContent = styled.trimmed(),
+            summary = summary.take(200),
+        )
+        _notes[index] = updated
+        pin?.let { store?.saveNotes(_notes, it) }
+        if (launchSummaryRefresh && summarizerSource != null) {
+            launchSummaryUpdates(noteId, note.title, summarizerSource)
+        }
+        return true
     }
 
     private fun createAnswerNote(
@@ -1100,19 +1240,23 @@ class NoteViewModel(
         question: String,
         partialAnswer: String,
         status: String,
+        events: List<String> = emptyList(),
     ): String = buildString {
         appendLine("Question:")
         appendLine(question.ifBlank { "Question unavailable" })
         appendLine()
-        appendLine("Status:")
-        appendLine(status.ifBlank { "Generating answer" })
+        appendLine("Live update:")
+        val timeline = events.ifEmpty { listOf(status.ifBlank { "Generating answer" }) }
+        timeline.forEach { event ->
+            appendLine("- ${event.ifBlank { "Generating answer" }}")
+        }
         appendLine()
         val partial = partialAnswer.trim()
         if (partial.isBlank()) {
-            appendLine("Answer:")
-            appendLine("Waiting for the first response from the on-device model...")
+            appendLine("Draft answer:")
+            appendLine("Waiting for the first response...")
         } else {
-            appendLine("Partial answer:")
+            appendLine("Draft answer:")
             appendLine(partial)
         }
     }.trim()
@@ -1230,6 +1374,8 @@ class NoteViewModel(
         summaryJobs.clear()
         pendingAnswerNoteIds.clear()
         pendingAnswerQuestions.clear()
+        pendingAnswerStatusHistory.clear()
+        pendingRewriteNoteIds.clear()
         summarizer?.close()
         val ctx = context
         val receiver = llamaBroadcastReceiver

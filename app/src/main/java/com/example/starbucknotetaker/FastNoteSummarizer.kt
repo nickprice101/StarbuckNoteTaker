@@ -363,9 +363,10 @@ internal class FastNoteSummarizer(
             val anchor = cleanTitle(title).ifBlank { fallbackTitle }
             val fragments = keyFragments(body, title.orEmpty(), category, maxFragments)
             if (fragments.isEmpty()) {
-                return punctuate("$anchor: ${Summarizer.lightweightPreview(body).ifBlank { body }}")
+                val fallback = conciseFallback(body)
+                return punctuate("$anchor: $fallback")
             }
-            return punctuate("$anchor: ${joinFragments(fragments)}")
+            return punctuate("$anchor: ${joinFragments(fragments.map { compactFragment(it, category) })}")
         }
 
         private fun keyFragments(
@@ -406,13 +407,31 @@ internal class FastNoteSummarizer(
             return base.flatMap { sentence ->
                 sentence.split(Regex("\\s*(?:;|\\n+)\\s*"))
                     .flatMap { clause ->
-                        if (clause.length > LONG_CLAUSE_SPLIT_LENGTH && clause.count { it == ',' } >= 2) {
+                        if (clause.length > LONG_CLAUSE_SPLIT_LENGTH && clause.count { it == ',' } >= 1) {
                             clause.split(Regex("\\s*,\\s*"))
                         } else {
                             listOf(clause)
                         }
                     }
             }
+        }
+
+        private fun compactFragment(fragment: String, category: String): String {
+            val cleaned = cleanFragment(fragment)
+            val maxWords = when (category) {
+                "TECHNICAL_REFERENCE", "CREATIVE_WRITING", "SELF_IMPROVEMENT" -> 10
+                "SHOPPING_LIST", "GENERAL_CHECKLIST" -> 7
+                else -> 12
+            }
+            return cleaned.limitWords(maxWords)
+        }
+
+        private fun conciseFallback(body: String): String {
+            val firstUseful = splitIntoFragments(body)
+                .map { cleanFragment(it) }
+                .firstOrNull { it.wordCount() >= 2 }
+                ?: body.trim()
+            return firstUseful.limitWords(16)
         }
 
         private fun joinFragments(fragments: List<String>): String =
@@ -430,8 +449,8 @@ internal class FastNoteSummarizer(
         private const val TFLITE_HIGH_CONFIDENCE = 0.78f
         private const val TFLITE_MEDIUM_CONFIDENCE = 0.58f
         private const val HEURISTIC_STRONG_CONFIDENCE = 3.0f
-        private const val MAX_FAST_SUMMARY_CHARS = 180
-        private const val LONG_CLAUSE_SPLIT_LENGTH = 120
+        private const val MAX_FAST_SUMMARY_CHARS = 140
+        private const val LONG_CLAUSE_SPLIT_LENGTH = 72
 
         private val ATTACHMENT_TAG_REGEX = Regex("\\[\\[(?:image|file):\\d+]]")
         private val BULLET_LINE_REGEX = Regex("^\\s*(?:[-*+]|\\d+[.)]|\\[[ xX]])\\s+")
@@ -440,6 +459,10 @@ internal class FastNoteSummarizer(
         private val PROPER_NOUN_REGEX = Regex("\\b[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*\\b")
         private val LEADING_FILLER_REGEX = Regex(
             "^(?:need to|remember to|todo:?|to-do:?|buy|pick up|get|please|note:?|reminder to)\\s+",
+            RegexOption.IGNORE_CASE,
+        )
+        private val GENERIC_TITLE_SUFFIX_REGEX = Regex(
+            "\\s+\\b(?:recap|summary|note|notes)\\b\\s*$",
             RegexOption.IGNORE_CASE,
         )
         private val TRAILING_PUNCTUATION_REGEX = Regex("[\\s,.;:!-]+$")
@@ -458,6 +481,7 @@ internal class FastNoteSummarizer(
         private fun cleanTitle(title: String?): String =
             title.orEmpty()
                 .removePrefixIgnoringCase("Title:")
+                .replace(GENERIC_TITLE_SUFFIX_REGEX, "")
                 .replace(TRAILING_PUNCTUATION_REGEX, "")
                 .trim()
 
@@ -466,6 +490,12 @@ internal class FastNoteSummarizer(
                 .replace(Regex("\\s+"), " ")
                 .replace(TRAILING_PUNCTUATION_REGEX, "")
                 .trim()
+
+        private fun String.limitWords(maxWords: Int): String {
+            val words = trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+            if (words.size <= maxWords) return trim()
+            return words.take(maxWords).joinToString(" ")
+        }
 
         private fun punctuate(text: String): String {
             val cleaned = text.replace(TRAILING_PUNCTUATION_REGEX, "").trim()

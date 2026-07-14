@@ -22,6 +22,11 @@ try:
 except ImportError:  # pragma: no cover - optional dependency for inference smoke test
     TFLiteRuntimeInterpreter = None
 
+try:
+    from ai_edge_litert.interpreter import Interpreter as LiteRtInterpreter
+except ImportError:  # pragma: no cover - optional dependency for inference smoke test
+    LiteRtInterpreter = None
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 VENDOR_DIR = SCRIPT_DIR / "_vendor"
 if VENDOR_DIR.exists():
@@ -293,9 +298,11 @@ def _create_interpreter(model_path: Path):
         return tf.lite.Interpreter(model_path=str(model_path))
     if TFLiteRuntimeInterpreter is not None:
         return TFLiteRuntimeInterpreter(model_path=str(model_path))
+    if LiteRtInterpreter is not None:
+        return LiteRtInterpreter(model_path=str(model_path))
     raise RuntimeError(
-        "TensorFlow Lite runtime not available; install tensorflow or tflite-runtime to "
-        "enable the inference smoke test."
+        "TensorFlow Lite runtime not available; install tensorflow, tflite-runtime, "
+        "or ai-edge-litert to enable the inference smoke test."
     )
 
 
@@ -304,10 +311,10 @@ def _run_inference_smoke_test(model_path: Path, tokenizer_tokens: list[str] | No
         print("NumPy not available; skipping inference smoke test.")
         return
 
-    if tf is None and TFLiteRuntimeInterpreter is None:
+    if tf is None and TFLiteRuntimeInterpreter is None and LiteRtInterpreter is None:
         print(
             "TensorFlow Lite runtime not available; skipping inference smoke test. "
-            "Install tensorflow or tflite-runtime to enable this check."
+            "Install tensorflow, tflite-runtime, or ai-edge-litert to enable this check."
         )
         return
 
@@ -412,9 +419,21 @@ def _run_inference_smoke_test(model_path: Path, tokenizer_tokens: list[str] | No
         summary = _build_sample_summary(SAMPLE_NOTE_TEXT, predicted_category)
         print(f"Example enhanced summary: {summary}")
     except Exception as exc:  # pragma: no cover - diagnostic output for build failures
+        if _is_missing_select_tf_ops_delegate(exc):
+            print(
+                "Inference smoke test requires TensorFlow Lite Select TF Ops. "
+                "The local Python runtime does not provide the Flex delegate; "
+                "verify on Android with org.tensorflow:tensorflow-lite-select-tf-ops packaged."
+            )
+            return
         raise SystemExit(
             f"TensorFlow Lite inference smoke test failed: {exc}"
         ) from exc
+
+
+def _is_missing_select_tf_ops_delegate(exc: Exception) -> bool:
+    message = str(exc)
+    return "Select TensorFlow op" in message or "Flex" in message
 
 
 def main() -> None:
