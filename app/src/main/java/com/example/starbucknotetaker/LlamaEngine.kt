@@ -208,8 +208,9 @@ class LlamaEngine(private val context: Context) {
                         mode,
                         primaryText,
                         questionMessage =
-                            "The on-device assistant hit the ${e.timeoutSeconds}-second limit. " +
-                            "Try a shorter question or less note context.",
+                            "The on-device assistant did not produce output within " +
+                            "${e.timeoutSeconds} seconds. The request has been kept so you can " +
+                            "retry after the model finishes warming up.",
                     )
                 }
                 val diagInfo = modelManager.debugModelDirInfo()
@@ -489,7 +490,7 @@ class LlamaEngine(private val context: Context) {
     private fun partialResultForTimeout(mode: Mode, partial: String, timeoutSeconds: Long): String =
         when (mode) {
             Mode.QUESTION ->
-                partial.trimEnd() + "\n\n(Stopped at the ${timeoutSeconds}-second on-device limit.)"
+                partial.trimEnd() + "\n\n(Stopped after ${timeoutSeconds} seconds; partial answer saved.)"
             Mode.REWRITE,
             Mode.SUMMARISE -> partial
         }
@@ -514,7 +515,7 @@ class LlamaEngine(private val context: Context) {
         internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_800
         private const val MAX_QUESTION_CHARS   = 500
         private const val TIMEOUT_SUMMARISE_SECONDS = 3L
-        private const val TIMEOUT_INTERACTIVE_SECONDS = 30L
+        private const val TIMEOUT_INTERACTIVE_SECONDS = 90L
         private const val THERMAL_HEADROOM_THROTTLE_THRESHOLD = 0.15f
     }
 }

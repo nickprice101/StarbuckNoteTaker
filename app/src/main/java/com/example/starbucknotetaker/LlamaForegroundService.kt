@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -39,7 +40,7 @@ class LlamaForegroundService : Service() {
     private val activeJobLock = Any()
     private val inferenceJobs = mutableMapOf<Int, Job>()
     private var phraseJob: Job? = null
-    private var thermalProgressJob: Job? = null
+    private var progressJob: Job? = null
     private lateinit var notificationManager: NotificationManager
     private lateinit var engine: LlamaEngine
     private var currentPhraseIndex = 0
@@ -92,7 +93,7 @@ class LlamaForegroundService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         ensurePhraseCycler()
-        ensureThermalProgressCollector()
+        ensureProgressCollector()
 
         val job = serviceScope.launch(start = CoroutineStart.LAZY) {
             try {
@@ -184,12 +185,42 @@ class LlamaForegroundService : Service() {
         }
     }
 
-    private fun ensureThermalProgressCollector() {
-        if (thermalProgressJob?.isActive == true) return
-        thermalProgressJob = serviceScope.launch {
+    private fun ensureProgressCollector() {
+        if (progressJob?.isActive == true) return
+        progressJob = serviceScope.launch {
+            val lastBroadcastAt = mutableMapOf<String, Long>()
+            val lastBroadcastText = mutableMapOf<String, String>()
             engine.progress.collect { progress ->
-                if (progress is LlamaEngine.InferenceProgress.Throttled) {
-                    updateNotification(THROTTLE_MESSAGE)
+                when (progress) {
+                    is LlamaEngine.InferenceProgress.Thinking -> {
+                        val now = SystemClock.elapsedRealtime()
+                        val lastAt = lastBroadcastAt[progress.taskId] ?: 0L
+                        val lastText = lastBroadcastText[progress.taskId].orEmpty()
+                        val shouldBroadcast = lastText.isBlank() ||
+                            now - lastAt >= PROGRESS_BROADCAST_MS ||
+                            progress.partialText.length - lastText.length >= PROGRESS_MIN_CHAR_DELTA
+                        if (shouldBroadcast) {
+                            lastBroadcastAt[progress.taskId] = now
+                            lastBroadcastText[progress.taskId] = progress.partialText
+                            broadcastProgress(
+                                requestId = progress.taskId,
+                                partialText = progress.partialText,
+                                status = "Generating answer",
+                            )
+                        }
+                    }
+                    is LlamaEngine.InferenceProgress.Throttled -> {
+                        updateNotification(THROTTLE_MESSAGE)
+                    }
+                    is LlamaEngine.InferenceProgress.Error -> {
+                        broadcastProgress(
+                            requestId = progress.taskId,
+                            partialText = "",
+                            status = progress.message,
+                        )
+                    }
+                    is LlamaEngine.InferenceProgress.Done,
+                    LlamaEngine.InferenceProgress.Idle -> Unit
                 }
             }
         }
@@ -198,8 +229,8 @@ class LlamaForegroundService : Service() {
     private fun stopProgressUpdates() {
         phraseJob?.cancel()
         phraseJob = null
-        thermalProgressJob?.cancel()
-        thermalProgressJob = null
+        progressJob?.cancel()
+        progressJob = null
     }
 
     // ------------------------------------------------------------------
@@ -224,6 +255,20 @@ class LlamaForegroundService : Service() {
         Log.d(TAG, "Result broadcast for requestId=$requestId mode=$mode error=$isError")
     }
 
+    private fun broadcastProgress(
+        requestId: String,
+        partialText: String,
+        status: String,
+    ) {
+        val broadcastIntent = Intent(ACTION_PROGRESS).apply {
+            putExtra(EXTRA_REQUEST_ID, requestId)
+            putExtra(EXTRA_MODE, LlamaEngine.Mode.QUESTION.name)
+            putExtra(EXTRA_PROGRESS_TEXT, partialText)
+            putExtra(EXTRA_PROGRESS_STATUS, status)
+        }
+        LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(broadcastIntent)
+    }
+
     companion object {
         private const val TAG = "LlamaForegroundService"
         private const val CHANNEL_ID = "llama_inference"
@@ -239,11 +284,16 @@ class LlamaForegroundService : Service() {
         const val EXTRA_REQUEST_ID   = "llama_request_id"
         const val EXTRA_RESULT       = "llama_result"
         const val EXTRA_IS_ERROR     = "llama_is_error"
+        const val EXTRA_PROGRESS_TEXT = "llama_progress_text"
+        const val EXTRA_PROGRESS_STATUS = "llama_progress_status"
 
         /** Broadcast action sent when inference is complete. */
         const val ACTION_RESULT = "com.example.starbucknotetaker.LLAMA_RESULT"
+        const val ACTION_PROGRESS = "com.example.starbucknotetaker.LLAMA_PROGRESS"
 
         private const val PHRASE_CYCLE_MS = 2_500L
+        private const val PROGRESS_BROADCAST_MS = 750L
+        private const val PROGRESS_MIN_CHAR_DELTA = 24
 
         private const val THROTTLE_MESSAGE = "Taking a breather 🌡️ — cooling down…"
 
