@@ -26,6 +26,7 @@ public class JSONFFIEngine {
     private final Function unloadFunc;
     private final Function resetFunc;
     private final Function chatCompletionFunc;
+    private final Function abortFunc;
     private final Function runBackgroundLoopFunc;
     private final Function runBackgroundStreamBackLoopFunc;
     private final Function exitBackgroundLoopFunc;
@@ -45,6 +46,7 @@ public class JSONFFIEngine {
         this.unloadFunc                      = engine.getFunction("unload");
         this.resetFunc                       = engine.getFunction("reset");
         this.chatCompletionFunc              = engine.getFunction("chat_completion");
+        this.abortFunc                       = engine.getFunction("abort");
         this.runBackgroundLoopFunc           = engine.getFunction("run_background_loop");
         this.runBackgroundStreamBackLoopFunc = engine.getFunction("run_background_stream_back_loop");
         this.exitBackgroundLoopFunc          = engine.getFunction("exit_background_loop");
@@ -101,6 +103,11 @@ public class JSONFFIEngine {
      */
     public void chatCompletion(String requestJson, String requestId) {
         chatCompletionFunc.pushArg(requestJson).pushArg(requestId).invoke();
+    }
+
+    /** Aborts an in-flight chat-completion request. */
+    public void abort(String requestId) {
+        abortFunc.pushArg(requestId).invoke();
     }
 
     /** Blocks until the background inference loop exits (call after {@link #exitBackgroundLoop()}). */

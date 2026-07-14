@@ -66,7 +66,11 @@ public class Module extends TVMObject {
 
     /** Loads a module from a file with an explicit format string. */
     public static Module load(String path, String format) {
-        return getApi("ffi.ModuleLoadFromFile").pushArg(path).pushArg(format).invoke().asModule();
+        Function loadFromFile = getApi("ffi.ModuleLoadFromFile").pushArg(path);
+        if (format != null && !format.isEmpty()) {
+            loadFromFile.pushArg(format);
+        }
+        return loadFromFile.invoke().asModule();
     }
 
     public static boolean enabled(String target) {

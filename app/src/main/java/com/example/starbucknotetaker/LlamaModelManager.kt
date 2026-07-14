@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -80,6 +79,8 @@ class LlamaModelManager(private val context: Context) {
 
     fun getRuntimeMlcDeviceType(): String? = runtimeProfile?.mlcDeviceType
 
+    fun getRuntimeMlcEngineMode(): String? = runtimeProfile?.mlcEngineMode
+
     private val modelDir: File
         get() = modelDirFor(runtimeProfile)
 
@@ -88,12 +89,12 @@ class LlamaModelManager(private val context: Context) {
     }
 
     /**
-     * Returns the path to the model weights directory if all required files are present,
-     * including at least one weight-shard `.bin` file.
+     * Returns the path to the model weights directory if all required files and
+     * every weight shard listed by `ndarray-cache.json` are present.
      *
-     * Checking only the metadata JSON files is insufficient: a partial download that fetched
-     * the config/tokenizer files but not the weight shards would pass a JSON-only check and
-     * cause the Settings UI to falsely show "Model ready" while inference would still fail.
+     * Checking only the metadata JSON files, or even the presence of a single shard, is
+     * insufficient: a partial download would otherwise pass this guard and fail later inside
+     * MLC when it tries to open a missing `params_shard_*.bin`.
      */
     fun getModelPath(): String? {
         val profile = runtimeProfile ?: return null
@@ -104,8 +105,13 @@ class LlamaModelManager(private val context: Context) {
         val dir = modelDirFor(profile)
         val metaPresent = REQUIRED_FILES.all { name -> File(dir, name).exists() }
         if (!metaPresent) return null
-        val hasWeightShard = dir.listFiles()?.any { it.isFile && it.name.endsWith(".bin") } == true
-        return if (hasWeightShard) dir.absolutePath else null
+        val shards = requiredWeightShards(dir) ?: return null
+        if (shards.isEmpty()) return null
+        val allShardsPresent = shards.all { (dataPath, expectedBytes) ->
+            val shard = File(dir, dataPath)
+            shard.isFile && (expectedBytes <= 0L || shard.length() == expectedBytes)
+        }
+        return if (allShardsPresent) dir.absolutePath else null
     }
 
     /** `true` when the model is fully downloaded and ready to load. */
@@ -177,22 +183,22 @@ class LlamaModelManager(private val context: Context) {
 
                     val targetFile = File(dest, fileName)
                     targetFile.parentFile?.mkdirs()
-                    if (targetFile.exists() && targetFile.length() == expectedSize) {
-                        downloadedBytes += expectedSize
+                    if (targetFile.exists() && (expectedSize <= 0L || targetFile.length() == expectedSize)) {
+                        downloadedBytes += if (expectedSize > 0L) expectedSize else targetFile.length()
                         Log.d(TAG, "Skipping already-downloaded $fileName")
                         continue
                     }
 
                     val url = profile.fileUrl(fileName)
-                    val ok = downloadFile(client, url, targetFile) { chunkBytes ->
-                        downloadedBytes += chunkBytes
+                    val ok = downloadFile(client, url, targetFile) { fileBytes ->
+                        val cumulativeBytes = downloadedBytes + fileBytes
                         val pct = if (totalBytes > 0) {
-                            (downloadedBytes * 100L / totalBytes).toInt()
+                            (cumulativeBytes * 100L / totalBytes).toInt()
                         } else 0
                         _modelStatus.value = ModelStatus.Downloading(
                             pct,
                             label,
-                            downloadedBytes,
+                            cumulativeBytes,
                             totalBytes,
                             profile.abi,
                         )
@@ -202,10 +208,18 @@ class LlamaModelManager(private val context: Context) {
                         _modelStatus.value = ModelStatus.Error("Failed to download $fileName")
                         return@withContext false
                     }
+                    downloadedBytes += if (expectedSize > 0L) expectedSize else targetFile.length()
+                }
+
+                val verifiedPath = getModelPath(profile)
+                if (verifiedPath == null) {
+                    _modelStatus.value = ModelStatus.Error("Downloaded model is incomplete")
+                    Log.e(TAG, "Downloaded model is incomplete after fetching all listed files")
+                    return@withContext false
                 }
 
                 val sizeBytes = dest.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                _modelStatus.value = ModelStatus.Present(dest.absolutePath, sizeBytes, profile.abi)
+                _modelStatus.value = ModelStatus.Present(verifiedPath, sizeBytes, profile.abi)
                 Log.i(TAG, "Model download complete → ${dest.absolutePath} (${sizeBytes / (1024 * 1024)} MB)")
                 true
 
@@ -335,6 +349,26 @@ class LlamaModelManager(private val context: Context) {
         return hasLib0 && (abi == ABI_X86_64 || hasModelObject)
     }
 
+    private fun requiredWeightShards(dir: File): List<Pair<String, Long>>? {
+        val manifest = File(dir, "ndarray-cache.json")
+        if (!manifest.isFile) return null
+        return try {
+            val records = JSONObject(manifest.readText()).optJSONArray("records") ?: return emptyList()
+            buildList {
+                for (i in 0 until records.length()) {
+                    val record = records.optJSONObject(i) ?: continue
+                    val dataPath = record.optString("dataPath").trim()
+                    if (dataPath.isNotEmpty()) {
+                        add(dataPath to record.optLong("nbytes", -1L))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not parse weight-shard manifest at ${manifest.absolutePath}", e)
+            null
+        }
+    }
+
     private fun unsupportedStatus(): ModelStatus.Unsupported {
         val abi = runtimeAbi
         return ModelStatus.Unsupported(
@@ -401,34 +435,63 @@ class LlamaModelManager(private val context: Context) {
         client: OkHttpClient,
         url: String,
         dest: File,
-        onChunk: (Long) -> Unit,
+        onFileBytes: (Long) -> Unit,
     ): Boolean {
         val tmp = File(dest.parent, "${dest.name}.tmp")
-        return try {
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "HTTP ${response.code} for $url")
-                    return false
-                }
-                val body = response.body ?: return false
-                FileOutputStream(tmp).use { out ->
-                    body.byteStream().use { inp ->
-                        val buf = ByteArray(BUFFER_SIZE)
-                        var read: Int
-                        while (inp.read(buf).also { read = it } != -1) {
-                            out.write(buf, 0, read)
-                            onChunk(read.toLong())
+        repeat(MAX_DOWNLOAD_ATTEMPTS) { attemptIndex ->
+            val attempt = attemptIndex + 1
+            var fileBytes = 0L
+            try {
+                tmp.delete()
+                val request = Request.Builder().url(url).build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val retry = shouldRetryDownload(response.code) && attempt < MAX_DOWNLOAD_ATTEMPTS
+                        val level = if (retry) Log.WARN else Log.ERROR
+                        Log.println(level, TAG, "HTTP ${response.code} for $url (attempt $attempt/$MAX_DOWNLOAD_ATTEMPTS)")
+                        if (retry) sleepBeforeRetry(attempt)
+                        return@repeat
+                    }
+                    val body = response.body ?: return false
+                    FileOutputStream(tmp).use { out ->
+                        body.byteStream().use { inp ->
+                            val buf = ByteArray(BUFFER_SIZE)
+                            var read: Int
+                            while (inp.read(buf).also { read = it } != -1) {
+                                out.write(buf, 0, read)
+                                fileBytes += read.toLong()
+                                onFileBytes(fileBytes)
+                            }
                         }
                     }
                 }
+                if (tmp.renameTo(dest)) {
+                    return true
+                }
+                Log.w(TAG, "Could not rename ${tmp.absolutePath} to ${dest.absolutePath}")
+            } catch (e: Exception) {
+                val retry = attempt < MAX_DOWNLOAD_ATTEMPTS
+                val level = if (retry) Log.WARN else Log.ERROR
+                Log.println(level, TAG, "Download failed for $url (attempt $attempt/$MAX_DOWNLOAD_ATTEMPTS): ${e.message}")
+                if (retry) sleepBeforeRetry(attempt)
             }
-            tmp.renameTo(dest)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Download failed for $url", e)
             tmp.delete()
-            false
+        }
+        return false
+    }
+
+    private fun shouldRetryDownload(statusCode: Int): Boolean =
+        statusCode == 408 || statusCode == 429 || statusCode in 500..599
+
+    private fun sleepBeforeRetry(attempt: Int) {
+        try {
+            val delayMs = minOf(
+                DOWNLOAD_RETRY_MAX_DELAY_MS,
+                DOWNLOAD_RETRY_BASE_DELAY_MS * attempt,
+            )
+            Thread.sleep(delayMs)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 
@@ -439,6 +502,7 @@ class LlamaModelManager(private val context: Context) {
         val tarAssetName: String,
         val modelLibExtractSubdir: String,
         val mlcDeviceType: String,
+        val mlcEngineMode: String,
     ) {
         fun fileUrl(fileName: String): String =
             "https://huggingface.co/$hfRepoId/resolve/main/$fileName"
@@ -525,6 +589,9 @@ class LlamaModelManager(private val context: Context) {
 
         private const val ABI_ARM64_V8A = "arm64-v8a"
         private const val ABI_X86_64 = "x86_64"
+        private const val MAX_DOWNLOAD_ATTEMPTS = 12
+        private const val DOWNLOAD_RETRY_BASE_DELAY_MS = 1_000L
+        private const val DOWNLOAD_RETRY_MAX_DELAY_MS = 10_000L
         val SUPPORTED_MODEL_ABIS: List<String> = listOf(ABI_ARM64_V8A, ABI_X86_64)
 
         private val MODEL_PROFILES: Map<String, RuntimeModelProfile> = mapOf(
@@ -535,6 +602,7 @@ class LlamaModelManager(private val context: Context) {
                 tarAssetName = TAR_ASSET_NAME,
                 modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR,
                 mlcDeviceType = "opencl",
+                mlcEngineMode = "interactive",
             ),
             ABI_X86_64 to RuntimeModelProfile(
                 abi = ABI_X86_64,
@@ -543,6 +611,7 @@ class LlamaModelManager(private val context: Context) {
                 tarAssetName = TAR_ASSET_NAME_X86_64,
                 modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR_X86_64,
                 mlcDeviceType = "cpu",
+                mlcEngineMode = "local",
             )
         )
 

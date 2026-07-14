@@ -556,6 +556,37 @@ tasks.register('buildModelLibSo') {
             def outputSo = new File(outputDir, llamaModelSoName)
             outputDir.mkdirs()
 
+            def aliasObject = null
+            if (abi == 'x86_64') {
+                def actualBlobSymbol = 'llama_q4f16_0__tvm_ffi__library_bin'
+                def mlcExpectedBlobSymbol = 'llama_q4f16_0___tvm_ffi__library_bin'
+                def hasActualBlobSymbol = objectFiles.any { nativeLibraryContainsAscii(it, actualBlobSymbol) }
+                def hasMlcExpectedBlobSymbol = objectFiles.any { nativeLibraryContainsAscii(it, mlcExpectedBlobSymbol) }
+                if (hasActualBlobSymbol && !hasMlcExpectedBlobSymbol) {
+                    def aliasSrc = new File(tmpDir, 'mlc_system_lib_alias.c')
+                    aliasSrc.text = """
+extern const unsigned char ${actualBlobSymbol}[];
+extern int TVMFFIEnvModRegisterSystemLibSymbol(const char* name, void* symbol);
+
+__attribute__((constructor))
+static void register_mlc_system_lib_alias(void) {
+    (void)TVMFFIEnvModRegisterSystemLibSymbol(
+        \"${mlcExpectedBlobSymbol}\",
+        (void*)${actualBlobSymbol});
+}
+"""
+                    aliasObject = new File(tmpDir, 'mlc_system_lib_alias.o')
+                    exec {
+                        commandLine clang.absolutePath,
+                            '-target', profile.target,
+                            '-fPIC', '-O2',
+                            '-c', aliasSrc.absolutePath,
+                            '-o', aliasObject.absolutePath
+                    }
+                    logger.lifecycle("buildModelLibSo: ${abi} adds ${mlcExpectedBlobSymbol} alias for MLC system-lib lookup")
+                }
+            }
+
             def linkCommand = [
                 clang.absolutePath,
                 '-target', profile.target,
@@ -567,6 +598,9 @@ tasks.register('buildModelLibSo') {
                 lib0.absolutePath,
             ]
             linkCommand.addAll(modelObjects.collect { it.absolutePath })
+            if (aliasObject != null) {
+                linkCommand.add(aliasObject.absolutePath)
+            }
             linkCommand.addAll([
                 "-L${tvmSoDir.absolutePath}",
                 '-ltvm4j_runtime_packed',

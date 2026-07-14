@@ -91,7 +91,8 @@ def nativeLibraryContainsAscii = { File library, String needle ->
 
 def runtimeSupportsTvmFfiSystemLib = { File runtime ->
     nativeLibraryContainsAscii(runtime, 'ffi.SystemLib') &&
-            nativeLibraryContainsAscii(runtime, 'TVMFFIEnvModRegisterSystemLibSymbol')
+            nativeLibraryContainsAscii(runtime, 'TVMFFIEnvModRegisterSystemLibSymbol') &&
+            nativeLibraryContainsAscii(runtime, 'starbuck_runtime_compat_prefixed_logit_processor_lookup')
 }
 
 tasks.register('downloadArm64TvmRuntime') {
@@ -117,7 +118,8 @@ tasks.register('downloadArm64TvmRuntime') {
     doLast {
         throw new GradleException(
             "Missing or incompatible ${tvmRuntimeDownloadSoName} at ${tvmRuntimeDownloadLocalPath}. " +
-            "The runtime must expose ffi.SystemLib and TVMFFIEnvModRegisterSystemLibSymbol. " +
+            "The runtime must expose ffi.SystemLib, TVMFFIEnvModRegisterSystemLibSymbol, " +
+            "and prefixed logit-processor lookup compatibility. " +
             "Run `TARGET_ABI=arm64-v8a bash scripts/fetch_mlc_native.sh` to build the TVM FFI-capable " +
             "runtime from MLC source commit ${tvmRuntimeSourceCommitValue}."
         )
@@ -138,9 +140,14 @@ tasks.register('downloadTvmRuntime') {
         def missing = tvmRuntimeRequiredAbis.findAll { abi ->
             !file("src/main/jniLibs/${abi}/${tvmRuntimeSoName}").exists()
         }
-        if (!missing.isEmpty()) {
+        def incompatible = tvmRuntimeRequiredAbis.findAll { abi ->
+            def runtime = file("src/main/jniLibs/${abi}/${tvmRuntimeSoName}")
+            runtime.exists() && !runtimeSupportsTvmFfiSystemLib(runtime)
+        }
+        if (!missing.isEmpty() || !incompatible.isEmpty()) {
             throw new GradleException(
-                "Missing ${tvmRuntimeSoName} for ABI(s): ${missing.join(', ')}. " +
+                "Missing ${tvmRuntimeSoName} for ABI(s): ${missing.join(', ')}; " +
+                "incompatible for ABI(s): ${incompatible.join(', ')}. " +
                 "Run TARGET_ABI=<abi> scripts/fetch_mlc_native.sh to generate a TVM FFI-capable runtime."
             )
         }

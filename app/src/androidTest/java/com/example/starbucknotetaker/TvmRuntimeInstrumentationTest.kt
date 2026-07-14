@@ -34,6 +34,20 @@ class TvmRuntimeInstrumentationTest {
         assertNotNull(engineModule.getFunction("reload"))
     }
 
+    @Test
+    fun compiledMlcModelLibrary_loadsAsSystemLibAndExposesVmLoader() {
+        val modelLibrary = assertCompiledModelLibraryPackaged()
+        Base.ensureInitialized()
+
+        System.load(modelLibrary.absolutePath)
+        val systemLibPrefixUsedByMlc = "${LlamaModelManager.MODEL_LIB_SYSTEM_NAME}_"
+        val systemLib = Function.getFunction("ffi.SystemLib")
+            .call(systemLibPrefixUsedByMlc)
+            .asModule()
+
+        assertNotNull(systemLib.getFunction("vm_load_executable", true))
+    }
+
     private fun assertTvmRuntimePackaged() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val runtime = File(context.applicationInfo.nativeLibraryDir, "libtvm4j_runtime_packed.so")
@@ -42,5 +56,20 @@ class TvmRuntimeInstrumentationTest {
                 "The debug APK must include libtvm4j_runtime_packed.so for the installed ABI.",
             runtime.isFile,
         )
+    }
+
+    private fun assertCompiledModelLibraryPackaged(): File {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val modelLibrary = File(
+            context.applicationInfo.nativeLibraryDir,
+            LlamaModelManager.MODEL_SO_FILENAME,
+        )
+        assertTrue(
+            "Missing packaged MLC model library at ${modelLibrary.absolutePath}. " +
+                "The debug APK must include ${LlamaModelManager.MODEL_SO_FILENAME} " +
+                "for the installed ABI.",
+            modelLibrary.isFile,
+        )
+        return modelLibrary
     }
 }
