@@ -1,11 +1,19 @@
 package com.example.starbucknotetaker
 
+import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class SummarizerFallbackTest {
+    private val appContext: android.app.Application
+        get() = ApplicationProvider.getApplicationContext()
+
     @Test
     fun lightweightPreviewUsesFirstSentences() {
         val text = "Morning briefing. Follow-up on vendor contracts. Schedule retro."
@@ -82,5 +90,50 @@ class SummarizerFallbackTest {
         assertEquals(2, tokenIds[0])
         assertEquals(1, tokenIds[1])
         assertEquals(3, tokenIds[2])
+    }
+
+    @Test
+    fun fastSummaryForMeetingRecapKeepsSpecificActions() = runTest {
+        val summarizer = Summarizer(appContext)
+
+        val summary = summarizer.summarize(
+            "Title: Shift meeting recap\n\n" +
+                "Aligned on mobile order staging flow, assigned Riley to monitor warming oven temps, " +
+                "noted need to reorder grande lids."
+        )
+
+        assertTrue(summary.contains("mobile order", ignoreCase = true))
+        assertTrue(summary.contains("Riley", ignoreCase = true))
+        assertTrue(summary.contains("grande lids", ignoreCase = true))
+        assertFalse(summary.contains("documenting", ignoreCase = true))
+    }
+
+    @Test
+    fun fastSummaryForShoppingListKeepsConcreteItems() = runTest {
+        val summarizer = Summarizer(appContext)
+
+        val summary = summarizer.summarize(
+            "Weekly grocery run: oat milk 3 cartons, almond butter 2 jars, " +
+                "spinach, blueberries, cold brew filters, biodegradable soap refill."
+        )
+
+        assertTrue(summary.contains("oat milk", ignoreCase = true))
+        assertTrue(summary.contains("almond butter", ignoreCase = true))
+        assertTrue(summary.contains("cold brew filters", ignoreCase = true))
+        assertFalse(summary.contains("Shopping list with", ignoreCase = true))
+    }
+
+    @Test
+    fun fastSummaryForReminderKeepsRequestedDetails() = runTest {
+        val summarizer = Summarizer(appContext)
+
+        val summary = summarizer.summarize(
+            "Call dentist tomorrow: schedule six-month cleaning appointment, " +
+                "mention tooth sensitivity on lower left side, request lunch hour slot."
+        )
+
+        assertTrue(summary.contains("cleaning", ignoreCase = true))
+        assertTrue(summary.contains("tooth sensitivity", ignoreCase = true))
+        assertTrue(summary.contains("lunch hour", ignoreCase = true))
     }
 }

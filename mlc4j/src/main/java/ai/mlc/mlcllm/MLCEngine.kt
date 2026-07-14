@@ -162,6 +162,7 @@ class MLCEngine(deviceType: String = "opencl") {
          */
         fun create(
             request: OpenAIProtocol.ChatCompletionRequest,
+            timeoutSeconds: Long = DEFAULT_COMPLETION_TIMEOUT_SECS,
             callback: (OpenAIProtocol.ChatCompletionStreamResponse) -> Unit,
         ) {
             val requestId = UUID.randomUUID().toString()
@@ -174,14 +175,15 @@ class MLCEngine(deviceType: String = "opencl") {
             try {
                 jsonFFIEngine.chatCompletion(requestJson, requestId)
 
-                val finished = latch.await(COMPLETION_TIMEOUT_SECS, TimeUnit.SECONDS)
+                val boundedTimeout = timeoutSeconds.coerceAtLeast(1L)
+                val finished = latch.await(boundedTimeout, TimeUnit.SECONDS)
                 throwIfBackgroundFailed()
                 if (!finished) {
                     Log.w(TAG, "Completion timed out; aborting requestId=$requestId")
                     runCatching { jsonFFIEngine.abort(requestId) }
                         .onFailure { Log.w(TAG, "Failed to abort timed-out requestId=$requestId", it) }
                     throw TimeoutException(
-                        "MLC completion timed out after $COMPLETION_TIMEOUT_SECS seconds"
+                        "MLC completion timed out after $boundedTimeout seconds"
                     )
                 }
             } finally {
@@ -254,6 +256,13 @@ class MLCEngine(deviceType: String = "opencl") {
         obj.put("stream", request.stream)
         request.model?.let { obj.put("model", it) }
         request.maxTokens?.let { obj.put("max_tokens", it) }
+        request.temperature?.let { obj.put("temperature", it.toDouble()) }
+        request.topP?.let { obj.put("top_p", it.toDouble()) }
+        if (request.stop.isNotEmpty()) {
+            val stopArr = JSONArray()
+            request.stop.forEach { stopArr.put(it) }
+            obj.put("stop", stopArr)
+        }
         return obj.toString()
     }
 
@@ -283,7 +292,7 @@ class MLCEngine(deviceType: String = "opencl") {
     )
 
     companion object {
-        private const val COMPLETION_TIMEOUT_SECS = 600L
+        private const val DEFAULT_COMPLETION_TIMEOUT_SECS = 30L
         private const val NATIVE_TEARDOWN_TIMEOUT_MS = 5_000L
     }
 }

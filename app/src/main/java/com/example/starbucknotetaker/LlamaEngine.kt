@@ -5,6 +5,7 @@ import ai.mlc.mlcllm.OpenAIProtocol
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import android.system.Os
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -15,6 +16,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.tvm.Base
+import java.util.concurrent.TimeoutException
 
 /**
  * On-device LLM inference engine backed by MLC LLM ([MLCEngine]) running
@@ -136,6 +138,21 @@ class LlamaEngine(private val context: Context) {
         maxTokensOverride: Int? = null,
     ): String = infer(Mode.QUESTION, question, context, taskId, maxTokensOverride)
 
+    /**
+     * Loads the native engine and model weights without generating text.
+     * Returns false when the current device/build/model state requires fallback.
+     */
+    suspend fun warmUp(): Boolean = withContext(Dispatchers.Default) {
+        inferenceMutex.withLock {
+            if (!DeviceCapabilityChecker.isAiCapable(context)) return@withLock false
+            val currentStatus = modelManager.modelStatus.value
+            if (currentStatus is LlamaModelManager.ModelStatus.Unsupported) return@withLock false
+            val modelPath = modelManager.getModelPath() ?: return@withLock false
+            ensureEngineLoaded(modelPath)
+            true
+        }
+    }
+
     /** Unloads the model from memory and releases engine resources. */
     fun close() {
         if (engineLoaded) {
@@ -185,6 +202,16 @@ class LlamaEngine(private val context: Context) {
                 generateWithMlc(mode, primaryText, secondaryText, taskId, maxTokensOverride)
             }.getOrElse { e ->
                 if (e is CancellationException) throw e
+                if (e is InferenceTimeoutException) {
+                    _progress.value = InferenceProgress.Error(taskId, e.message ?: "inference timeout")
+                    return@withLock fallback(
+                        mode,
+                        primaryText,
+                        questionMessage =
+                            "The on-device assistant hit the ${e.timeoutSeconds}-second limit. " +
+                            "Try a shorter question or less note context.",
+                    )
+                }
                 val diagInfo = modelManager.debugModelDirInfo()
                 Log.e(TAG, "MLC inference failed for mode=$mode taskId=$taskId " +
                     "[${e::class.simpleName}]: ${e.message}\n$diagInfo", e)
@@ -310,19 +337,43 @@ class LlamaEngine(private val context: Context) {
             model = LlamaModelManager.MODEL_DISPLAY_NAME,
             stream = true,
             maxTokens = maxTokens,
+            temperature = when (mode) {
+                Mode.SUMMARISE -> 0.1f
+                Mode.REWRITE -> 0.2f
+                Mode.QUESTION -> 0.2f
+            },
+            topP = 0.9f,
         )
 
         val sb = StringBuilder()
+        val timeoutSeconds = timeoutSecondsFor(mode)
+        val startedAt = SystemClock.elapsedRealtime()
         _progress.value = InferenceProgress.Thinking("", taskId)
 
-        mlcEngine.chat.completions.create(request) { response ->
-            response.choices.firstOrNull()?.delta?.content?.let { token ->
-                sb.append(token)
-                _progress.value = InferenceProgress.Thinking(sb.toString(), taskId)
+        try {
+            mlcEngine.chat.completions.create(request, timeoutSeconds = timeoutSeconds) { response ->
+                response.choices.firstOrNull()?.delta?.content?.let { token ->
+                    sb.append(token)
+                    _progress.value = InferenceProgress.Thinking(sb.toString(), taskId)
+                }
             }
+        } catch (e: TimeoutException) {
+            val partial = sb.toString().trim()
+            if (partial.isNotBlank()) {
+                val result = partialResultForTimeout(mode, partial, timeoutSeconds)
+                _progress.value = InferenceProgress.Done(taskId, result)
+                return result
+            }
+            throw InferenceTimeoutException(mode, timeoutSeconds, e)
         }
 
         val result = sb.toString().trim()
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+        Log.i(
+            TAG,
+            "MLC inference complete mode=$mode taskId=$taskId chars=${result.length} " +
+                "maxTokens=$maxTokens elapsedMs=$elapsedMs timeoutSecs=$timeoutSeconds",
+        )
         _progress.value = InferenceProgress.Done(taskId, result)
         return result
     }
@@ -373,10 +424,11 @@ class LlamaEngine(private val context: Context) {
                 }
         }
 
+        val contextLimit = contextCharLimitFor(mode)
         val userContent = when {
             mode == Mode.QUESTION && secondary != null ->
-                "Context:\n${secondary.take(MAX_CONTEXT_CHARS)}\n\nQuestion: ${primary.take(MAX_QUESTION_CHARS)}"
-            else -> primary.take(MAX_CONTEXT_CHARS)
+                "Context:\n${secondary.take(contextLimit)}\n\nQuestion: ${primary.take(MAX_QUESTION_CHARS)}"
+            else -> primary.take(contextLimit)
         }
 
         return listOf(
@@ -422,14 +474,47 @@ class LlamaEngine(private val context: Context) {
 
     private fun newTaskId(): String = java.util.UUID.randomUUID().toString()
 
+    private fun timeoutSecondsFor(mode: Mode): Long = when (mode) {
+        Mode.SUMMARISE -> TIMEOUT_SUMMARISE_SECONDS
+        Mode.REWRITE -> TIMEOUT_INTERACTIVE_SECONDS
+        Mode.QUESTION -> TIMEOUT_INTERACTIVE_SECONDS
+    }
+
+    private fun contextCharLimitFor(mode: Mode): Int = when (mode) {
+        Mode.SUMMARISE -> MAX_CONTEXT_CHARS_SUMMARISE
+        Mode.REWRITE -> MAX_CONTEXT_CHARS_REWRITE
+        Mode.QUESTION -> QUESTION_CONTEXT_CHAR_LIMIT
+    }
+
+    private fun partialResultForTimeout(mode: Mode, partial: String, timeoutSeconds: Long): String =
+        when (mode) {
+            Mode.QUESTION ->
+                partial.trimEnd() + "\n\n(Stopped at the ${timeoutSeconds}-second on-device limit.)"
+            Mode.REWRITE,
+            Mode.SUMMARISE -> partial
+        }
+
+    private class InferenceTimeoutException(
+        val mode: Mode,
+        val timeoutSeconds: Long,
+        cause: TimeoutException,
+    ) : RuntimeException(
+        "MLC $mode inference timed out after $timeoutSeconds seconds",
+        cause,
+    )
+
     companion object {
         private const val TAG = "LlamaEngine"
         private const val MIN_MAX_TOKENS       = 1
-        private const val MAX_TOKENS_SUMMARISE = 96
+        private const val MAX_TOKENS_SUMMARISE = 64
         private const val MAX_TOKENS_REWRITE   = 256
         private const val MAX_TOKENS_QUESTION  = 192
-        private const val MAX_CONTEXT_CHARS    = 3000
+        private const val MAX_CONTEXT_CHARS_SUMMARISE = 900
+        private const val MAX_CONTEXT_CHARS_REWRITE = 2_000
+        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_800
         private const val MAX_QUESTION_CHARS   = 500
+        private const val TIMEOUT_SUMMARISE_SECONDS = 3L
+        private const val TIMEOUT_INTERACTIVE_SECONDS = 30L
         private const val THERMAL_HEADROOM_THROTTLE_THRESHOLD = 0.15f
     }
 }

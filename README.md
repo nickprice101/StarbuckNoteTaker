@@ -9,11 +9,11 @@ Starbuck Note Taker is an Android note-taking app built with Kotlin + Jetpack Co
   - checklist notes
   - optional event metadata (start/end, timezone, location)
 - Attach images and files to notes.
-- Generate note summaries on-device using **MLC LLM** with **Llama 3.2 3B Instruct** (q4f16_0 quantisation) via `LlamaEngine`; falls back to lightweight rule-based heuristics when the model is unavailable or the device has insufficient RAM.
-  - **Summarise** — concise 1–3 line note preview
-  - **Rewrite** — rewrites a note in a clean, professional style
-  - **Question** — answers a free-form question using optional note context
-- AI features require ≥ 4 GB total device RAM (`DeviceCapabilityChecker`); the rule-based fallback is used automatically on devices below this threshold.
+- Generate note summaries on-device with a fast local path: `note_classifier.tflite` provides an optional category signal and `FastNoteSummarizer` extracts specific items/actions/details from the note contents.
+  - **Summarise** - concise note preview without loading the 2 GB Llama model
+  - **Rewrite** - rewrites a note in a clean, professional style via Llama 3.2 3B when available
+  - **Question** - answers a free-form question using optional note context via Llama 3.2 3B when available
+- LLM-backed rewrite/question features require >= 4 GB total device RAM (`DeviceCapabilityChecker`); summaries remain available through the local fast path.
 - Add URL link previews (metadata fetch requires internet once; cached preview data remains local afterward).
 - Protect notes with PIN-based encryption, with optional biometric unlock support.
 - Schedule event reminders and full-screen alarm flows.
@@ -72,9 +72,9 @@ TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh
 
 The generated model `.so` files are written under `app/src/main/jniLibs/<abi>/` by Gradle task `buildModelLibSo`. Model **weights** (~2 GB) are still downloaded automatically at runtime from HuggingFace on first use.
 
-### Legacy TFLite assets (optional)
+### Fast TFLite summary assets
 
-The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, and `deployment_metadata.json` in `app/src/main/assets/` are legacy artifacts from the previous TFLite classification path. They are no longer used at runtime (the rule-based fallback fills this role now) but are retained for reference. To regenerate them:
+The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, and `deployment_metadata.json` in `app/src/main/assets/` support the fast summary classifier path. To regenerate them:
 
 ```bash
 python3 app/src/main/assets/scripts/complete_pipeline.py

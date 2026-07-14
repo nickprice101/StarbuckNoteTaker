@@ -22,7 +22,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.net.URL
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 import android.provider.OpenableColumns
 import android.widget.Toast
 import kotlinx.coroutines.channels.BufferOverflow
@@ -62,6 +64,7 @@ class NoteViewModel(
     private val _summarizerState = MutableStateFlow<Summarizer.SummarizerState>(Summarizer.SummarizerState.Ready)
     val summarizerState: StateFlow<Summarizer.SummarizerState> = _summarizerState
     private var summarizerStateJob: Job? = null
+    private val summaryJobs = mutableMapOf<Long, Job>()
     private val unlockedNoteIds = mutableStateListOf<Long>()
     private val reminderNavigationEvents = MutableSharedFlow<Long>(
         extraBufferCapacity = 1,
@@ -139,6 +142,8 @@ class NoteViewModel(
     private fun configureSummarizer(enabled: Boolean) {
         summarizerStateJob?.cancel()
         summarizerStateJob = null
+        summaryJobs.values.forEach { it.cancel() }
+        summaryJobs.clear()
         summarizer?.close()
         summarizer = null
 
@@ -226,6 +231,7 @@ class NoteViewModel(
     private companion object {
         const val PENDING_OPEN_NOTE_ID_KEY = "pending_open_note_id"
         const val PENDING_UNLOCK_NAVIGATION_NOTE_ID_KEY = "pending_unlock_navigation_note_id"
+        const val SUMMARY_DEBOUNCE_MS = 250L
     }
 
     fun updateChecklistItems(id: Long, items: List<ChecklistItem>) {
@@ -255,6 +261,7 @@ class NoteViewModel(
         linkPreviews: List<NoteLinkPreview>,
         event: NoteEvent? = null,
         checklistItems: List<ChecklistItem>? = null,
+        skipAiSummary: Boolean = false,
     ) {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
@@ -276,7 +283,7 @@ class NoteViewModel(
         val embeddedImages = processed.images
         val embeddedFiles = processed.files
         val summarizerEnabled = isSummarizerEnabled()
-        val summarizerSource = if (summarizerEnabled && normalizedChecklist == null) {
+        val summarizerSource = if (summarizerEnabled && !skipAiSummary && normalizedChecklist == null) {
             buildSummarizerSource(finalTitle, finalContent, event)
         } else {
             null
@@ -302,7 +309,7 @@ class NoteViewModel(
         tryEmitPendingReminder()
         if (summarizerSource != null) {
             val noteId = note.id
-            launchSummaryUpdates(noteId, finalTitle, summarizerSource, event)
+            launchSummaryUpdates(noteId, finalTitle, summarizerSource)
         }
     }
 
@@ -310,6 +317,7 @@ class NoteViewModel(
         val index = _notes.indexOfFirst { it.id == id }
         if (index != -1) {
             val note = _notes[index]
+            summaryJobs.remove(id)?.cancel()
             reminderScheduler?.cancel(id)
             deleteAttachmentsFor(note)
             _notes.removeAt(index)
@@ -393,7 +401,9 @@ class NoteViewModel(
             tryEmitPendingReminder()
             if (summarizerSource != null) {
                 val noteId = updated.id
-                launchSummaryUpdates(noteId, finalTitle, summarizerSource, finalEvent)
+                launchSummaryUpdates(noteId, finalTitle, summarizerSource)
+            } else {
+                summaryJobs.remove(id)?.cancel()
             }
         }
     }
@@ -784,41 +794,36 @@ class NoteViewModel(
         noteId: Long,
         noteTitle: String,
         source: String,
-        event: NoteEvent?,
     ) {
         if (source.isBlank()) return
         if (!isSummarizerEnabled()) return
         val sum = summarizer ?: return
-        val ctx = context ?: return
 
-        viewModelScope.launch {
-            if (!isSummarizerEnabled()) return@launch
-
-            // Immediate rule-based placeholder while LLM warms up
-            runCatching {
-                sum.fallbackSummary(source, event)
-            }.onSuccess { fallback ->
+        summaryJobs.remove(noteId)?.cancel()
+        val job = viewModelScope.launch {
+            try {
+                delay(SUMMARY_DEBOUNCE_MS)
                 if (!isSummarizerEnabled()) return@launch
-                updateNoteSummary(noteId, fallback)
-            }.onFailure {
-                Log.e("NoteViewModel", "fallback summary failed", it)
-            }
 
-            // Start foreground service for full LLM summarisation
-            val requestId = java.util.UUID.randomUUID().toString()
-            val intent = LlamaForegroundService.buildIntent(
-                context = ctx,
-                mode = LlamaEngine.Mode.SUMMARISE,
-                text = source,
-                noteId = noteId,
-                requestId = requestId,
-            )
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                ctx.startForegroundService(intent)
-            } else {
-                ctx.startService(intent)
+                val summary = runCatching {
+                    sum.summarize(source)
+                }.getOrElse {
+                    Log.e("NoteViewModel", "fast summary failed for \"$noteTitle\"", it)
+                    sum.quickFallbackSummary(source)
+                }
+
+                if (!isSummarizerEnabled()) return@launch
+                val current = getNoteById(noteId) ?: return@launch
+                val currentSource = buildSummarizerSource(current.title, current.content, current.event)
+                if (currentSource != source) return@launch
+                updateNoteSummary(noteId, summary)
+            } finally {
+                if (summaryJobs[noteId] === coroutineContext[Job]) {
+                    summaryJobs.remove(noteId)
+                }
             }
         }
+        summaryJobs[noteId] = job
     }
 
     /**
@@ -864,7 +869,7 @@ class NoteViewModel(
             text = question,
             noteId = noteId,
             requestId = requestId,
-            contextText = note.content.take(3000),
+            contextText = note.content.take(LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT),
         )
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             ctx.startForegroundService(intent)
@@ -957,6 +962,7 @@ class NoteViewModel(
             images = emptyList(),
             files = emptyList(),
             linkPreviews = emptyList(),
+            skipAiSummary = true,
         )
     }
 
@@ -1041,6 +1047,8 @@ class NoteViewModel(
     override fun onCleared() {
         summarizerStateJob?.cancel()
         summarizerStateJob = null
+        summaryJobs.values.forEach { it.cancel() }
+        summaryJobs.clear()
         summarizer?.close()
         val ctx = context
         val receiver = llamaBroadcastReceiver

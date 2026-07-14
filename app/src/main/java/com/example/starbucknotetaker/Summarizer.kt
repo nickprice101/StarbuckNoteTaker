@@ -58,7 +58,11 @@ class Summarizer(
     private val _state = MutableStateFlow<SummarizerState>(SummarizerState.Ready)
     val state: StateFlow<SummarizerState> = _state
 
-    private val engine by lazy { LlamaEngine(context) }
+    private val fastSummarizer by lazy {
+        FastNoteSummarizer(context, assetLoader, logger)
+    }
+
+    private val engine by lazy { LlamaEngineProvider.acquire(context) }
 
     /** Live streaming inference progress from the underlying [LlamaEngine]. */
     val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress>
@@ -78,11 +82,9 @@ class Summarizer(
     suspend fun warmUp(): SummarizerState = withContext(Dispatchers.Default) {
         _state.emit(SummarizerState.Loading)
         try {
-            val modelPath = engine.modelStatus.value
-            val ready = modelPath is LlamaModelManager.ModelStatus.Present
-            val next = if (ready) SummarizerState.Ready else SummarizerState.Fallback
-            _state.emit(next)
-            debugSink("warmUp: state=$next")
+            fastSummarizer.warmUp()
+            _state.emit(SummarizerState.Ready)
+            debugSink("warmUp: fast summarizer ready")
         } catch (t: Throwable) {
             logger("warm up failed", t)
             _state.emit(SummarizerState.Error(t.message ?: "warmUp failed"))
@@ -103,8 +105,8 @@ class Summarizer(
         try {
             _state.emit(SummarizerState.Loading)
             debugSink("summarize: input length=${trimmed.length}")
-            trace += "summarizing text of length ${trimmed.length}"
-            val result = engine.summarise(trimmed)
+            trace += "fast summarizing text of length ${trimmed.length}"
+            val result = fastSummarizer.summarize(trimmed)
             _state.emit(SummarizerState.Ready)
             trace += "result: $result"
             lastDebugTrace.set(trace)
@@ -166,18 +168,23 @@ class Summarizer(
     suspend fun fallbackSummary(
         text: String,
         @Suppress("UNUSED_PARAMETER") event: NoteEvent?,
-    ): String = withContext(Dispatchers.Default) { fallbackSummaryInternal(text) }
+    ): String = withContext(Dispatchers.Default) {
+        runCatching { fastSummarizer.summarize(text) }
+            .getOrElse { fallbackSummaryInternal(text) }
+    }
 
     /** Synchronous rule-based preview (used as a placeholder until async result arrives). */
     fun quickFallbackSummary(text: String): String =
-        smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH)
+        runCatching { fastSummarizer.summarize(text) }
+            .getOrElse { smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH) }
 
     /** Consumes and returns the debug trace from the last [summarize] call. */
     fun consumeDebugTrace(): List<String> = lastDebugTrace.getAndSet(emptyList())
 
     /** Releases the native model context and associated resources. */
     fun close() {
-        engine.close()
+        fastSummarizer.close()
+        LlamaEngineProvider.releaseAfterIdle()
     }
 
     // ------------------------------------------------------------------

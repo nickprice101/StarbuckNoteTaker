@@ -16,6 +16,9 @@ class OpenAIProtocol {
         val model: String? = null,
         val stream: Boolean = true,
         val maxTokens: Int? = null,
+        val temperature: Float? = null,
+        val topP: Float? = null,
+        val stop: List<String> = emptyList(),
     )
 
     data class ChatCompletionMessage(
