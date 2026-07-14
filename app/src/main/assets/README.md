@@ -2,16 +2,21 @@
 
 This directory contains assets bundled into the APK and related deployment documentation.
 
-## Active runtime: MLC LLM (Llama 3.2 3B Instruct)
+## Active runtime
 
-The primary on-device AI now uses **MLC LLM** with Llama 3.2 3B Instruct. Gradle builds ABI-specific model libraries under `app/src/main/jniLibs/<abi>/` from the MLC tar assets before packaging (see `DEPLOYMENT_README.md`). Model weights (~2 GB) are downloaded at runtime by `LlamaModelManager`.
+Automatic note summaries use a fast local path:
 
-## Legacy TFLite assets (no longer used at runtime)
+- `note_classifier.tflite` provides an optional category signal.
+- `tokenizer_vocabulary_v2.txt` keeps Android tokenization aligned with the exported model.
+- `category_mapping.json` maps classifier outputs to note categories.
+- `FastNoteSummarizer` generates the final preview from the note contents, not from category-only templates.
 
-The following files from the previous TFLite classification pipeline are retained for reference but are **not loaded at runtime**:
+Interactive rewrite and question-answering use **MLC LLM** with Llama 3.2 3B Instruct. Gradle builds ABI-specific model libraries under `app/src/main/jniLibs/<abi>/` from the MLC tar assets before packaging (see `DEPLOYMENT_README.md`). Model weights (~2 GB) are downloaded at runtime by `LlamaModelManager`.
+
+## Fast summary assets
 
 ### `note_classifier.tflite`
-- Former TensorFlow Lite classifier model.
+- TensorFlow Lite classifier model used as a fast category hint.
 - Input contract: token IDs (`int32[1,120]`).
 
 ### `tokenizer_vocabulary_v2.txt`
@@ -29,5 +34,6 @@ The following files from the previous TFLite classification pipeline are retaine
 ## Notes
 
 - All AI inference is performed entirely on-device.
-- If the Llama model library or weights are unavailable, the app falls back to rule-based summary heuristics in `Summarizer`.
+- Summaries do not require the Llama model download and should complete in a few seconds or less.
+- If the TFLite classifier is unavailable, `FastNoteSummarizer` falls back to heuristic category detection and still generates content-aware summaries.
 

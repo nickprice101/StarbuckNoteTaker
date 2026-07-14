@@ -51,7 +51,7 @@ class LlamaForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        engine = LlamaEngine(applicationContext)
+        engine = LlamaEngineProvider.acquire(applicationContext)
         createNotificationChannel()
     }
 
@@ -137,7 +137,7 @@ class LlamaForegroundService : Service() {
             inferenceJobs.clear()
         }
         serviceScope.cancel()
-        engine.close()
+        LlamaEngineProvider.releaseAfterIdle()
     }
 
     // ------------------------------------------------------------------

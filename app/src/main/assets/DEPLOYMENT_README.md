@@ -4,9 +4,13 @@ This document describes the AI inference stack integrated into the Android app.
 
 ## Runtime Overview
 
-- Inference is performed on-device via MLC LLM (`ai.mlc.mlcllm.MLCEngine`).
-- The model is Llama 3.2 3B Instruct with q4f16_0 quantization.
-- Devices with less than 4 GB total RAM have AI features disabled at runtime and fall back to rule-based heuristics (`DeviceCapabilityChecker`).
+- Automatic note summaries run on-device through `FastNoteSummarizer`, using
+  `note_classifier.tflite` as an optional category signal and deterministic
+  content extraction for the final preview.
+- Rewrite and question-answering are performed on-device via MLC LLM
+  (`ai.mlc.mlcllm.MLCEngine`).
+- The LLM is Llama 3.2 3B Instruct with q4f16_0 quantization.
+- Devices with less than 4 GB total RAM skip LLM-backed rewrite/question features and use local summary heuristics (`DeviceCapabilityChecker`).
 - Thermal throttling is applied on API 31+ devices when `PowerManager.thermalHeadroom` is critically low.
 
 ## Build-Time Requirements
@@ -97,9 +101,16 @@ The download is managed by `LlamaModelManager`, which exposes a `modelStatus`
 
 | Mode | Description |
 |------|-------------|
-| `SUMMARISE` | Concise 1-3 line note preview |
+| `SUMMARISE` | Concise note preview via the fast local summarizer; LLM fallback remains available only for direct engine callers |
 | `REWRITE` | Rewrites the note in a clean, professional style |
 | `QUESTION` | Answers a free-form question using optional note context |
+
+## Latency Budgets
+
+- Note summaries are generated without loading the Llama model and should return within a few seconds on the default Galaxy S24 Ultra target.
+- LLM summaries, if called directly, use a 3 second completion timeout.
+- Rewrite and question-answering use a 30 second completion timeout.
+- Question context is trimmed before inference so x86 CPU test runs remain bounded, even when slower than the target device.
 
 ## Fallback Behavior
 
@@ -107,9 +118,10 @@ When the model is unavailable, native artifacts are missing, the engine reports 
 background failure, or the device has insufficient RAM, AI operations fall back
 automatically to the lightweight rule-based heuristics in `Summarizer`.
 
-## Legacy TFLite Assets
+## Fast TFLite Summary Assets
 
 The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`,
 `category_mapping.json`, and `deployment_metadata.json` are retained in
-`app/src/main/assets/` as legacy artifacts from the previous TFLite
-classification path. They are no longer used at runtime.
+`app/src/main/assets/` for the fast summary path. The classifier does not
+generate prose directly; `FastNoteSummarizer` combines the category signal with
+content extraction so summaries stay specific and less repetitive.
