@@ -3,6 +3,7 @@ package com.example.starbucknotetaker
 import android.content.Context
 import android.util.Log
 import org.json.JSONObject
+import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -74,10 +75,9 @@ internal class FastNoteSummarizer(
     private fun classifyWithTflite(text: String): CategoryScore? {
         val localInterpreter = interpreterOrNull() ?: return null
         if (categories.isEmpty()) return null
-        val tokenIds = Summarizer.tokenizeForModelInput(text, vocabulary)
-        val input = arrayOf(tokenIds)
         val output = Array(1) { FloatArray(categories.size) }
         return runCatching {
+            val input = buildTfliteInput(localInterpreter, text) ?: return null
             synchronized(interpreterLock) {
                 localInterpreter.run(input, output)
             }
@@ -88,6 +88,34 @@ internal class FastNoteSummarizer(
             logger("TFLite note classification failed", it)
         }.getOrNull()
     }
+
+    private fun buildTfliteInput(localInterpreter: Interpreter, text: String): Any? {
+        val inputTensor = localInterpreter.getInputTensor(0)
+        return when (inputTensor.dataType()) {
+            DataType.STRING ->
+                stringInputForShape(Summarizer.normalizeForModelInput(text), inputTensor.shape())
+            DataType.INT32 ->
+                arrayOf(Summarizer.tokenizeForModelInput(text, vocabulary))
+            DataType.INT64 ->
+                arrayOf(Summarizer.tokenizeForModelInput(text, vocabulary).map { it.toLong() }.toLongArray())
+            else -> {
+                Log.w(TAG, "Unsupported TFLite input type: ${inputTensor.dataType()}")
+                null
+            }
+        }
+    }
+
+    private fun stringInputForShape(value: String, shape: IntArray): Any =
+        when (shape.size) {
+            0 -> value
+            1 -> Array(shape[0].positiveTensorDim()) { value }
+            2 -> Array(shape[0].positiveTensorDim()) {
+                Array(shape[1].positiveTensorDim()) { value }
+            }
+            else -> Array(shape[0].positiveTensorDim()) {
+                Array(shape.drop(1).fold(1) { acc, dim -> acc * dim.positiveTensorDim() }) { value }
+            }
+        }
 
     private fun interpreterOrNull(): Interpreter? {
         interpreter?.let { return it }
@@ -456,5 +484,7 @@ internal class FastNoteSummarizer(
 
         private fun String.removePrefixIgnoringCase(prefix: String): String =
             if (startsWith(prefix, ignoreCase = true)) substring(prefix.length) else this
+
+        private fun Int.positiveTensorDim(): Int = if (this > 0) this else 1
     }
 }

@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
 import android.util.Base64
 import android.util.Log
 import android.util.Patterns
@@ -90,6 +89,8 @@ class NoteViewModel(
     /** Live streaming progress from the on-device AI engine. */
     private val _inferenceProgress = MutableStateFlow<LlamaEngine.InferenceProgress>(LlamaEngine.InferenceProgress.Idle)
     val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress> = _inferenceProgress
+    private val pendingAnswerNoteIds = mutableMapOf<String, Long>()
+    private val pendingAnswerQuestions = mutableMapOf<String, String>()
 
     private var llamaBroadcastReceiver: BroadcastReceiver? = null
     private var llamaModelManager: LlamaModelManager? = null
@@ -860,21 +861,46 @@ class NoteViewModel(
     fun askQuestion(noteId: Long, question: String) {
         val ctx = context ?: return
         val note = getNoteById(noteId) ?: return
-        if (question.isBlank()) return
+        val trimmedQuestion = question.trim()
+        if (trimmedQuestion.isBlank()) return
 
         val requestId = java.util.UUID.randomUUID().toString()
+        createAnswerNote(
+            sourceNoteId = noteId,
+            answer = buildAnswerProgressContent(
+                question = trimmedQuestion,
+                partialAnswer = "",
+                status = "Starting on-device assistant",
+            ),
+            summary = "AI answer in progress",
+        )?.let { answerNoteId ->
+            pendingAnswerNoteIds[requestId] = answerNoteId
+            pendingAnswerQuestions[requestId] = trimmedQuestion
+        }
+        _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
         val intent = LlamaForegroundService.buildIntent(
             context = ctx,
             mode = LlamaEngine.Mode.QUESTION,
-            text = question,
+            text = trimmedQuestion,
             noteId = noteId,
             requestId = requestId,
             contextText = note.content.take(LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT),
         )
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            ctx.startForegroundService(intent)
-        } else {
-            ctx.startService(intent)
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                ctx.startForegroundService(intent)
+            } else {
+                ctx.startService(intent)
+            }
+        }.onFailure { throwable ->
+            val message = throwable.message ?: "Unable to start on-device assistant"
+            _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, message)
+            finishAnswerNote(
+                requestId = requestId,
+                sourceNoteId = noteId,
+                answer = message,
+                isError = true,
+            )
         }
     }
 
@@ -899,6 +925,10 @@ class NoteViewModel(
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 intent ?: return
+                if (intent.action == LlamaForegroundService.ACTION_PROGRESS) {
+                    handleLlamaProgress(intent)
+                    return
+                }
                 val noteId    = intent.getLongExtra(LlamaForegroundService.EXTRA_NOTE_ID, -1L)
                 val mode      = intent.getStringExtra(LlamaForegroundService.EXTRA_MODE)
                     ?.let { runCatching { LlamaEngine.Mode.valueOf(it) }.getOrNull() }
@@ -912,6 +942,15 @@ class NoteViewModel(
                     // Write the error into the Answer note for QUESTION mode so the user
                     // can read and copy the full error message for debugging.
                     if (mode == LlamaEngine.Mode.QUESTION && noteId != -1L) {
+                        if (pendingAnswerNoteIds.containsKey(requestId)) {
+                            finishAnswerNote(
+                                requestId = requestId,
+                                sourceNoteId = noteId,
+                                answer = result,
+                                isError = true,
+                            )
+                            return
+                        }
                         createAnswerNote(noteId, "⚠️ AI Error\n\n$result")
                     }
                     return
@@ -927,17 +966,79 @@ class NoteViewModel(
                         if (noteId != -1L) applyRewriteToNote(noteId, result)
                     }
                     LlamaEngine.Mode.QUESTION -> {
+                        if (noteId != -1L && pendingAnswerNoteIds.containsKey(requestId)) {
+                            finishAnswerNote(
+                                requestId = requestId,
+                                sourceNoteId = noteId,
+                                answer = result,
+                                isError = false,
+                            )
+                            return
+                        }
                         if (noteId != -1L) createAnswerNote(noteId, result)
                     }
                     null -> Unit
                 }
             }
         }
-        val filter = IntentFilter(LlamaForegroundService.ACTION_RESULT)
+        val filter = IntentFilter(LlamaForegroundService.ACTION_RESULT).apply {
+            addAction(LlamaForegroundService.ACTION_PROGRESS)
+        }
         androidx.localbroadcastmanager.content.LocalBroadcastManager
             .getInstance(ctx)
             .registerReceiver(receiver, filter)
         llamaBroadcastReceiver = receiver
+    }
+
+    private fun handleLlamaProgress(intent: Intent) {
+        val requestId = intent.getStringExtra(LlamaForegroundService.EXTRA_REQUEST_ID) ?: return
+        val partialText = intent.getStringExtra(LlamaForegroundService.EXTRA_PROGRESS_TEXT).orEmpty()
+        val status = intent.getStringExtra(LlamaForegroundService.EXTRA_PROGRESS_STATUS)
+            ?: "Generating answer"
+        _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking(partialText, requestId)
+
+        val answerNoteId = pendingAnswerNoteIds[requestId] ?: return
+        val question = pendingAnswerQuestions[requestId] ?: return
+        updateAnswerNote(
+            noteId = answerNoteId,
+            content = buildAnswerProgressContent(question, partialText, status),
+            summary = "AI answer in progress",
+        )
+    }
+
+    private fun finishAnswerNote(
+        requestId: String,
+        sourceNoteId: Long,
+        answer: String,
+        isError: Boolean,
+    ) {
+        val question = pendingAnswerQuestions[requestId].orEmpty()
+        val answerNoteId = pendingAnswerNoteIds[requestId]
+        val content = if (isError) {
+            buildAnswerErrorContent(question, answer)
+        } else {
+            buildAnswerCompleteContent(question, answer)
+        }
+        val summary = if (isError) {
+            "AI answer failed"
+        } else {
+            manualSummaryFromContent(answer).ifBlank { "AI answer complete" }
+        }
+
+        if (answerNoteId != null && updateAnswerNote(answerNoteId, content, summary)) {
+            clearPendingAnswer(requestId)
+            return
+        }
+
+        if (sourceNoteId != -1L) {
+            createAnswerNote(sourceNoteId, content, summary)
+        }
+        clearPendingAnswer(requestId)
+    }
+
+    private fun clearPendingAnswer(requestId: String) {
+        pendingAnswerNoteIds.remove(requestId)
+        pendingAnswerQuestions.remove(requestId)
     }
 
     private fun applyRewriteToNote(noteId: Long, rewrittenContent: String) {
@@ -952,8 +1053,12 @@ class NoteViewModel(
         pin?.let { store?.saveNotes(_notes, it) }
     }
 
-    private fun createAnswerNote(sourceNoteId: Long, answer: String) {
-        val sourceNote = getNoteById(sourceNoteId) ?: return
+    private fun createAnswerNote(
+        sourceNoteId: Long,
+        answer: String,
+        summary: String = manualSummaryFromContent(answer),
+    ): Long? {
+        val sourceNote = getNoteById(sourceNoteId) ?: return null
         val answerTitle = "Answer — ${sourceNote.title.take(40)}"
         addNote(
             title = answerTitle,
@@ -964,7 +1069,81 @@ class NoteViewModel(
             linkPreviews = emptyList(),
             skipAiSummary = true,
         )
+        val created = _notes
+            .filter { it.title == answerTitle && it.content == answer.trim() }
+            .maxByOrNull { it.date }
+        if (created != null && created.summary != summary) {
+            updateAnswerNote(created.id, answer, summary)
+        }
+        return created?.id
     }
+
+    private fun updateAnswerNote(noteId: Long, content: String, summary: String): Boolean {
+        val index = _notes.indexOfFirst { it.id == noteId }
+        if (index == -1) return false
+        val cleanedContent = content.trim()
+        val cleanedSummary = sanitizeSummary(summary).take(200)
+        val current = _notes[index]
+        if (current.content == cleanedContent && current.summary == cleanedSummary) {
+            return true
+        }
+        _notes[index] = current.copy(
+            content = cleanedContent,
+            styledContent = RichTextDocument.fromPlainText(cleanedContent).trimmed(),
+            summary = cleanedSummary,
+        )
+        pin?.let { store?.saveNotes(_notes, it) }
+        return true
+    }
+
+    private fun buildAnswerProgressContent(
+        question: String,
+        partialAnswer: String,
+        status: String,
+    ): String = buildString {
+        appendLine("Question:")
+        appendLine(question.ifBlank { "Question unavailable" })
+        appendLine()
+        appendLine("Status:")
+        appendLine(status.ifBlank { "Generating answer" })
+        appendLine()
+        val partial = partialAnswer.trim()
+        if (partial.isBlank()) {
+            appendLine("Answer:")
+            appendLine("Waiting for the first response from the on-device model...")
+        } else {
+            appendLine("Partial answer:")
+            appendLine(partial)
+        }
+    }.trim()
+
+    private fun buildAnswerCompleteContent(question: String, answer: String): String =
+        if (question.isBlank()) {
+            answer.trim()
+        } else {
+            buildString {
+                appendLine("Question:")
+                appendLine(question)
+                appendLine()
+                appendLine("Answer:")
+                appendLine(answer.trim())
+            }.trim()
+        }
+
+    private fun buildAnswerErrorContent(question: String, error: String): String =
+        if (question.isBlank()) {
+            "AI Error\n\n${error.trim()}"
+        } else {
+            buildString {
+                appendLine("Question:")
+                appendLine(question)
+                appendLine()
+                appendLine("Status:")
+                appendLine("AI Error")
+                appendLine()
+                appendLine(error.trim())
+            }.trim()
+        }
 
     private fun updateNoteSummary(noteId: Long, summary: String): Boolean {
         val index = _notes.indexOfFirst { it.id == noteId }
@@ -1049,18 +1228,16 @@ class NoteViewModel(
         summarizerStateJob = null
         summaryJobs.values.forEach { it.cancel() }
         summaryJobs.clear()
+        pendingAnswerNoteIds.clear()
+        pendingAnswerQuestions.clear()
         summarizer?.close()
         val ctx = context
         val receiver = llamaBroadcastReceiver
         if (ctx != null && receiver != null) {
             runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    ctx.unregisterReceiver(receiver)
-                } else {
-                    androidx.localbroadcastmanager.content.LocalBroadcastManager
-                        .getInstance(ctx)
-                        .unregisterReceiver(receiver)
-                }
+                androidx.localbroadcastmanager.content.LocalBroadcastManager
+                    .getInstance(ctx)
+                    .unregisterReceiver(receiver)
             }
             llamaBroadcastReceiver = null
         }
