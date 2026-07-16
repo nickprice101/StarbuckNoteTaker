@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
+MODEL_NAME_X86_64="Llama-3.2-1B-Instruct-q4f32_1-MLC"
 PHASE=""
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -100,7 +101,7 @@ verify_required_mlc_artifacts() {
   local missing=0
 
   require_file "${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-android.tar" || missing=1
-  require_file "${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-android-x86_64.tar" || missing=1
+  require_file "${REPO_ROOT}/app/src/main/assets/${MODEL_NAME_X86_64}-android-x86_64.tar" || missing=1
   require_file "${REPO_ROOT}/mlc4j/src/main/jniLibs/arm64-v8a/libtvm4j_runtime_packed.so" || missing=1
   require_file "${REPO_ROOT}/mlc4j/src/main/jniLibs/x86_64/libtvm4j_runtime_packed.so" || missing=1
 
