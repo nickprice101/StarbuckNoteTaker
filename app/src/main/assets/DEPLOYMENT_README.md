@@ -20,7 +20,7 @@ The build has two Llama native ABI profiles:
 | ABI | Model archive | TVM runtime source |
 |-----|---------------|--------------------|
 | `arm64-v8a` | `app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar` | `bash scripts/fetch_mlc_native.sh` |
-| `x86_64` | `app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar` | `TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh` |
+| `x86_64` | `app/src/main/assets/Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64.tar` | `TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh` |
 
 The checked-in model archive uses TVM FFI system-library metadata
 (`__tvm_ffi_*`, `library_bin`, and `library_ctx`). It requires a
