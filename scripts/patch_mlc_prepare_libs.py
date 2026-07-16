@@ -50,12 +50,26 @@ def patch_prepare_libs(path: Path, target_abi: str, rust_target: str) -> None:
         '        f"-DCMAKE_TOOLCHAIN_FILE={android_ndk_path.as_posix()}",\n',
     )
 
+    # The Android emulator exposes Vulkan (including float16/int8 shaders) but
+    # not OpenCL. Include TVM's Vulkan runtime for x86_64 so the emulator can
+    # execute the 3B kernels through its accelerated graphics stack.
+    if target_abi == "x86_64" and '"-DUSE_VULKAN=ON",' not in text:
+        opencl_flag = '        "-DUSE_OPENCL=ON",\n'
+        if opencl_flag not in text:
+            raise RuntimeError("prepare_libs.py has no known USE_OPENCL flag insertion point")
+        text = text.replace(
+            opencl_flag,
+            opencl_flag + '        "-DUSE_VULKAN=ON",\n',
+        )
+
     if "from mlc_llm.support import logging" in text:
         raise RuntimeError("prepare_libs.py still imports mlc_llm.support.logging")
     if f"-DANDROID_ABI={target_abi}" not in text:
         raise RuntimeError(f"prepare_libs.py was not patched for Android ABI {target_abi}")
     if f'"rustup", "target", "add", "{rust_target}"' not in text:
         raise RuntimeError(f"prepare_libs.py was not patched for Rust target {rust_target}")
+    if target_abi == "x86_64" and '"-DUSE_VULKAN=ON",' not in text:
+        raise RuntimeError("prepare_libs.py was not patched for the Vulkan runtime")
 
     path.write_text(text, encoding="utf-8")
 

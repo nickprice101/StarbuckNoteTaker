@@ -78,7 +78,7 @@ class NoteViewModelAiAnswerTest {
     }
 
     @Test
-    fun askQuestionRewriteRequestFormatsSourceNoteImmediately() {
+    fun askQuestionRewriteRequestCreatesCopyAndPreservesSource() {
         val viewModel = NoteViewModel(SavedStateHandle())
         viewModel.loadNotes(appContext, "1234")
         viewModel.addNote(
@@ -93,21 +93,28 @@ class NoteViewModelAiAnswerTest {
             skipAiSummary = true,
         )
         val source = viewModel.notes.first { it.title == "Client Meeting" }
+        val originalContent = source.content
 
-        viewModel.askQuestion(source.id, "rewrite and format this note in a more professional way")
+        val rewrittenId =
+            viewModel.askQuestion(source.id, "rewrite and format this note in a more professional way")
 
-        val updated = viewModel.getNoteById(source.id)
-        assertNotNull(updated)
-        requireNotNull(updated)
-        assertTrue(updated.content.contains("Overview"))
-        assertTrue(updated.content.contains("Action Items"))
-        assertTrue(updated.content.contains("- Update launch doc."))
-        assertTrue(updated.summary.contains("AI rewrite"))
+        assertNotNull(rewrittenId)
+        val original = viewModel.getNoteById(source.id)
+        val rewritten = viewModel.getNoteById(requireNotNull(rewrittenId))
+        assertEquals("Client Meeting", original?.title)
+        assertEquals(originalContent, original?.content)
+        assertNotNull(rewritten)
+        requireNotNull(rewritten)
+        assertTrue(rewritten.title.startsWith("Reformatted - Client Meeting"))
+        assertTrue(rewritten.content.contains("Overview"))
+        assertTrue(rewritten.content.contains("Action Items"))
+        assertTrue(rewritten.content.contains("• Update launch doc."))
+        assertTrue(rewritten.styledContent?.spans?.isNotEmpty() == true)
         assertTrue(viewModel.notes.none { it.title.startsWith("Answer") })
     }
 
     @Test
-    fun rewriteNoteAppliesQuickFormattedDraftImmediately() {
+    fun rewriteNoteCreatesQuickFormattedCopyAndPreservesSource() {
         val viewModel = NoteViewModel(SavedStateHandle())
         viewModel.loadNotes(appContext, "1234")
         viewModel.addNote(
@@ -122,15 +129,82 @@ class NoteViewModelAiAnswerTest {
             skipAiSummary = true,
         )
         val source = viewModel.notes.first { it.title == "Planning" }
+        val originalContent = source.content
 
-        viewModel.rewriteNote(source.id)
+        val rewrittenId = viewModel.rewriteNote(source.id)
 
-        val updated = viewModel.getNoteById(source.id)
-        assertNotNull(updated)
-        requireNotNull(updated)
-        assertTrue(updated.content.contains("Overview"))
-        assertTrue(updated.content.contains("Action Items"))
-        assertTrue(updated.content.contains("- Schedule vendor call."))
-        assertTrue(updated.summary.contains("AI rewrite"))
+        assertNotNull(rewrittenId)
+        val original = viewModel.getNoteById(source.id)
+        val rewritten = viewModel.getNoteById(requireNotNull(rewrittenId))
+        assertEquals("Planning", original?.title)
+        assertEquals(originalContent, original?.content)
+        assertNotNull(rewritten)
+        requireNotNull(rewritten)
+        assertTrue(rewritten.title.startsWith("Reformatted - Planning"))
+        assertTrue(rewritten.content.contains("Overview"))
+        assertTrue(rewritten.content.contains("Action Items"))
+        assertTrue(rewritten.content.contains("• Schedule vendor call."))
+        assertTrue(rewritten.styledContent?.spans?.isNotEmpty() == true)
+    }
+
+    @Test
+    fun rewriteNoteCanEditCurrentNoteWithoutCreatingCopy() {
+        val viewModel = NoteViewModel(SavedStateHandle())
+        viewModel.loadNotes(appContext, "1234")
+        viewModel.addNote(
+            title = "Rough plan",
+            content = "todo: review budget; schedule vendor call; prepare board update",
+            styledContent = RichTextDocument.fromPlainText(
+                "todo: review budget; schedule vendor call; prepare board update",
+            ),
+            images = emptyList(),
+            files = emptyList(),
+            linkPreviews = emptyList(),
+            skipAiSummary = true,
+        )
+        val source = viewModel.notes.single()
+
+        val rewrittenId = viewModel.rewriteNote(
+            noteId = source.id,
+            sourceTitle = "Board planning",
+            sourceContent = source.content,
+            destination = RewriteDestination.CURRENT_NOTE,
+        )
+
+        assertEquals(source.id, rewrittenId)
+        assertEquals(1, viewModel.notes.size)
+        val rewritten = requireNotNull(viewModel.getNoteById(source.id))
+        assertEquals("Board planning", rewritten.title)
+        assertTrue(rewritten.content.contains("Overview"))
+        assertTrue(rewritten.content.contains("• Schedule vendor call."))
+        assertTrue(rewritten.styledContent?.spans?.isNotEmpty() == true)
+    }
+
+    @Test
+    fun rewriteCurrentNotePreservesAttachmentReferences() {
+        val viewModel = NoteViewModel(SavedStateHandle())
+        viewModel.loadNotes(appContext, "1234")
+        val source = Note(
+            id = 42L,
+            title = "Site visit",
+            content = "todo: call alex; send recap\n[[image:0]]",
+            styledContent = RichTextDocument.fromPlainText(
+                "todo: call alex; send recap\n[[image:0]]",
+            ),
+            images = listOf(NoteImage(attachmentId = "photo-1")),
+        )
+        viewModel.restoreNote(source)
+
+        val rewrittenId = viewModel.rewriteNote(
+            noteId = source.id,
+            sourceContent = source.content,
+            destination = RewriteDestination.CURRENT_NOTE,
+        )
+
+        assertEquals(source.id, rewrittenId)
+        val rewritten = requireNotNull(viewModel.getNoteById(source.id))
+        assertEquals(source.images, rewritten.images)
+        assertTrue(rewritten.content.contains("[[image:0]]"))
+        assertTrue(rewritten.content.contains("Attachments"))
     }
 }

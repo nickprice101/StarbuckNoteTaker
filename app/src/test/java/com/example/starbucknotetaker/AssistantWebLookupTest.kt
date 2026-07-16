@@ -16,6 +16,7 @@ class AssistantWebLookupTest {
         assertTrue(AssistantWebLookup.shouldLookup("look up the latest Android release"))
         assertTrue(AssistantWebLookup.shouldLookup("what is the stock price today?"))
         assertTrue(AssistantWebLookup.shouldLookup("summarize https://example.com/news"))
+        assertTrue(AssistantWebLookup.shouldLookup("Who wrote The Hobbit?"))
         assertFalse(AssistantWebLookup.shouldLookup("rewrite this note more clearly"))
     }
 
@@ -29,7 +30,7 @@ class AssistantWebLookupTest {
         """.trimIndent()
         val lookup = AssistantWebLookup(
             object : AssistantWebLookup.HttpClient {
-                override fun get(
+                override suspend fun get(
                     url: String,
                     headers: Map<String, String>,
                     maxBytes: Int,

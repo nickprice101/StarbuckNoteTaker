@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.dp
+import com.example.starbucknotetaker.LlamaEngineProvider
 import com.example.starbucknotetaker.LlamaModelManager
 import com.example.starbucknotetaker.PinManager
 import java.text.SimpleDateFormat
@@ -37,7 +38,9 @@ fun SettingsScreen(
     summarizerEnabled: Boolean,
     onSummarizerChanged: (Boolean) -> Unit,
     modelStatus: LlamaModelManager.ModelStatus = LlamaModelManager.ModelStatus.Missing,
+    modelPreloadState: LlamaEngineProvider.PreloadState = LlamaEngineProvider.PreloadState.Idle,
     onDownloadModel: () -> Unit = {},
+    onWarmUpModel: () -> Unit = {},
     onDeleteModel: () -> Unit = {},
     isAiCapable: Boolean = true,
     onBack: () -> Unit,
@@ -318,7 +321,9 @@ fun SettingsScreen(
             // ---- AI model (Llama 3.2 3B) download section ----
             AiModelDownloadSection(
                 modelStatus = modelStatus,
+                modelPreloadState = modelPreloadState,
                 onDownload = onDownloadModel,
+                onWarmUp = onWarmUpModel,
                 onDelete = onDeleteModel,
                 isAiCapable = isAiCapable,
             )
@@ -535,7 +540,9 @@ fun SettingsScreen(
 @Composable
 private fun AiModelDownloadSection(
     modelStatus: LlamaModelManager.ModelStatus,
+    modelPreloadState: LlamaEngineProvider.PreloadState,
     onDownload: () -> Unit,
+    onWarmUp: () -> Unit,
     onDelete: () -> Unit,
     isAiCapable: Boolean = true,
 ) {
@@ -587,10 +594,45 @@ private fun AiModelDownloadSection(
                     val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
                     val sizeLabel = if (modelStatus.sizeBytes > 0) " (%.0f MB on disk)".format(sizeMb) else ""
                     Text(
-                        "✅ Model ready — Llama 3.2 3B$sizeLabel",
+                        "✅ Model files downloaded — Llama 3.2 3B$sizeLabel",
                         style = MaterialTheme.typography.caption,
                         color = MaterialTheme.colors.primary,
                     )
+                    when (modelPreloadState) {
+                        LlamaEngineProvider.PreloadState.Loading -> {
+                            Text(
+                                "Engine status: loading weights and priming first-token generation...",
+                                style = MaterialTheme.typography.caption,
+                            )
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                            )
+                        }
+                        is LlamaEngineProvider.PreloadState.Ready -> {
+                            Text(
+                                "Engine status: ready for requests (warmed in %.1f s).".format(
+                                    modelPreloadState.elapsedMs / 1000f,
+                                ),
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.primary,
+                            )
+                        }
+                        is LlamaEngineProvider.PreloadState.Failed -> {
+                            Text(
+                                "Engine status: preload failed - ${modelPreloadState.message}",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.error,
+                            )
+                            Button(onClick = onWarmUp) { Text("Retry engine warmup") }
+                        }
+                        LlamaEngineProvider.PreloadState.Idle,
+                        LlamaEngineProvider.PreloadState.ModelUnavailable -> {
+                            Text("Engine status: not warmed.", style = MaterialTheme.typography.caption)
+                            Button(onClick = onWarmUp) { Text("Warm up AI engine") }
+                        }
+                    }
                     OutlinedButton(
                         onClick = { showDeleteConfirm = true },
                         colors = ButtonDefaults.outlinedButtonColors(

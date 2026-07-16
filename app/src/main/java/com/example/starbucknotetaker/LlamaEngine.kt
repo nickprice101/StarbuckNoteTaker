@@ -2,6 +2,7 @@ package com.example.starbucknotetaker
 
 import ai.mlc.mlcllm.MLCEngine
 import ai.mlc.mlcllm.OpenAIProtocol
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -17,28 +18,32 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.tvm.Base
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * On-device LLM inference engine backed by MLC LLM ([MLCEngine]) running
- * Llama 3.2 3B Instruct (q4f16_0 quantisation).
+ * Llama 3.2 Instruct. ARM64 devices run the full 3B q4f16 OpenCL profile so
+ * modern mobile GPUs can accelerate inference. x86_64 emulators run a compact
+ * 1B q4f32 AVX2 CPU profile because web/CI emulators cannot assume access to a
+ * discrete host GPU and gfxstream capabilities vary by host.
  *
  * **Model library (system-lib `.so` flow):**
  * The compiled model library is distributed as a `.tar` asset bundled inside the APK
- * (`assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android*.tar`).  The Gradle task
+ * (`assets/Llama-3.2-3B-Instruct-*-android*.tar`).  The Gradle task
  * `buildModelLibSo` links the ABI-specific `.o` files from that archive into a
- * single shared library (`libLlama-3.2-3B-Instruct-q4f16_0-MLC.so`) placed in the
+ * matching shared library placed in the
  * APK's `jniLibs/`.
  * Android extracts it to `nativeLibraryDir` at install time.
  *
  * On the first inference attempt [ensureEngineLoaded] loads the library via
  * `System.load(path)`.  This registers the model's TVM FFI system-library metadata
  * with the packed TVM runtime.  [MLCEngine.reload] is then called with
- * [LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE] (`system://llama_q4f16_0`), which
+ * the ABI-specific `system://` handle, which
  * instructs MLC-LLM to retrieve the pre-registered module via `ffi.SystemLib`
  * rather than attempting to load a `.so` file through TVM's file-loader.
  *
- * The model weights (~2 GB) are not bundled in the APK; they are downloaded
- * to `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/` via [LlamaModelManager].
+ * The model weights (~2 GB) are not bundled in the APK; [LlamaModelManager]
+ * downloads the matching ABI-specific weight profile under `filesDir/models/`.
  * Until the weights are present, every inference call falls back to the
  * rule-based heuristics in [Summarizer].
  *
@@ -93,8 +98,11 @@ class LlamaEngine(private val context: Context) {
     @Volatile
     private var engineLoaded = false
 
+    @Volatile
+    private var enginePrimed = false
+
     val isWarm: Boolean
-        get() = engineLoaded
+        get() = engineLoaded && enginePrimed
 
     /**
      * `null`  = not yet tested
@@ -152,6 +160,7 @@ class LlamaEngine(private val context: Context) {
             if (currentStatus is LlamaModelManager.ModelStatus.Unsupported) return@withLock false
             val modelPath = modelManager.getModelPath() ?: return@withLock false
             ensureEngineLoaded(modelPath)
+            primeEngine()
             true
         }
     }
@@ -161,6 +170,7 @@ class LlamaEngine(private val context: Context) {
         if (engineLoaded) {
             runCatching { mlcEngine.unload() }
             engineLoaded = false
+            enginePrimed = false
         }
     }
 
@@ -211,9 +221,8 @@ class LlamaEngine(private val context: Context) {
                         mode,
                         primaryText,
                         questionMessage =
-                            "The on-device assistant did not produce output within " +
-                            "${e.timeoutSeconds} seconds. The request has been kept so you can " +
-                            "retry after the model finishes warming up.",
+                            "The on-device 3B model did not produce output within " +
+                            "${e.timeoutSeconds} seconds. Try a shorter request or retry.",
                     )
                 }
                 val diagInfo = modelManager.debugModelDirInfo()
@@ -260,7 +269,8 @@ class LlamaEngine(private val context: Context) {
 
         // The compiled model kernel library is built by the Gradle task `buildModelLibSo` and
         // packaged in the APK's jniLibs.  Android extracts it to nativeLibraryDir at install time.
-        val modelSoPath = "${context.applicationInfo.nativeLibraryDir}/${LlamaModelManager.MODEL_SO_FILENAME}"
+        val modelSoPath =
+            "${context.applicationInfo.nativeLibraryDir}/${modelManager.getRuntimeModelSoFilename()}"
         val modelSoFile = java.io.File(modelSoPath)
         if (!modelSoFile.exists()) {
             val diagInfo = modelManager.debugModelDirInfo()
@@ -288,9 +298,10 @@ class LlamaEngine(private val context: Context) {
             // TVM's system-lib mechanism instead of trying to load the .so through TVM's
             // file-loader.
             mlcEngine.reload(
-                LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE,
+                modelManager.getRuntimeModelLibSystemHandle(),
                 modelPath,
                 mode = modelManager.getRuntimeMlcEngineMode() ?: "interactive",
+                runtimeConfig = runtimeConfigForDevice(),
             )
         } catch (e: Throwable) {
             val diagInfo = modelManager.debugModelDirInfo()
@@ -302,9 +313,41 @@ class LlamaEngine(private val context: Context) {
         Log.i(TAG, "MLCEngine loaded successfully")
     }
 
+    /**
+     * Runs one token through the fully loaded engine while the app is starting.
+     * This pays first-request kernel and KV-cache setup before an interactive
+     * request reaches the engine.
+     */
+    private fun primeEngine() {
+        if (enginePrimed) return
+        val startedAt = SystemClock.elapsedRealtime()
+        val request = OpenAIProtocol.ChatCompletionRequest(
+            messages = listOf(
+                // A single minimal token is enough to initialise the execution
+                // kernels and KV cache. Keeping this prompt tiny matters on CPU
+                // devices because prefill cost grows with every prompt token.
+                OpenAIProtocol.ChatCompletionMessage(role = "user", content = "."),
+            ),
+            model = LlamaModelManager.MODEL_DISPLAY_NAME,
+            stream = true,
+            maxTokens = 1,
+            temperature = 0.0f,
+            topP = 1.0f,
+        )
+        mlcEngine.chat.completions.create(request, timeoutSeconds = WARMUP_TIMEOUT_SECONDS) { }
+        mlcEngine.reset()
+        enginePrimed = true
+        Log.i(TAG, "MLCEngine primed in ${SystemClock.elapsedRealtime() - startedAt}ms")
+    }
+
     private fun configureCpuThreadingIfNeeded() {
         if (modelManager.getRuntimeMlcDeviceType() != "cpu") return
-        val requestedThreads = maxOf(1, Runtime.getRuntime().availableProcessors() * 2)
+        // Reserve one CPU for UI, lookup, and Android system work while still
+        // using the rest for model loading/generation. ARM production builds use
+        // OpenCL and are not constrained by this emulator/CPU profile.
+        val availableProcessors = Runtime.getRuntime().availableProcessors()
+        val requestedThreads = (availableProcessors - 1)
+            .coerceIn(1, MAX_CPU_THREADS)
         runCatching {
             Os.setenv("TVM_NUM_THREADS", requestedThreads.toString(), true)
             Os.setenv("OMP_NUM_THREADS", requestedThreads.toString(), true)
@@ -314,6 +357,71 @@ class LlamaEngine(private val context: Context) {
         }.onFailure {
             Log.w(TAG, "Failed to configure TVM CPU threading", it)
         }
+    }
+
+    /**
+     * Sizes MLC for the device instead of accepting its interactive preset,
+     * which reserves buffers for Llama's complete 128K context window. The
+     * latter is wasteful for note tasks and cannot fit beside 3B weights on a
+     * typical mobile GPU. Modern ARM phones receive a larger context and
+     * prefill batch, while the emulator uses a compact single-user CPU profile.
+     */
+    private fun runtimeConfigForDevice(): MLCEngine.RuntimeConfig {
+        val totalRamBytes = runCatching {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE)
+                as ActivityManager
+            ActivityManager.MemoryInfo().also(activityManager::getMemoryInfo).totalMem
+        }.getOrDefault(0L)
+        val totalRamGb = totalRamBytes.toDouble() / BYTES_PER_GIB
+        val isEmulatorProfile = modelManager.getRuntimeMlcDeviceType() == "cpu" &&
+            Build.SUPPORTED_ABIS.any { it == "x86_64" || it == "x86" }
+
+        val config = when {
+            isEmulatorProfile -> MLCEngine.RuntimeConfig(
+                // CPU inference uses system RAM; this value only bounds MLC's
+                // capacity estimator and does not claim a discrete GPU.
+                gpuMemoryUtilization = 0.80,
+                maxNumSequence = 1,
+                maxTotalSequenceLength = 1_024,
+                maxSingleSequenceLength = 1_024,
+                prefillChunkSize = 32,
+            )
+            totalRamGb >= 12.0 -> MLCEngine.RuntimeConfig(
+                gpuMemoryUtilization = 0.90,
+                maxNumSequence = 1,
+                maxTotalSequenceLength = 8_192,
+                maxSingleSequenceLength = 8_192,
+                prefillChunkSize = 512,
+            )
+            totalRamGb >= 8.0 -> MLCEngine.RuntimeConfig(
+                gpuMemoryUtilization = 0.90,
+                maxNumSequence = 1,
+                maxTotalSequenceLength = 4_096,
+                maxSingleSequenceLength = 4_096,
+                prefillChunkSize = 256,
+            )
+            totalRamGb >= 6.0 -> MLCEngine.RuntimeConfig(
+                gpuMemoryUtilization = 0.90,
+                maxNumSequence = 1,
+                maxTotalSequenceLength = 3_072,
+                maxSingleSequenceLength = 3_072,
+                prefillChunkSize = 192,
+            )
+            else -> MLCEngine.RuntimeConfig(
+                gpuMemoryUtilization = 0.92,
+                maxNumSequence = 1,
+                maxTotalSequenceLength = 2_048,
+                maxSingleSequenceLength = 2_048,
+                prefillChunkSize = 128,
+            )
+        }
+        Log.i(
+            TAG,
+            "MLC hardware profile: device=${modelManager.getRuntimeMlcDeviceType()} " +
+                "ram=${"%.1f".format(totalRamGb)}GiB cores=${Runtime.getRuntime().availableProcessors()} " +
+                "config=$config",
+        )
+        return config
     }
 
     private fun generateWithMlc(
@@ -350,13 +458,18 @@ class LlamaEngine(private val context: Context) {
         )
 
         val sb = StringBuilder()
+        val firstTokenMs = AtomicLong(-1L)
         val timeoutSeconds = timeoutSecondsFor(mode)
         val startedAt = SystemClock.elapsedRealtime()
         _progress.value = InferenceProgress.Thinking("", taskId)
 
         try {
+            mlcEngine.reset()
             mlcEngine.chat.completions.create(request, timeoutSeconds = timeoutSeconds) { response ->
                 response.choices.firstOrNull()?.delta?.content?.let { token ->
+                    if (token.isNotEmpty()) {
+                        firstTokenMs.compareAndSet(-1L, SystemClock.elapsedRealtime() - startedAt)
+                    }
                     sb.append(token)
                     _progress.value = InferenceProgress.Thinking(sb.toString(), taskId)
                 }
@@ -376,7 +489,8 @@ class LlamaEngine(private val context: Context) {
         Log.i(
             TAG,
             "MLC inference complete mode=$mode taskId=$taskId chars=${result.length} " +
-                "maxTokens=$maxTokens elapsedMs=$elapsedMs timeoutSecs=$timeoutSeconds",
+                "maxTokens=$maxTokens firstTokenMs=${firstTokenMs.get()} " +
+                "elapsedMs=$elapsedMs timeoutSecs=$timeoutSeconds",
         )
         _progress.value = InferenceProgress.Done(taskId, result)
         return result
@@ -418,7 +532,9 @@ class LlamaEngine(private val context: Context) {
             Mode.REWRITE ->
                 "You are a professional writing assistant. " +
                 "Rewrite the following note in a cleaner, more professional style. " +
-                "Preserve every fact and detail. Output only the rewritten note."
+                "Preserve every fact and detail. Use clean Markdown with short headings, " +
+                "paragraphs, and bullet or numbered lists where they improve readability. " +
+                "Do not use a code fence. Output only the rewritten note."
             Mode.QUESTION ->
                 if (secondary != null) {
                     "You are a helpful assistant. " +
@@ -512,14 +628,20 @@ class LlamaEngine(private val context: Context) {
         private const val TAG = "LlamaEngine"
         private const val MIN_MAX_TOKENS       = 1
         private const val MAX_TOKENS_SUMMARISE = 64
-        private const val MAX_TOKENS_REWRITE   = 256
-        private const val MAX_TOKENS_QUESTION  = 192
+        private const val MAX_TOKENS_REWRITE   = 160
+        private const val MAX_TOKENS_QUESTION  = 128
         private const val MAX_CONTEXT_CHARS_SUMMARISE = 900
         private const val MAX_CONTEXT_CHARS_REWRITE = 2_000
-        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_800
+        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_000
         private const val MAX_QUESTION_CHARS   = 500
-        private const val TIMEOUT_SUMMARISE_SECONDS = 3L
-        private const val TIMEOUT_INTERACTIVE_SECONDS = 90L
+        // A warm 3B response can take several seconds on an x86 emulator. Keep
+        // the same bounded interactive budget so real output is not discarded
+        // moments before its first token arrives.
+        private const val TIMEOUT_SUMMARISE_SECONDS = 30L
+        private const val TIMEOUT_INTERACTIVE_SECONDS = 30L
+        private const val WARMUP_TIMEOUT_SECONDS = 90L
+        private const val MAX_CPU_THREADS = 8
+        private const val BYTES_PER_GIB = 1_073_741_824.0
         private const val THERMAL_HEADROOM_THROTTLE_THRESHOLD = 0.15f
     }
 }

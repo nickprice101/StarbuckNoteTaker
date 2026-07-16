@@ -11,20 +11,28 @@ plugins {
 def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
 def llamaModelName = 'Llama-3.2-3B-Instruct-q4f16_0-MLC'
 def llamaModelSoName = "lib${llamaModelName}.so"
+// x86 Android emulators cannot assume access to the host's discrete GPU. Use
+// the compact q4f32 CPU profile so CI/web emulators remain portable, while
+// physical ARM64 devices retain the full 3B OpenCL/FP16 profile below.
+def x86LlamaModelName = 'Llama-3.2-1B-Instruct-q4f32_1-MLC'
 def llamaModelAbiProfiles = [
         'arm64-v8a': [
                 clangPrefix: 'aarch64-linux-android',
                 target     : 'aarch64-linux-android26',
                 tarAsset   : "src/main/assets/${llamaModelName}-android.tar",
+                modelSoName: llamaModelSoName,
+                systemLibPrefix: 'llama_q4f16_0',
         ],
 ]
-def x86MlcTar = file("src/main/assets/${llamaModelName}-android-x86_64.tar")
+def x86MlcTar = file("src/main/assets/${x86LlamaModelName}-android-x86_64.tar")
 def includeX86MlcModel = System.getenv('MLC_ARM64_ONLY_RUNTIME') != '1' && x86MlcTar.exists()
 if (includeX86MlcModel) {
     llamaModelAbiProfiles['x86_64'] = [
             clangPrefix: 'x86_64-linux-android',
             target     : 'x86_64-linux-android26',
-            tarAsset   : "src/main/assets/${llamaModelName}-android-x86_64.tar",
+            tarAsset   : "src/main/assets/${x86LlamaModelName}-android-x86_64.tar",
+            modelSoName: "lib${x86LlamaModelName}.so",
+            systemLibPrefix: 'llama_1b_q4f32_1',
     ]
 }
 def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
@@ -484,7 +492,7 @@ tasks.register('buildModelLibSoArm64Legacy') {
 
 tasks.register('buildModelLibSo') {
     group = 'setup'
-    description = 'Links ABI-specific model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
+    description = 'Links ABI-specific MLC model object files into native shared libraries'
 
     dependsOn(':mlc4j:downloadTvmRuntime')
 
@@ -494,7 +502,7 @@ tasks.register('buildModelLibSo') {
     llamaModelAbiProfiles.each { abi, profile ->
         inputs.file(file(profile.tarAsset)).withPropertyName("modelTar_${abi}")
         inputs.file(new File(tvmSoDirs[abi], 'libtvm4j_runtime_packed.so')).withPropertyName("tvmRuntime_${abi}")
-        outputs.file(new File(file("src/main/jniLibs/${abi}"), llamaModelSoName))
+        outputs.file(new File(file("src/main/jniLibs/${abi}"), profile.modelSoName))
     }
 
     doLast {
@@ -555,19 +563,22 @@ tasks.register('buildModelLibSo') {
             }
 
             def outputDir = file("src/main/jniLibs/${abi}")
-            def outputSo = new File(outputDir, llamaModelSoName)
+            def outputSo = new File(outputDir, profile.modelSoName)
             outputDir.mkdirs()
 
             def aliasObject = null
             if (abi == 'x86_64') {
-                def actualBlobSymbol = 'llama_q4f16_0__tvm_ffi__library_bin'
-                def mlcExpectedBlobSymbol = 'llama_q4f16_0___tvm_ffi__library_bin'
+                def actualBlobSymbol = "${profile.systemLibPrefix}__tvm_ffi__library_bin"
+                def mlcExpectedBlobSymbol = "${profile.systemLibPrefix}___tvm_ffi__library_bin"
+                def actualContextSymbol = "${profile.systemLibPrefix}__tvm_ffi__library_ctx"
+                def mlcExpectedContextSymbol = "${profile.systemLibPrefix}___tvm_ffi__library_ctx"
                 def hasActualBlobSymbol = objectFiles.any { nativeLibraryContainsAscii(it, actualBlobSymbol) }
                 def hasMlcExpectedBlobSymbol = objectFiles.any { nativeLibraryContainsAscii(it, mlcExpectedBlobSymbol) }
                 if (hasActualBlobSymbol && !hasMlcExpectedBlobSymbol) {
                     def aliasSrc = new File(tmpDir, 'mlc_system_lib_alias.c')
                     aliasSrc.text = """
 extern const unsigned char ${actualBlobSymbol}[];
+extern void* ${actualContextSymbol};
 extern int TVMFFIEnvModRegisterSystemLibSymbol(const char* name, void* symbol);
 
 __attribute__((constructor))
@@ -575,6 +586,9 @@ static void register_mlc_system_lib_alias(void) {
     (void)TVMFFIEnvModRegisterSystemLibSymbol(
         \"${mlcExpectedBlobSymbol}\",
         (void*)${actualBlobSymbol});
+    (void)TVMFFIEnvModRegisterSystemLibSymbol(
+        \"${mlcExpectedContextSymbol}\",
+        (void*)&${actualContextSymbol});
 }
 """
                     aliasObject = new File(tmpDir, 'mlc_system_lib_alias.o')
@@ -585,7 +599,7 @@ static void register_mlc_system_lib_alias(void) {
                             '-c', aliasSrc.absolutePath,
                             '-o', aliasObject.absolutePath
                     }
-                    logger.lifecycle("buildModelLibSo: ${abi} adds ${mlcExpectedBlobSymbol} alias for MLC system-lib lookup")
+                    logger.lifecycle("buildModelLibSo: ${abi} adds blob/context aliases for MLC system-lib lookup")
                 }
             }
 
@@ -593,7 +607,7 @@ static void register_mlc_system_lib_alias(void) {
                 clang.absolutePath,
                 '-target', profile.target,
                 '-shared',
-                "-Wl,-soname,${llamaModelSoName}",
+                "-Wl,-soname,${profile.modelSoName}",
                 '-Wl,--build-id',
                 '-Wl,-z,nocopyreloc',
                 '-o', outputSo.absolutePath,

@@ -52,11 +52,11 @@ internal object ProfessionalNoteFormatter {
             .take(8)
 
         return buildString {
-            appendLine("Overview")
+            appendLine("## Overview")
             appendLine(punctuate(sentenceCase(overview)))
             if (bullets.isNotEmpty()) {
                 appendLine()
-                appendLine(if (actions.isNotEmpty()) "Action Items" else "Key Points")
+                appendLine(if (actions.isNotEmpty()) "## Action Items" else "## Key Points")
                 bullets.forEach { bullet ->
                     appendLine("- ${punctuate(bullet)}")
                 }

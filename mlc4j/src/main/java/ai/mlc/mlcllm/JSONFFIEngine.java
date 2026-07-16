@@ -27,6 +27,7 @@ public class JSONFFIEngine {
     private final Function resetFunc;
     private final Function chatCompletionFunc;
     private final Function abortFunc;
+    private final Function getLastErrorFunc;
     private final Function runBackgroundLoopFunc;
     private final Function runBackgroundStreamBackLoopFunc;
     private final Function exitBackgroundLoopFunc;
@@ -47,6 +48,7 @@ public class JSONFFIEngine {
         this.resetFunc                       = engine.getFunction("reset");
         this.chatCompletionFunc              = engine.getFunction("chat_completion");
         this.abortFunc                       = engine.getFunction("abort");
+        this.getLastErrorFunc                = engine.getFunction("get_last_error");
         this.runBackgroundLoopFunc           = engine.getFunction("run_background_loop");
         this.runBackgroundStreamBackLoopFunc = engine.getFunction("run_background_stream_back_loop");
         this.exitBackgroundLoopFunc          = engine.getFunction("exit_background_loop");
@@ -101,8 +103,13 @@ public class JSONFFIEngine {
      * @param requestJson JSON-encoded {@code ChatCompletionRequest}.
      * @param requestId   Unique request identifier; echoed back in each response chunk.
      */
-    public void chatCompletion(String requestJson, String requestId) {
-        chatCompletionFunc.pushArg(requestJson).pushArg(requestId).invoke();
+    public boolean chatCompletion(String requestJson, String requestId) {
+        return chatCompletionFunc.pushArg(requestJson).pushArg(requestId).invoke().asLong() != 0L;
+    }
+
+    /** Returns the native JSON FFI parser/validation error from the last rejected request. */
+    public String getLastError() {
+        return getLastErrorFunc.invoke().asString();
     }
 
     /** Aborts an in-flight chat-completion request. */

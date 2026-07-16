@@ -32,6 +32,7 @@ class LlamaEngineUnitTest {
         appContext = ApplicationProvider.getApplicationContext()
         appContext.applicationInfo.nativeLibraryDir = "/data/app/example/lib/x86_64"
         File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR).deleteRecursively()
+        File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR_X86_64).deleteRecursively()
     }
 
     // ------------------------------------------------------------------
@@ -255,6 +256,10 @@ class LlamaEngineUnitTest {
             "system://llama_q4f16_0",
             LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE,
         )
+        assertEquals(
+            "system://llama_1b_q4f32_1",
+            LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE_X86_64,
+        )
     }
 
     @Test
@@ -294,7 +299,8 @@ class LlamaEngineUnitTest {
     }
 
     private fun createModelMetadata(ndarrayCacheJson: String): File {
-        val dir = File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR).also { it.mkdirs() }
+        val dir = File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR_X86_64)
+            .also { it.mkdirs() }
         File(dir, "mlc-chat-config.json").writeText("{}")
         File(dir, "ndarray-cache.json").writeText(ndarrayCacheJson)
         File(dir, "tokenizer.json").writeText("{}")

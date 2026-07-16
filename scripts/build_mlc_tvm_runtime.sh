@@ -17,7 +17,7 @@
 #   - git, rustup, cmake, ninja
 #   - Python with mlc_llm importable
 #   - Android NDK, with ANDROID_NDK set or discoverable under ANDROID_HOME
-#   - app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android*.tar
+#   - ABI-appropriate compiled model archive in app/src/main/assets
 #
 # Windows note:
 #   Run this script from Git Bash. If the MSVC Rust host linker is unavailable,
@@ -34,7 +34,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 source "${SCRIPT_DIR}/mlc_python_env.sh"
 
-MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
 TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
 MLC_LLM_REPO_URL="${MLC_LLM_REPO_URL:-https://github.com/mlc-ai/mlc-llm.git}"
 MLC_LLM_COMMIT="${MLC_LLM_COMMIT:-d1ea69a87280e821611643958bfec385b62dafd3}"
@@ -42,10 +41,14 @@ MLC_SOURCE_DIR="${MLC_SOURCE_DIR:-${REPO_ROOT}/build/mlc-llm-${MLC_LLM_COMMIT}}"
 
 case "${TARGET_ABI}" in
   arm64-v8a)
+    MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
     RUST_TARGET="aarch64-linux-android"
     MODEL_TAR_DEFAULT="${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-android.tar"
     ;;
   x86_64)
+    # Web/CI emulators cannot assume access to the host's discrete GPU. Keep a
+    # portable, AVX2-optimised 1B q4f32 CPU profile for connected testing.
+    MODEL_NAME="Llama-3.2-1B-Instruct-q4f32_1-MLC"
     RUST_TARGET="x86_64-linux-android"
     MODEL_TAR_DEFAULT="${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-android-x86_64.tar"
     ;;

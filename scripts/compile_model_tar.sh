@@ -2,10 +2,13 @@
 # =============================================================================
 # compile_model_tar.sh
 #
-# Compiles the Llama 3.2 3B Instruct (q4f16_0) model into the MLC system-lib
-# format (.tar) and places it at the ABI-specific asset path, for example:
+# Compiles the ABI-optimized Llama 3.2 3B Instruct model into the MLC system-lib
+# format (.tar) and places it at the ABI-specific asset path. ARM64 uses OpenCL
+# and x86_64 emulators use a portable 1B q4f32 AVX2 CPU profile. This avoids
+# depending on a discrete host GPU that web/CI emulators cannot access.
 #
 #   app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
+#   app/src/main/assets/Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64.tar
 #
 # The .tar is a Gradle build input. buildModelLibSo links its object files into
 # an ABI-specific native .so under app/src/main/jniLibs/<abi>/. It contains:
@@ -25,12 +28,16 @@
 #   TARGET_ABI   Android ABI to compile for: arm64-v8a or x86_64.
 #                Defaults to arm64-v8a.
 #   MLC_DEVICE   MLC target/device hint. Defaults to android for arm64-v8a and
-#                explicit JSON Android LLVM x86_64 for emulator builds.
+#                an explicit Android x86_64 LLVM target for emulator builds.
 #   MLC_SYSTEM_LIB_PREFIX
 #                TVM system-lib module prefix. Defaults to auto for arm64-v8a
-#                and llama_q4f16_0 for x86_64.
+#                and llama_1b_q4f32_1 for x86_64.
+#   MLC_MODEL_OVERRIDES
+#                Compile-time model capacity. Defaults are deliberately sized
+#                for a single-user mobile workload so the official 8192-token
+#                prefill buffer does not reserve ~1.75 GB of temporary GPU RAM.
 #   WEIGHTS_DIR   Path to pre-downloaded quantised weights directory.
-#                 Defaults to ./Llama-3.2-3B-Instruct-q4f16_0-MLC (current dir).
+#                 Defaults to the ABI-specific official MLC model directory.
 #   OUTPUT_TAR    Destination path for the compiled .tar.
 #                 Defaults to an ABI-specific file in app/src/main/assets/.
 # =============================================================================
@@ -43,23 +50,27 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-HF_REPO="mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
-MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
 TARGET_ABI="${TARGET_ABI:-arm64-v8a}"
-
 case "${TARGET_ABI}" in
   arm64-v8a)
+    ARTIFACT_MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
+    HF_REPO="mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
+    MODEL_NAME="Llama-3.2-3B-Instruct-q4f16_0-MLC"
     HOST_TRIPLE="aarch64-linux-android"
     DEFAULT_MLC_DEVICE="android"
     DEFAULT_SYSTEM_LIB_PREFIX="auto"
+    DEFAULT_MODEL_OVERRIDES="context_window_size=8192;prefill_chunk_size=256;max_batch_size=1"
     OUTPUT_SUFFIX="android"
     ;;
   x86_64)
+    ARTIFACT_MODEL_NAME="Llama-3.2-1B-Instruct-q4f32_1-MLC"
+    HF_REPO="mlc-ai/Llama-3.2-1B-Instruct-q4f32_1-MLC"
+    MODEL_NAME="Llama-3.2-1B-Instruct-q4f32_1-MLC"
     HOST_TRIPLE="x86_64-linux-android"
-    # Avoid MLC's CPU auto-target path in CI. The pinned CPU wheel's TVM build
-    # tries to canonicalize unsupported Arm profiles during Target.from_device.
-    DEFAULT_MLC_DEVICE="{\"kind\":\"llvm\",\"mtriple\":\"${HOST_TRIPLE}\"}"
-    DEFAULT_SYSTEM_LIB_PREFIX="llama_q4f16_0"
+    DEFAULT_HOST_TARGET_JSON="{\"kind\":\"llvm\",\"mtriple\":\"${HOST_TRIPLE}\",\"mcpu\":\"core-avx2\",\"mattr\":[\"+avx2\",\"+f16c\",\"+fma\"],\"num-cores\":4}"
+    DEFAULT_MLC_DEVICE="${DEFAULT_HOST_TARGET_JSON}"
+    DEFAULT_SYSTEM_LIB_PREFIX="llama_1b_q4f32_1"
+    DEFAULT_MODEL_OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
     OUTPUT_SUFFIX="android-x86_64"
     ;;
   *)
@@ -70,9 +81,15 @@ case "${TARGET_ABI}" in
 esac
 
 MLC_DEVICE="${MLC_DEVICE:-${DEFAULT_MLC_DEVICE}}"
+if [[ "${TARGET_ABI}" == "x86_64" ]]; then
+  # MLC otherwise reduces --host to a bare LLVM triple and drops x86 vector
+  # features from the small set of host-side kernels.
+  export MLC_HOST_TARGET_JSON="${MLC_HOST_TARGET_JSON:-${DEFAULT_HOST_TARGET_JSON}}"
+fi
 MLC_SYSTEM_LIB_PREFIX="${MLC_SYSTEM_LIB_PREFIX:-${DEFAULT_SYSTEM_LIB_PREFIX}}"
+MLC_MODEL_OVERRIDES="${MLC_MODEL_OVERRIDES:-${DEFAULT_MODEL_OVERRIDES}}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-${REPO_ROOT}/${MODEL_NAME}}"
-OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
+OUTPUT_TAR="${OUTPUT_TAR:-${REPO_ROOT}/app/src/main/assets/${ARTIFACT_MODEL_NAME}-${OUTPUT_SUFFIX}.tar}"
 COMPILE_OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mlc_compile.XXXXXX")"
 
 trap 'rm -rf "${COMPILE_OUTPUT_DIR}"' EXIT
@@ -240,6 +257,7 @@ echo "     Target ABI   : ${TARGET_ABI}"
 echo "     MLC device   : ${MLC_DEVICE}"
 echo "     Host triple  : ${HOST_TRIPLE}"
 echo "     System prefix: ${MLC_SYSTEM_LIB_PREFIX}"
+echo "     Model limits : ${MLC_MODEL_OVERRIDES}"
 
 export TVM_BACKTRACE="${TVM_BACKTRACE:-1}"
 
@@ -248,6 +266,7 @@ ${MLC_LLM_CMD} compile \
   --device "${MLC_DEVICE}" \
   --host "${HOST_TRIPLE}" \
   --system-lib-prefix "${MLC_SYSTEM_LIB_PREFIX}" \
+  --overrides "${MLC_MODEL_OVERRIDES}" \
   --output "${COMPILE_OUTPUT_DIR}/model.tar"
 
 # ---------------------------------------------------------------------------

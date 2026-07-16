@@ -43,9 +43,10 @@ class AssistantResponsiveInstrumentationTest {
 
     @Test
     fun webLookup_parsesResultsOnDeviceWithoutWaitingForModel() = runBlocking {
+        val startedAt = SystemClock.elapsedRealtime()
         val lookup = AssistantWebLookup(
             object : AssistantWebLookup.HttpClient {
-                override fun get(
+                override suspend fun get(
                     url: String,
                     headers: Map<String, String>,
                     maxBytes: Int,
@@ -54,19 +55,25 @@ class AssistantResponsiveInstrumentationTest {
                         statusCode = 200,
                         body = """
                             <html><body>
-                              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fsource">Example Source</a>
-                              <a class="result__snippet">A concise source snippet from the web.</a>
+                              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fbaltic">Baltic Sea source</a>
+                              <a class="result__snippet">The Baltic Sea is bordered by Denmark, Germany, Sweden, and other countries.</a>
                             </body></html>
                         """.trimIndent().toByteArray(),
                     )
             },
         )
 
-        val result = lookup.lookup("look up latest example")
-        val answer = AssistantWebLookup.quickAnswer("look up latest example", result)
+        val question = "What countries border the Baltic Sea?"
+        assertTrue(AssistantWebLookup.shouldLookup(question))
+        val result = lookup.lookup(question)
+        val answer = AssistantWebLookup.quickAnswer(question, result)
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAt
 
         assertTrue(result.results.isNotEmpty())
-        assertTrue(answer.contains("Example Source"))
-        assertTrue(answer.contains("https://example.com/source"))
+        assertTrue(answer.contains("Denmark"))
+        assertTrue(answer.contains("https://example.com/baltic"))
+        // SwiftShader and a concurrent background model preload introduce emulator
+        // scheduling jitter; a sub-second local lookup remains an interactive response.
+        assertTrue("Generic lookup took ${elapsedMs}ms", elapsedMs < 1_000L)
     }
 }
