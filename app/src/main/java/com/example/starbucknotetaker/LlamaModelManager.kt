@@ -15,11 +15,14 @@ import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * Manages the lifecycle of the Llama 3.2 3B MLC-compiled model weights on device.
+ * Manages the lifecycle of the ABI-optimized Llama MLC model on device.
  *
  * The model weights (~2 GB) are never bundled in the APK.  They are downloaded from
  * HuggingFace on first use and stored in
- * `filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/`.
+ * an ABI-specific directory under `filesDir/models/`. ARM64 phones use the
+ * full Llama 3.2 3B q4f16 OpenCL profile. Resource-constrained x86_64 Android
+ * emulators use a portable Llama 3.2 1B q4f32 CPU/AVX2 compatibility profile;
+ * emulator correctness never depends on access to the host's discrete GPU.
  *
  * The MLC model directory contains:
  *   - `mlc-chat-config.json`   — model/tokenizer configuration
@@ -80,6 +83,12 @@ class LlamaModelManager(private val context: Context) {
     fun getRuntimeMlcDeviceType(): String? = runtimeProfile?.mlcDeviceType
 
     fun getRuntimeMlcEngineMode(): String? = runtimeProfile?.mlcEngineMode
+
+    fun getRuntimeModelSoFilename(): String =
+        runtimeProfile?.modelSoFilename ?: MODEL_SO_FILENAME
+
+    fun getRuntimeModelLibSystemHandle(): String =
+        runtimeProfile?.modelLibSystemHandle ?: MODEL_LIB_SYSTEM_HANDLE
 
     private val modelDir: File
         get() = modelDirFor(runtimeProfile)
@@ -324,7 +333,7 @@ class LlamaModelManager(private val context: Context) {
         val tvmRuntimeSo = java.io.File(nativeLibDir, TVM_RUNTIME_SO_FILENAME)
         sb.appendLine("TVM runtime .so: ${tvmRuntimeSo.absolutePath} (exists=${tvmRuntimeSo.exists()}," +
             " size=${if (tvmRuntimeSo.exists()) "%.1f MB".format(tvmRuntimeSo.length() / (1024.0 * 1024.0)) else "n/a"})")
-        val modelSo = java.io.File(nativeLibDir, MODEL_SO_FILENAME)
+        val modelSo = java.io.File(nativeLibDir, getRuntimeModelSoFilename())
         sb.appendLine("Model .so: ${modelSo.absolutePath} (exists=${modelSo.exists()}," +
             " size=${if (modelSo.exists()) "%.1f MB".format(modelSo.length() / (1024.0 * 1024.0)) else "n/a"})")
         return sb.toString().trimEnd()
@@ -501,6 +510,8 @@ class LlamaModelManager(private val context: Context) {
         val modelSubdir: String,
         val tarAssetName: String,
         val modelLibExtractSubdir: String,
+        val modelSoFilename: String,
+        val modelLibSystemHandle: String,
         val mlcDeviceType: String,
         val mlcEngineMode: String,
     ) {
@@ -518,23 +529,25 @@ class LlamaModelManager(private val context: Context) {
          * [extractModelLibIfNeeded] can also unpack it for diagnostics.
          */
         const val TAR_ASSET_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar"
-        const val TAR_ASSET_NAME_X86_64 = "Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64.tar"
+        const val TAR_ASSET_NAME_X86_64 = "Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64.tar"
 
         /**
          * Sub-directory inside `filesDir` where the model library `.tar` can be
          * extracted for diagnostics or archive validation.
          */
         const val MODEL_LIB_EXTRACT_SUBDIR = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android"
-        const val MODEL_LIB_EXTRACT_SUBDIR_X86_64 = "lib/Llama-3.2-3B-Instruct-q4f16_0-MLC-android-x86_64"
+        const val MODEL_LIB_EXTRACT_SUBDIR_X86_64 = "lib/Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64"
 
-        /** HuggingFace model repository identifier. */
+        /** ARM64/OpenCL HuggingFace model repository identifier. */
         const val HF_REPO_ID = "mlc-ai/Llama-3.2-3B-Instruct-q4f16_0-MLC"
+        const val HF_REPO_ID_X86_64 = "mlc-ai/Llama-3.2-1B-Instruct-q4f32_1-MLC"
 
         /**
          * Sub-directory inside `filesDir` where the model weights live.
          * This is also the value passed to [ai.mlc.mlcllm.MLCEngine.reload] as `modelPath`.
          */
         const val MODEL_SUBDIR = "models/Llama-3.2-3B-Instruct-q4f16_0-MLC"
+        const val MODEL_SUBDIR_X86_64 = "models/Llama-3.2-1B-Instruct-q4f32_1-MLC"
 
         /**
          * The Android library name for the compiled model kernel library.
@@ -543,6 +556,7 @@ class LlamaModelManager(private val context: Context) {
          * derive [MODEL_SO_FILENAME] and [MODEL_LIB_SYSTEM_HANDLE].
          */
         const val MODEL_LIB_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
+        const val MODEL_LIB_NAME_X86_64 = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
 
         /**
          * Name used by TVM's system-lib registry.
@@ -554,6 +568,7 @@ class LlamaModelManager(private val context: Context) {
          * must be `llama_q4f16_0`.
          */
         const val MODEL_LIB_SYSTEM_NAME = "llama_q4f16_0"
+        const val MODEL_LIB_SYSTEM_NAME_X86_64 = "llama_1b_q4f32_1"
 
         /**
          * The filename of the compiled model kernel library bundled in the APK's
@@ -568,6 +583,7 @@ class LlamaModelManager(private val context: Context) {
          * source-built, TVM FFI-capable `libtvm4j_runtime_packed.so`.
          */
         const val MODEL_SO_FILENAME = "lib$MODEL_LIB_NAME.so"
+        const val MODEL_SO_FILENAME_X86_64 = "lib$MODEL_LIB_NAME_X86_64.so"
         const val TVM_RUNTIME_SO_FILENAME = "libtvm4j_runtime_packed.so"
 
         /**
@@ -580,12 +596,13 @@ class LlamaModelManager(private val context: Context) {
          * retrieve the pre-registered module.
          */
         const val MODEL_LIB_SYSTEM_HANDLE = "system://$MODEL_LIB_SYSTEM_NAME"
+        const val MODEL_LIB_SYSTEM_HANDLE_X86_64 = "system://$MODEL_LIB_SYSTEM_NAME_X86_64"
 
         /** Human-readable approximate download size shown in the Settings UI. */
         const val MODEL_SIZE_LABEL = "~2.0 GB"
 
         /** Human-readable model name used in request metadata. */
-        const val MODEL_DISPLAY_NAME = "Llama-3.2-3B-Instruct-q4f16_0-MLC"
+        const val MODEL_DISPLAY_NAME = "Llama-3.2-3B-Instruct"
 
         private const val ABI_ARM64_V8A = "arm64-v8a"
         private const val ABI_X86_64 = "x86_64"
@@ -601,17 +618,21 @@ class LlamaModelManager(private val context: Context) {
                 modelSubdir = MODEL_SUBDIR,
                 tarAssetName = TAR_ASSET_NAME,
                 modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR,
+                modelSoFilename = MODEL_SO_FILENAME,
+                modelLibSystemHandle = MODEL_LIB_SYSTEM_HANDLE,
                 mlcDeviceType = "opencl",
                 mlcEngineMode = "interactive",
             ),
             ABI_X86_64 to RuntimeModelProfile(
                 abi = ABI_X86_64,
-                hfRepoId = HF_REPO_ID,
-                modelSubdir = MODEL_SUBDIR,
+                hfRepoId = HF_REPO_ID_X86_64,
+                modelSubdir = MODEL_SUBDIR_X86_64,
                 tarAssetName = TAR_ASSET_NAME_X86_64,
                 modelLibExtractSubdir = MODEL_LIB_EXTRACT_SUBDIR_X86_64,
+                modelSoFilename = MODEL_SO_FILENAME_X86_64,
+                modelLibSystemHandle = MODEL_LIB_SYSTEM_HANDLE_X86_64,
                 mlcDeviceType = "cpu",
-                mlcEngineMode = "local",
+                mlcEngineMode = "interactive",
             )
         )
 

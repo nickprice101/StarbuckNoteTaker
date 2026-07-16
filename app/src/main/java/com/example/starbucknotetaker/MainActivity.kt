@@ -302,6 +302,7 @@ fun AppContent(
     val context = LocalContext.current
     val summarizerState by noteViewModel.summarizerState.collectAsState()
     val summarizerEnabled by noteViewModel.summarizerEnabled.collectAsState()
+    val modelPreloadState by LlamaEngineProvider.preloadState.collectAsState()
     val pendingShare by noteViewModel.pendingShare.collectAsState()
     val pendingOpenNoteId by noteViewModel.pendingOpenNoteId.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -517,8 +518,25 @@ fun AppContent(
                     onEnablePinCheck = {},
                     summarizerState = summarizerState,
                     openAttachment = { id -> noteViewModel.openAttachment(id) },
-                    onRewriteNote = { id -> noteViewModel.rewriteNote(id) },
-                    onAskQuestion = { id, q -> noteViewModel.askQuestion(id, q) },
+                    onRewriteNote = { id, currentTitle, currentContent, destination ->
+                        noteViewModel.rewriteNote(
+                            id,
+                            currentTitle,
+                            currentContent,
+                            destination,
+                        )?.let { resultId ->
+                            navController.navigate("detail/$resultId") {
+                                launchSingleTop = true
+                            }
+                        }
+                    },
+                    onAskQuestion = { id, q ->
+                        noteViewModel.askQuestion(id, q)?.let { resultId ->
+                            navController.navigate("detail/$resultId") {
+                                launchSingleTop = true
+                            }
+                        }
+                    },
                     inferenceProgress = noteViewModel.inferenceProgress.collectAsState().value,
                 )
             } else {
@@ -561,7 +579,9 @@ fun AppContent(
                 summarizerEnabled = summarizerEnabled,
                 onSummarizerChanged = { enabled -> noteViewModel.setSummarizerEnabled(enabled) },
                 modelStatus = noteViewModel.modelStatus.collectAsState().value,
+                modelPreloadState = modelPreloadState,
                 onDownloadModel = { noteViewModel.downloadAiModel() },
+                onWarmUpModel = { noteViewModel.warmUpAiModel() },
                 onDeleteModel = { noteViewModel.deleteAiModel() },
                 isAiCapable = noteViewModel.isAiCapable,
                 onBack = { navController.popBackStack() },

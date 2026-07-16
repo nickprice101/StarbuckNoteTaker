@@ -147,43 +147,27 @@ class LlamaForegroundService : Service() {
         noteContext: String?,
         requestId: String,
     ): String {
-        var webResult: WebLookupResult? = null
-        var enrichedContext = noteContext
-
         if (AssistantWebLookup.shouldLookup(question)) {
             broadcastProgress(requestId, "", "Looking up web context", LlamaEngine.Mode.QUESTION)
             val lookup = webLookup.lookup(question)
             if (lookup.results.isNotEmpty()) {
-                webResult = lookup
-                enrichedContext = AssistantWebLookup.mergeWithNoteContext(noteContext, lookup)
                 broadcastProgress(
                     requestId = requestId,
                     partialText = lookup.progressPreview(),
-                    status = "Found web context",
+                    status = "Lookup complete",
                     mode = LlamaEngine.Mode.QUESTION,
                 )
-
-                if (!engine.isWarm) {
-                    return AssistantWebLookup.quickAnswer(question, lookup)
-                }
-            } else {
-                broadcastProgress(
-                    requestId = requestId,
-                    partialText = "",
-                    status = "Web lookup unavailable; using local context",
-                    mode = LlamaEngine.Mode.QUESTION,
-                )
+                // Lookup questions already have bounded factual context. Returning
+                // it directly avoids paying model prefill/decode latency and also
+                // works while the 3B engine is still preloading.
+                return AssistantWebLookup.quickAnswer(question, lookup)
             }
+            val detail = lookup.error?.takeIf { it.isNotBlank() } ?: "No results found"
+            return "I could not complete that lookup quickly. $detail"
         }
 
         broadcastProgress(requestId, "", "Preparing on-device model", LlamaEngine.Mode.QUESTION)
-        val answer = engine.answer(question, enrichedContext, requestId)
-        val lookup = webResult ?: return answer
-        return if (answer.shouldUseWebFallback()) {
-            AssistantWebLookup.quickAnswer(question, lookup)
-        } else {
-            appendWebSources(answer, lookup)
-        }
+        return engine.answer(question, noteContext, requestId)
     }
 
     private fun appendWebSources(answer: String, webLookup: WebLookupResult): String {

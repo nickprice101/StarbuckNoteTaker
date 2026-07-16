@@ -1,17 +1,26 @@
 package com.example.starbucknotetaker
 
-import android.text.Html
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 internal class AssistantWebLookup(
     private val httpClient: HttpClient = HttpUrlConnectionClient(),
@@ -22,29 +31,52 @@ internal class AssistantWebLookup(
             return@withContext WebLookupResult(question, emptyList(), "empty query")
         }
 
-        val htmlResult = runCatching { searchDuckDuckGoHtml(query) }.getOrNull()
-        if (htmlResult != null && htmlResult.results.isNotEmpty()) {
-            return@withContext htmlResult
+        // Query providers together so an unreachable endpoint cannot multiply the wait.
+        // Return as soon as any provider succeeds instead of waiting for every request.
+        val answer = supervisorScope {
+            val attempts = listOf(
+                async { lookupSafely(query, "DuckDuckGo HTML", ::searchDuckDuckGoHtml) },
+                async {
+                    lookupSafely(
+                        query,
+                        "DuckDuckGo instant answer",
+                        ::searchDuckDuckGoInstantAnswer,
+                    )
+                },
+                async { lookupSafely(query, "Wikipedia", ::searchWikipedia) },
+            ).toMutableList()
+            val failures = mutableListOf<WebLookupResult>()
+            while (attempts.isNotEmpty()) {
+                val (completed, result) = select<Pair<Deferred<WebLookupResult>, WebLookupResult>> {
+                    attempts.forEach { attempt ->
+                        attempt.onAwait { attempt to it }
+                    }
+                }
+                attempts.remove(completed)
+                if (result.results.isNotEmpty()) {
+                    attempts.forEach { it.cancel() }
+                    return@supervisorScope result
+                }
+                failures += result
+            }
+            WebLookupResult(
+                query,
+                emptyList(),
+                failures.mapNotNull { it.error }.firstOrNull() ?: "No web results found",
+            )
         }
-
-        val instantResult = runCatching { searchDuckDuckGoInstantAnswer(query) }.getOrNull()
-        if (instantResult != null && instantResult.results.isNotEmpty()) {
-            return@withContext instantResult
-        }
-
-        val wikiResult = runCatching { searchWikipedia(query) }.getOrNull()
-        if (wikiResult != null && wikiResult.results.isNotEmpty()) {
-            return@withContext wikiResult
-        }
-
-        WebLookupResult(
-            query = query,
-            results = emptyList(),
-            error = htmlResult?.error ?: instantResult?.error ?: wikiResult?.error ?: "No web results found",
-        )
+        answer
     }
 
-    private fun searchDuckDuckGoHtml(query: String): WebLookupResult {
+    private suspend fun lookupSafely(
+        query: String,
+        provider: String,
+        lookup: suspend (String) -> WebLookupResult,
+    ): WebLookupResult =
+        runCatching { lookup(query) }
+            .getOrElse { WebLookupResult(query, emptyList(), "$provider unavailable: ${it.message.orEmpty()}") }
+
+    private suspend fun searchDuckDuckGoHtml(query: String): WebLookupResult {
         val url = "https://duckduckgo.com/html/?q=${urlEncode(query)}"
         val response = httpClient.get(url, SEARCH_HEADERS, MAX_SEARCH_RESPONSE_BYTES)
         if (response.statusCode !in 200..299) {
@@ -78,7 +110,7 @@ internal class AssistantWebLookup(
         return WebLookupResult(query, results, if (results.isEmpty()) "No DuckDuckGo results parsed" else null)
     }
 
-    private fun searchDuckDuckGoInstantAnswer(query: String): WebLookupResult {
+    private suspend fun searchDuckDuckGoInstantAnswer(query: String): WebLookupResult {
         val url = "https://api.duckduckgo.com/?q=${urlEncode(query)}&format=json&no_html=1&skip_disambig=1"
         val response = httpClient.get(url, SEARCH_HEADERS, MAX_SEARCH_RESPONSE_BYTES)
         if (response.statusCode !in 200..299) {
@@ -128,7 +160,7 @@ internal class AssistantWebLookup(
         )
     }
 
-    private fun searchWikipedia(query: String): WebLookupResult {
+    private suspend fun searchWikipedia(query: String): WebLookupResult {
         val url = "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=$MAX_RESULTS&srsearch=${urlEncode(query)}"
         val response = httpClient.get(url, SEARCH_HEADERS, MAX_SEARCH_RESPONSE_BYTES)
         if (response.statusCode !in 200..299) {
@@ -164,21 +196,25 @@ internal class AssistantWebLookup(
     }
 
     internal interface HttpClient {
-        fun get(url: String, headers: Map<String, String> = emptyMap(), maxBytes: Int): WebLookupHttpResponse
+        suspend fun get(
+            url: String,
+            headers: Map<String, String> = emptyMap(),
+            maxBytes: Int,
+        ): WebLookupHttpResponse
     }
 
     private class HttpUrlConnectionClient : HttpClient {
         private val client = OkHttpClient.Builder()
-            .connectTimeout(2, TimeUnit.SECONDS)
-            .readTimeout(3, TimeUnit.SECONDS)
-            .callTimeout(5, TimeUnit.SECONDS)
+            .connectTimeout(1_500, TimeUnit.MILLISECONDS)
+            .readTimeout(2_500, TimeUnit.MILLISECONDS)
+            .callTimeout(3_000, TimeUnit.MILLISECONDS)
             .build()
 
-        override fun get(
+        override suspend fun get(
             url: String,
             headers: Map<String, String>,
             maxBytes: Int,
-        ): WebLookupHttpResponse {
+        ): WebLookupHttpResponse = suspendCancellableCoroutine { continuation ->
             val request = Request.Builder()
                 .url(url)
                 .apply {
@@ -186,11 +222,31 @@ internal class AssistantWebLookup(
                 }
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.byteStream()?.use { it.readBytesLimited(maxBytes) }
-                    ?: ByteArray(0)
-                return WebLookupHttpResponse(response.code, body)
-            }
+            val call = client.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(
+                object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        if (continuation.isActive) continuation.resumeWith(Result.failure(e))
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        val result = runCatching {
+                            response.use {
+                                val body = it.body?.byteStream()?.use { stream ->
+                                    stream.readBytesLimited(maxBytes)
+                                } ?: ByteArray(0)
+                                WebLookupHttpResponse(it.code, body)
+                            }
+                        }
+                        if (!continuation.isActive) return
+                        result.fold(
+                            onSuccess = continuation::resume,
+                            onFailure = { continuation.resumeWith(Result.failure(it)) },
+                        )
+                    }
+                },
+            )
         }
     }
 
@@ -210,6 +266,17 @@ internal class AssistantWebLookup(
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
         private val TAG_REGEX = Regex("<[^>]+>")
+        private val HTML_ENTITY_REGEX = Regex("&(#(?:x[0-9a-fA-F]+|[0-9]+)|[a-zA-Z]+);")
+        private val HTML_ENTITIES = mapOf(
+            "amp" to "&",
+            "quot" to "\"",
+            "apos" to "'",
+            "lt" to "<",
+            "gt" to ">",
+            "nbsp" to " ",
+            "ndash" to "–",
+            "mdash" to "—",
+        )
         private val CURRENT_INFO_REGEX = Regex(
             "\\b(latest|current|currently|today|tonight|yesterday|tomorrow|news|weather|forecast|score|scores|schedule|price|stock|version|release|released|update|updates|recent|newest|now)\\b",
             RegexOption.IGNORE_CASE,
@@ -218,13 +285,23 @@ internal class AssistantWebLookup(
             "\\b(search|web|internet|online|look\\s*up|lookup|google|source|sources|cite|citation)\\b",
             RegexOption.IGNORE_CASE,
         )
+        private val FACTUAL_QUESTION_REGEX = Regex(
+            "^\\s*(?:who|what|when|where|which|how\\s+many|how\\s+much|name|list)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        private val NON_LOOKUP_QUESTION_REGEX = Regex(
+            "\\b(?:should|could|would|this\\s+note|current\\s+note|rewrite|reformat|format|summari[sz]e|brainstorm|draft|create)\\b",
+            RegexOption.IGNORE_CASE,
+        )
 
         fun shouldLookup(question: String): Boolean {
             val trimmed = question.trim()
             if (trimmed.isBlank()) return false
             if (extractUrls(trimmed, treatUnterminatedAsComplete = true).isNotEmpty()) return true
             return EXPLICIT_LOOKUP_REGEX.containsMatchIn(trimmed) ||
-                CURRENT_INFO_REGEX.containsMatchIn(trimmed)
+                CURRENT_INFO_REGEX.containsMatchIn(trimmed) ||
+                (FACTUAL_QUESTION_REGEX.containsMatchIn(trimmed) &&
+                    !NON_LOOKUP_QUESTION_REGEX.containsMatchIn(trimmed))
         }
 
         fun mergeWithNoteContext(noteContext: String?, webLookup: WebLookupResult): String =
@@ -243,16 +320,17 @@ internal class AssistantWebLookup(
             if (results.isEmpty()) {
                 return "I could not find web results quickly enough for: ${question.trim()}"
             }
+            val primary = results.first()
             return buildString {
-                appendLine("I found these web results:")
+                if (primary.snippet.isNotBlank()) {
+                    appendLine(primary.snippet)
+                } else {
+                    appendLine(primary.title)
+                }
                 appendLine()
+                appendLine("Sources:")
                 results.take(3).forEachIndexed { index, result ->
-                    appendLine("${index + 1}. ${result.title}")
-                    if (result.snippet.isNotBlank()) {
-                        appendLine(result.snippet)
-                    }
-                    appendLine(result.url)
-                    if (index != results.take(3).lastIndex) appendLine()
+                    appendLine("${index + 1}. ${result.title}: ${result.url}")
                 }
             }.trim()
         }
@@ -267,7 +345,19 @@ internal class AssistantWebLookup(
         private fun stripTags(value: String): String = TAG_REGEX.replace(value, " ")
 
         private fun decodeHtml(value: String): String =
-            Html.fromHtml(value, Html.FROM_HTML_MODE_LEGACY).toString()
+            HTML_ENTITY_REGEX.replace(value) { match ->
+                val entity = match.groupValues[1]
+                when {
+                    entity.startsWith("#x", ignoreCase = true) ->
+                        entity.substring(2).toIntOrNull(16)?.toUnicodeString()
+                    entity.startsWith('#') ->
+                        entity.substring(1).toIntOrNull()?.toUnicodeString()
+                    else -> HTML_ENTITIES[entity.lowercase(Locale.US)]
+                } ?: match.value
+            }
+
+        private fun Int.toUnicodeString(): String? =
+            takeIf(Character::isValidCodePoint)?.let { String(Character.toChars(it)) }
 
         private fun String.cleanResultText(): String =
             replace(Regex("\\s+"), " ").trim()

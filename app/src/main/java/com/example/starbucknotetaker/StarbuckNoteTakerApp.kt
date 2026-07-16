@@ -17,6 +17,7 @@ class StarbuckNoteTakerApp : Application() {
         super.onCreate()
         val processName = resolveProcessName()
         if (processName == null || processName == packageName) {
+            LlamaEngineProvider.prewarm(this)
             if (QspmDeviceDetector.shouldWarmUpCurrentDevice()) {
                 QspmServiceInitializer.warmUp(this)
             } else {

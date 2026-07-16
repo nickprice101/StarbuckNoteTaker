@@ -39,6 +39,7 @@ import com.example.starbucknotetaker.asChecklistContent
 import com.example.starbucknotetaker.richtext.StyleRange
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextStyle
+import com.example.starbucknotetaker.richtext.MarkdownRichText
 
 /**
  * ViewModel storing notes in memory.
@@ -70,7 +71,7 @@ class NoteViewModel(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val reminderNavigation: SharedFlow<Long> = reminderNavigationEvents.asSharedFlow()
-    private val attachmentTagRegex = Regex("\\[\\[(?:image|file):\\d+]]")
+    private val attachmentTagRegex = Regex("\\[\\[(?:image|file|link):\\d+]]")
     private val _biometricUnlockEvents = MutableSharedFlow<BiometricUnlockRequest>(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -236,6 +237,10 @@ class NoteViewModel(
         const val PENDING_UNLOCK_NAVIGATION_NOTE_ID_KEY = "pending_unlock_navigation_note_id"
         const val SUMMARY_DEBOUNCE_MS = 250L
         const val MAX_ANSWER_STATUS_HISTORY = 6
+        val NOTE_CONTEXT_REQUEST_REGEX = Regex(
+            "\\b(?:this|the|current)\\s+note\\b|\\b(?:notes|above|context|word\\s+count)\\b",
+            RegexOption.IGNORE_CASE,
+        )
     }
 
     fun updateChecklistItems(id: Long, items: List<ChecklistItem>) {
@@ -266,7 +271,8 @@ class NoteViewModel(
         event: NoteEvent? = null,
         checklistItems: List<ChecklistItem>? = null,
         skipAiSummary: Boolean = false,
-    ) {
+        isLocked: Boolean = false,
+    ): Long {
         val finalTitle = if (title.isNullOrBlank()) {
             "Untitled ${untitledCounter++}"
         } else {
@@ -304,6 +310,7 @@ class NoteViewModel(
             linkPreviews = linkPreviews,
             summary = initialSummary,
             event = event,
+            isLocked = isLocked,
             checklistItems = normalizedChecklist,
         )
         _notes.add(note)
@@ -315,6 +322,7 @@ class NoteViewModel(
             val noteId = note.id
             launchSummaryUpdates(noteId, finalTitle, summarizerSource)
         }
+        return note.id
     }
 
     fun deleteNote(id: Long) {
@@ -831,33 +839,74 @@ class NoteViewModel(
     }
 
     /**
-     * Rewrites the content of note [noteId] via the LLM foreground service.
-     * The rewritten text is delivered back via the [LlamaForegroundService.ACTION_RESULT]
-     * broadcast and applied to the note automatically.
+     * Reformats [noteId] immediately, either as a new note or in place according
+     * to [destination]. If the model is ready, it can refine that same result in
+     * the background without delaying the user's selected operation.
      */
-    fun rewriteNote(noteId: Long) {
-        val ctx = context ?: return
-        val note = getNoteById(noteId) ?: return
-        val text = note.content.trim()
-        if (text.isBlank()) return
+    fun rewriteNote(
+        noteId: Long,
+        sourceTitle: String? = null,
+        sourceContent: String? = null,
+        destination: RewriteDestination = RewriteDestination.NEW_NOTE,
+    ): Long? {
+        val ctx = context ?: return null
+        val note = getNoteById(noteId) ?: return null
+        val text = sourceContent?.trim()?.takeIf { it.isNotBlank() } ?: note.content.trim()
+        if (text.isBlank()) return null
+
+        val attachmentTags = attachmentTagRegex.findAll(text).map { it.value }.toList()
+        val formatSource = attachmentTagRegex.replace(text, " ")
+            .replace(Regex("[ \\t]+"), " ")
+            .trim()
+        val localRewrite = ProfessionalNoteFormatter.format(formatSource).ifBlank { formatSource }
+        val rewrittenNoteId = when (destination) {
+            RewriteDestination.NEW_NOTE -> {
+                val copyTitle =
+                    "Reformatted - ${sourceTitle?.trim()?.takeIf { it.isNotBlank() } ?: note.title}"
+                        .take(80)
+                val styledRewrite = MarkdownRichText.parse(localRewrite)
+                addNote(
+                    title = copyTitle,
+                    content = styledRewrite.text,
+                    styledContent = styledRewrite,
+                    images = emptyList(),
+                    files = emptyList(),
+                    linkPreviews = emptyList(),
+                    skipAiSummary = true,
+                    isLocked = note.isLocked,
+                )
+            }
+            RewriteDestination.CURRENT_NOTE -> {
+                val updated = applyRewriteToNote(
+                    noteId = noteId,
+                    rewrittenContent = localRewrite,
+                    titleOverride = sourceTitle,
+                    attachmentTagsOverride = attachmentTags,
+                    launchSummaryRefresh = false,
+                )
+                if (!updated) return null
+                noteId
+            }
+        }
+        updateNoteSummary(rewrittenNoteId, "AI rewrite: local result ready")
+        _inferenceProgress.value = LlamaEngine.InferenceProgress.Done(
+            rewrittenNoteId.toString(),
+            localRewrite,
+        )
+
+        if (LlamaEngineProvider.preloadState.value !is LlamaEngineProvider.PreloadState.Ready) {
+            return rewrittenNoteId
+        }
 
         val requestId = java.util.UUID.randomUUID().toString()
-        val localRewrite = ProfessionalNoteFormatter.format(text).ifBlank { text }
-        pendingRewriteNoteIds[requestId] = noteId
+        pendingRewriteNoteIds[requestId] = rewrittenNoteId
         _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
-        applyRewriteToNote(
-            noteId = noteId,
-            rewrittenContent = localRewrite,
-            summaryOverride = "AI rewrite: quick cleanup applied",
-            launchSummaryRefresh = false,
-        )
-        updateRewriteStatus(requestId, "Quick cleanup applied")
-
+        updateRewriteStatus(requestId, "3B refinement started")
         val intent = LlamaForegroundService.buildIntent(
             context = ctx,
             mode = LlamaEngine.Mode.REWRITE,
             text = localRewrite,
-            noteId = noteId,
+            noteId = rewrittenNoteId,
             requestId = requestId,
         )
         runCatching {
@@ -872,6 +921,7 @@ class NoteViewModel(
             updateRewriteStatus(requestId, "Model refinement unavailable; local rewrite kept")
             pendingRewriteNoteIds.remove(requestId)
         }
+        return rewrittenNoteId
     }
 
     /**
@@ -879,21 +929,20 @@ class NoteViewModel(
      * as grounding context.  The answer is delivered via [LlamaForegroundService.ACTION_RESULT]
      * and stored as a new child note.
      */
-    fun askQuestion(noteId: Long, question: String) {
-        val ctx = context ?: return
-        val note = getNoteById(noteId) ?: return
+    fun askQuestion(noteId: Long, question: String): Long? {
+        val ctx = context ?: return null
+        val note = getNoteById(noteId) ?: return null
         val trimmedQuestion = question.trim()
-        if (trimmedQuestion.isBlank()) return
+        if (trimmedQuestion.isBlank()) return null
 
         if (ProfessionalNoteFormatter.isRewriteRequest(trimmedQuestion)) {
-            rewriteNote(noteId)
-            return
+            return rewriteNote(noteId)
         }
 
         val requestId = java.util.UUID.randomUUID().toString()
         rememberAnswerStatus(requestId, "Received question")
         rememberAnswerStatus(requestId, "Checking for quick answer")
-        createAnswerNote(
+        val answerNoteId = createAnswerNote(
             sourceNoteId = noteId,
             answer = buildAnswerProgressContent(
                 question = trimmedQuestion,
@@ -902,10 +951,9 @@ class NoteViewModel(
                 events = answerStatusHistory(requestId),
             ),
             summary = "AI answer in progress",
-        )?.let { answerNoteId ->
-            pendingAnswerNoteIds[requestId] = answerNoteId
-            pendingAnswerQuestions[requestId] = trimmedQuestion
-        }
+        ) ?: return null
+        pendingAnswerNoteIds[requestId] = answerNoteId
+        pendingAnswerQuestions[requestId] = trimmedQuestion
         _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
 
         val quickAnswer = QuickAssistantAnswerer.answer(trimmedQuestion, note.content)
@@ -923,7 +971,7 @@ class NoteViewModel(
                 answer = quickAnswer.answer,
                 isError = false,
             )
-            return
+            return answerNoteId
         }
 
         rememberAnswerStatus(requestId, "Starting assistant service")
@@ -938,7 +986,9 @@ class NoteViewModel(
             text = trimmedQuestion,
             noteId = noteId,
             requestId = requestId,
-            contextText = note.content.take(LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT),
+            contextText = note.content
+                .take(LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT)
+                .takeIf { NOTE_CONTEXT_REQUEST_REGEX.containsMatchIn(trimmedQuestion) },
         )
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -957,6 +1007,7 @@ class NoteViewModel(
                 isError = true,
             )
         }
+        return answerNoteId
     }
 
     /**
@@ -966,12 +1017,20 @@ class NoteViewModel(
     fun downloadAiModel() {
         val manager = llamaModelManager ?: return
         viewModelScope.launch {
-            manager.downloadModel()
+            if (manager.downloadModel()) {
+                context?.let(LlamaEngineProvider::prewarm)
+            }
         }
+    }
+
+    fun warmUpAiModel() {
+        val ctx = context ?: return
+        LlamaEngineProvider.prewarm(ctx)
     }
 
     /** Deletes the downloaded model weights to reclaim storage. */
     fun deleteAiModel() {
+        LlamaEngineProvider.closeNow()
         llamaModelManager?.deleteModel()
     }
 
@@ -1164,15 +1223,30 @@ class NoteViewModel(
         rewrittenContent: String,
         summaryOverride: String? = null,
         launchSummaryRefresh: Boolean = true,
+        titleOverride: String? = null,
+        attachmentTagsOverride: List<String>? = null,
     ): Boolean {
         val index = _notes.indexOfFirst { it.id == noteId }
         if (index == -1) return false
-        val cleanedContent = rewrittenContent.trim()
-        if (cleanedContent.isBlank()) return false
         val note = _notes[index]
-        val styled = RichTextDocument.fromPlainText(cleanedContent)
+        val attachmentTags = attachmentTagsOverride
+            ?: attachmentTagRegex.findAll(note.content).map { it.value }.toList()
+        val markdownBody = attachmentTagRegex.replace(rewrittenContent, " ").trim()
+        if (markdownBody.isBlank()) return false
+        val markdownWithAttachments = if (attachmentTags.isEmpty()) {
+            markdownBody
+        } else {
+            buildString {
+                append(markdownBody)
+                append("\n\n## Attachments\n")
+                append(attachmentTags.joinToString("\n"))
+            }
+        }
+        val styled = MarkdownRichText.parse(markdownWithAttachments)
+        val cleanedContent = styled.text
+        val finalTitle = titleOverride?.trim()?.takeIf { it.isNotBlank() } ?: note.title
         val summarizerSource = if (isSummarizerEnabled() && note.checklistItems == null) {
-            buildSummarizerSource(note.title, cleanedContent, note.event)
+            buildSummarizerSource(finalTitle, cleanedContent, note.event)
         } else {
             null
         }
@@ -1181,14 +1255,15 @@ class NoteViewModel(
             ?: summarizerSource?.let(::synchronousSummaryPlaceholder)
             ?: manualSummaryFromContent(cleanedContent)
         val updated = note.copy(
+            title = finalTitle,
             content = cleanedContent,
-            styledContent = styled.trimmed(),
+            styledContent = styled,
             summary = summary.take(200),
         )
         _notes[index] = updated
         pin?.let { store?.saveNotes(_notes, it) }
         if (launchSummaryRefresh && summarizerSource != null) {
-            launchSummaryUpdates(noteId, note.title, summarizerSource)
+            launchSummaryUpdates(noteId, finalTitle, summarizerSource)
         }
         return true
     }
@@ -1200,28 +1275,28 @@ class NoteViewModel(
     ): Long? {
         val sourceNote = getNoteById(sourceNoteId) ?: return null
         val answerTitle = "Answer — ${sourceNote.title.take(40)}"
-        addNote(
+        val styledAnswer = MarkdownRichText.parse(answer)
+        val createdId = addNote(
             title = answerTitle,
-            content = answer,
-            styledContent = com.example.starbucknotetaker.richtext.RichTextDocument.fromPlainText(answer),
+            content = styledAnswer.text,
+            styledContent = styledAnswer,
             images = emptyList(),
             files = emptyList(),
             linkPreviews = emptyList(),
             skipAiSummary = true,
         )
-        val created = _notes
-            .filter { it.title == answerTitle && it.content == answer.trim() }
-            .maxByOrNull { it.date }
-        if (created != null && created.summary != summary) {
-            updateAnswerNote(created.id, answer, summary)
+        val created = getNoteById(createdId)
+        if (created?.summary != summary) {
+            updateAnswerNote(createdId, answer, summary)
         }
-        return created?.id
+        return createdId
     }
 
     private fun updateAnswerNote(noteId: Long, content: String, summary: String): Boolean {
         val index = _notes.indexOfFirst { it.id == noteId }
         if (index == -1) return false
-        val cleanedContent = content.trim()
+        val styledContent = MarkdownRichText.parse(content)
+        val cleanedContent = styledContent.text
         val cleanedSummary = sanitizeSummary(summary).take(200)
         val current = _notes[index]
         if (current.content == cleanedContent && current.summary == cleanedSummary) {
@@ -1229,7 +1304,7 @@ class NoteViewModel(
         }
         _notes[index] = current.copy(
             content = cleanedContent,
-            styledContent = RichTextDocument.fromPlainText(cleanedContent).trimmed(),
+            styledContent = styledContent,
             summary = cleanedSummary,
         )
         pin?.let { store?.saveNotes(_notes, it) }

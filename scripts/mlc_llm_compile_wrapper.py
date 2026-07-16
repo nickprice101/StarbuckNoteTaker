@@ -256,6 +256,34 @@ def _preserve_explicit_system_lib_prefix(compile_cli: types.ModuleType) -> None:
     compile_cli.detect_system_lib_prefix = detect_system_lib_prefix
 
 
+def _install_host_target_override() -> None:
+    """Let Android CPU builds retain vector features on the LLVM host target.
+
+    MLC's CLI accepts a full JSON target for ``--device`` but treats ``--host``
+    strictly as an LLVM triple. For a CPU-only Android build the model kernels
+    are emitted by the host code generator, so reducing that host to a bare
+    triple silently drops AVX2/F16C/FMA and produces extremely slow software
+    float16 conversions. ``compile_model_tar.sh`` supplies the same validated
+    JSON through ``MLC_HOST_TARGET_JSON`` for x86_64 builds.
+    """
+    override = os.environ.get("MLC_HOST_TARGET_JSON", "").strip()
+    if not override:
+        return
+
+    from mlc_llm.support import auto_target  # pylint: disable=import-outside-toplevel
+    from tvm.target import Target  # pylint: disable=import-outside-toplevel
+
+    host_target = Target(override)
+    original = auto_target._detect_target_host  # pylint: disable=protected-access
+
+    def detect_target_host(hint: str) -> Target:
+        if hint == host_target.attrs["mtriple"]:
+            return host_target
+        return original(hint)
+
+    auto_target._detect_target_host = detect_target_host  # pylint: disable=protected-access
+
+
 def main(argv: list[str]) -> int:
     if argv == ["--check-import"]:
         return _check_import_lightweight()
@@ -267,6 +295,7 @@ def main(argv: list[str]) -> int:
     _patch_tirx_well_formed_checks()
     _install_missing_tvm_contrib_stubs()
     _install_missing_tvm_ir_helpers()
+    _install_host_target_override()
 
     from mlc_llm.cli import compile as compile_cli  # pylint: disable=import-outside-toplevel
     _preserve_explicit_system_lib_prefix(compile_cli)

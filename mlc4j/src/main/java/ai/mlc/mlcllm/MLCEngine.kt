@@ -45,6 +45,20 @@ import kotlin.concurrent.thread
  */
 class MLCEngine(deviceType: String = "opencl") {
 
+    /**
+     * Capacity limits for a single-user on-device engine. Explicit limits are
+     * important on phones because MLC's interactive preset otherwise expands
+     * buffers to the model's full (very large) context window.
+     */
+    data class RuntimeConfig(
+        val gpuMemoryUtilization: Double,
+        val maxNumSequence: Int,
+        val maxTotalSequenceLength: Int,
+        val maxSingleSequenceLength: Int,
+        val prefillChunkSize: Int,
+        val prefixCacheMaxNumRecyclingSeqs: Int = 1,
+    )
+
     private val TAG = "MLCEngine"
 
     private val jsonFFIEngine = JSONFFIEngine(deviceType)
@@ -59,7 +73,7 @@ class MLCEngine(deviceType: String = "opencl") {
         jsonFFIEngine.initBackgroundEngine { resultJson ->
             dispatchStreamResult(resultJson)
         }
-        thread(isDaemon = true, name = "mlc-background-loop", priority = Thread.MAX_PRIORITY) {
+        thread(isDaemon = true, name = "mlc-background-loop", priority = Thread.NORM_PRIORITY) {
             runBackgroundLoopSafely()
         }
         thread(isDaemon = true, name = "mlc-stream-back-loop") {
@@ -75,14 +89,30 @@ class MLCEngine(deviceType: String = "opencl") {
      * @param modelPath Absolute path to the model weights directory.
      * @param mode      MLC engine mode: "interactive", "local", or "server".
      */
-    fun reload(modelLib: String, modelPath: String, mode: String = "interactive") {
+    fun reload(
+        modelLib: String,
+        modelPath: String,
+        mode: String = "interactive",
+        runtimeConfig: RuntimeConfig? = null,
+    ) {
         backgroundFailure.set(null)
         val config = JSONObject().apply {
             put("model", modelPath)
             put("model_lib", modelLib)
             put("mode", mode)
+            runtimeConfig?.let { tuning ->
+                put("gpu_memory_utilization", tuning.gpuMemoryUtilization)
+                put("max_num_sequence", tuning.maxNumSequence)
+                put("max_total_sequence_length", tuning.maxTotalSequenceLength)
+                put("max_single_sequence_length", tuning.maxSingleSequenceLength)
+                put("prefill_chunk_size", tuning.prefillChunkSize)
+                put(
+                    "prefix_cache_max_num_recycling_seqs",
+                    tuning.prefixCacheMaxNumRecyclingSeqs,
+                )
+            }
         }.toString()
-        Log.i(TAG, "Reloading engine: lib=$modelLib mode=$mode")
+        Log.i(TAG, "Reloading engine: lib=$modelLib mode=$mode tuning=$runtimeConfig")
         jsonFFIEngine.reload(config)
         throwIfBackgroundFailed()
         Log.i(TAG, "Engine reload complete")
@@ -115,6 +145,7 @@ class MLCEngine(deviceType: String = "opencl") {
      */
     private fun dispatchStreamResult(resultJson: String?) {
         if (resultJson == null) return
+        Log.d(TAG, "Received completion stream callback (${resultJson.length} chars)")
         try {
             // The callback delivers a JSON array of ChatCompletionStreamResponse objects.
             val arr: org.json.JSONArray = when {
@@ -127,6 +158,15 @@ class MLCEngine(deviceType: String = "opencl") {
                 val req = pending[requestId] ?: continue
 
                 req.callback(parseChunk(chunk))
+
+                // MLC guarantees that the final usage-only block is last. Treat it as
+                // terminal as well as finish_reason so completion cannot wait for its
+                // timeout if a runtime emits the finish and usage blocks separately.
+                if (chunk.has("usage") && !chunk.isNull("usage")) {
+                    pending.remove(requestId)
+                    req.latch.countDown()
+                    continue
+                }
 
                 // Release the latch when a terminal finish_reason is present.
                 val choices = chunk.optJSONArray("choices")
@@ -173,7 +213,13 @@ class MLCEngine(deviceType: String = "opencl") {
             Log.d(TAG, "Submitting completion requestId=$requestId")
             throwIfBackgroundFailed()
             try {
-                jsonFFIEngine.chatCompletion(requestJson, requestId)
+                val accepted = jsonFFIEngine.chatCompletion(requestJson, requestId)
+                if (!accepted) {
+                    throw IllegalArgumentException(
+                        "MLC rejected completion request: ${jsonFFIEngine.getLastError()}",
+                    )
+                }
+                Log.d(TAG, "Completion accepted requestId=$requestId")
 
                 val boundedTimeout = timeoutSeconds.coerceAtLeast(1L)
                 val finished = latch.await(boundedTimeout, TimeUnit.SECONDS)

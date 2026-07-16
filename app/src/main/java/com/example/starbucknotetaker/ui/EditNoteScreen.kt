@@ -32,7 +32,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
-import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -54,6 +53,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.exifinterface.media.ExifInterface
 import com.example.starbucknotetaker.Note
+import com.example.starbucknotetaker.RewriteDestination
 import com.example.starbucknotetaker.NoteFile
 import com.example.starbucknotetaker.NoteImage
 import com.example.starbucknotetaker.NoteEvent
@@ -85,6 +85,74 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
+@Composable
+fun AiAssistantDialog(
+    onDismiss: () -> Unit,
+    onAskQuestion: (String) -> Unit,
+    onReformat: ((RewriteDestination) -> Unit)? = null,
+) {
+    var question by remember { mutableStateOf("") }
+    var chooseReformatDestination by remember { mutableStateOf(false) }
+
+    if (chooseReformatDestination) {
+        AlertDialog(
+            onDismissRequest = { chooseReformatDestination = false },
+            title = { Text("Reformat note") },
+            text = {
+                Text(
+                    "Would you like to create a new reformatted note or edit the current note?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onReformat?.invoke(RewriteDestination.NEW_NOTE) }) {
+                    Text("Create new note")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { onReformat?.invoke(RewriteDestination.CURRENT_NOTE) }) {
+                    Text("Edit current note")
+                }
+            },
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ask the AI") },
+        text = {
+            Column {
+                if (onReformat != null) {
+                    Button(
+                        onClick = { chooseReformatDestination = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Reformat note")
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                OutlinedTextField(
+                    value = question,
+                    onValueChange = { question = it },
+                    label = { Text("Your question") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = question.isNotBlank(),
+                onClick = { onAskQuestion(question.trim()) },
+            ) {
+                Text("Ask")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun EditNoteScreen(
@@ -95,7 +163,7 @@ fun EditNoteScreen(
     onEnablePinCheck: () -> Unit,
     summarizerState: Summarizer.SummarizerState,
     openAttachment: suspend (String) -> ByteArray?,
-    onRewriteNote: ((Long) -> Unit)? = null,
+    onRewriteNote: ((Long, String?, String, RewriteDestination) -> Unit)? = null,
     onAskQuestion: ((Long, String) -> Unit)? = null,
     inferenceProgress: LlamaEngine.InferenceProgress = LlamaEngine.InferenceProgress.Idle,
 ) {
@@ -567,6 +635,20 @@ fun EditNoteScreen(
         }
     }
 
+    fun currentDraftContent(): String = buildString {
+        var imageIndex = 0
+        var fileIndex = 0
+        var linkIndex = 0
+        blocks.forEach { block ->
+            when (block) {
+                is EditBlock.Text -> appendLine(block.value.text)
+                is EditBlock.Image -> appendLine("[[image:${imageIndex++}]]")
+                is EditBlock.File -> appendLine("[[file:${fileIndex++}]]")
+                is EditBlock.LinkPreview -> appendLine("[[link:${linkIndex++}]]")
+            }
+        }
+    }.trim()
+
     Scaffold(
         scaffoldState = scaffoldState,
         topBar = {
@@ -588,17 +670,8 @@ fun EditNoteScreen(
                     },
                     actions = {
                         // ---- AI toolbar buttons ----
-                        if (onRewriteNote != null) {
-                            IconButton(onClick = { onRewriteNote(note.id) }) {
-                                Icon(
-                                    imageVector = Icons.Default.Autorenew,
-                                    contentDescription = "Rewrite with AI ♻",
-                                )
-                            }
-                        }
                         if (onAskQuestion != null) {
                             var showAskDialog by remember { mutableStateOf(false) }
-                            var question by remember { mutableStateOf("") }
                             IconButton(onClick = { showAskDialog = true }) {
                                 Icon(
                                     imageVector = Icons.Default.QuestionAnswer,
@@ -606,28 +679,22 @@ fun EditNoteScreen(
                                 )
                             }
                             if (showAskDialog) {
-                                AlertDialog(
-                                    onDismissRequest = { showAskDialog = false },
-                                    title = { Text("Ask the AI") },
-                                    text = {
-                                        OutlinedTextField(
-                                            value = question,
-                                            onValueChange = { question = it },
-                                            label = { Text("Your question") },
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
+                                AiAssistantDialog(
+                                    onDismiss = { showAskDialog = false },
+                                    onAskQuestion = { question ->
+                                        onAskQuestion(note.id, question)
+                                        showAskDialog = false
                                     },
-                                    confirmButton = {
-                                        TextButton(onClick = {
-                                            if (question.isNotBlank()) {
-                                                onAskQuestion(note.id, question)
-                                            }
+                                    onReformat = onRewriteNote?.let { rewrite ->
+                                        { destination ->
+                                            rewrite(
+                                                note.id,
+                                                title,
+                                                currentDraftContent(),
+                                                destination,
+                                            )
                                             showAskDialog = false
-                                            question = ""
-                                        }) { Text("Ask") }
-                                    },
-                                    dismissButton = {
-                                        TextButton(onClick = { showAskDialog = false }) { Text("Cancel") }
+                                        }
                                     },
                                 )
                             }
