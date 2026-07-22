@@ -838,11 +838,7 @@ class NoteViewModel(
         summaryJobs[noteId] = job
     }
 
-    /**
-     * Reformats [noteId] immediately, either as a new note or in place according
-     * to [destination]. If the model is ready, it can refine that same result in
-     * the background without delaying the user's selected operation.
-     */
+    /** Starts an offline ADK agent reformat and reserves the user-selected destination. */
     fun rewriteNote(
         noteId: Long,
         sourceTitle: String? = null,
@@ -858,17 +854,16 @@ class NoteViewModel(
         val formatSource = attachmentTagRegex.replace(text, " ")
             .replace(Regex("[ \\t]+"), " ")
             .trim()
-        val localRewrite = ProfessionalNoteFormatter.format(formatSource).ifBlank { formatSource }
         val rewrittenNoteId = when (destination) {
             RewriteDestination.NEW_NOTE -> {
                 val copyTitle =
                     "Reformatted - ${sourceTitle?.trim()?.takeIf { it.isNotBlank() } ?: note.title}"
                         .take(80)
-                val styledRewrite = MarkdownRichText.parse(localRewrite)
+                val pendingCopy = MarkdownRichText.parse(formatSource)
                 addNote(
                     title = copyTitle,
-                    content = styledRewrite.text,
-                    styledContent = styledRewrite,
+                    content = pendingCopy.text,
+                    styledContent = pendingCopy,
                     images = emptyList(),
                     files = emptyList(),
                     linkPreviews = emptyList(),
@@ -879,7 +874,7 @@ class NoteViewModel(
             RewriteDestination.CURRENT_NOTE -> {
                 val updated = applyRewriteToNote(
                     noteId = noteId,
-                    rewrittenContent = localRewrite,
+                    rewrittenContent = formatSource,
                     titleOverride = sourceTitle,
                     attachmentTagsOverride = attachmentTags,
                     launchSummaryRefresh = false,
@@ -888,24 +883,14 @@ class NoteViewModel(
                 noteId
             }
         }
-        updateNoteSummary(rewrittenNoteId, "AI rewrite: local result ready")
-        _inferenceProgress.value = LlamaEngine.InferenceProgress.Done(
-            rewrittenNoteId.toString(),
-            localRewrite,
-        )
-
-        if (LlamaEngineProvider.preloadState.value !is LlamaEngineProvider.PreloadState.Ready) {
-            return rewrittenNoteId
-        }
-
         val requestId = java.util.UUID.randomUUID().toString()
         pendingRewriteNoteIds[requestId] = rewrittenNoteId
         _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
-        updateRewriteStatus(requestId, "3B refinement started")
+        updateRewriteStatus(requestId, "ADK agent starting")
         val intent = LlamaForegroundService.buildIntent(
             context = ctx,
             mode = LlamaEngine.Mode.REWRITE,
-            text = localRewrite,
+            text = formatSource,
             noteId = rewrittenNoteId,
             requestId = requestId,
         )
@@ -916,9 +901,9 @@ class NoteViewModel(
                 ctx.startService(intent)
             }
         }.onFailure { throwable ->
-            val message = throwable.message ?: "Unable to start rewrite refinement"
+            val message = throwable.message ?: "Unable to start the reformat agent"
             _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, message)
-            updateRewriteStatus(requestId, "Model refinement unavailable; local rewrite kept")
+            updateRewriteStatus(requestId, "Agent unavailable; original text kept")
             pendingRewriteNoteIds.remove(requestId)
         }
         return rewrittenNoteId
@@ -1054,7 +1039,7 @@ class NoteViewModel(
                     Log.e("NoteViewModel", "LLM error for requestId=$requestId: $result")
                     _inferenceProgress.value = LlamaEngine.InferenceProgress.Error(requestId, result)
                     if (mode == LlamaEngine.Mode.REWRITE) {
-                        updateRewriteStatus(requestId, "Model refinement failed; local rewrite kept")
+                        updateRewriteStatus(requestId, "Agent failed; original text kept")
                         pendingRewriteNoteIds.remove(requestId)
                         return
                     }
@@ -1084,7 +1069,7 @@ class NoteViewModel(
                     LlamaEngine.Mode.REWRITE -> {
                         if (noteId != -1L) {
                             if (!applyRewriteToNote(noteId, result)) {
-                                updateRewriteStatus(requestId, "Model returned no refinement; local rewrite kept")
+                                updateRewriteStatus(requestId, "Agent result was invalid; original text kept")
                             }
                             pendingRewriteNoteIds.remove(requestId)
                         }

@@ -22,6 +22,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
@@ -66,6 +69,7 @@ import androidx.core.app.ActivityCompat
 import com.example.starbucknotetaker.NewNoteImage
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextDocumentBuilder
+import com.example.starbucknotetaker.richtext.MarkdownRichText
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -410,8 +414,38 @@ fun AddNoteScreen(
         }
     }
 
+    fun appendAgentText(text: String) {
+        val document = MarkdownRichText.parse(text.trim())
+        if (document.text.isBlank()) return
+        markDirty()
+        val block = NoteBlock.Text(RichTextValue.fromDocument(document))
+        val lastIndex = blocks.lastIndex
+        if ((blocks.getOrNull(lastIndex) as? NoteBlock.Text)?.value?.text?.isBlank() == true) {
+            blocks[lastIndex] = block
+        } else {
+            blocks.add(block)
+        }
+        blocks.add(NoteBlock.Text(RichTextValue.fromPlainText("")))
+    }
+
+    fun currentDraftContent(): String = buildString {
+        var imageIndex = 0
+        var fileIndex = 0
+        var linkIndex = 0
+        blocks.forEach { block ->
+            when (block) {
+                is NoteBlock.Text -> appendLine(block.value.text)
+                is NoteBlock.Image -> appendLine("[[image:${imageIndex++}]]")
+                is NoteBlock.File -> appendLine("[[file:${fileIndex++}]]")
+                is NoteBlock.LinkPreview -> appendLine("[[link:${linkIndex++}]]")
+            }
+        }
+    }.trim()
+
     var showTranscriptionDialog by remember { mutableStateOf(false) }
     var showSketchPad by remember { mutableStateOf(false) }
+    var showConversation by remember { mutableStateOf(false) }
+    var conversationNoteContext by remember { mutableStateOf("") }
     var showAudioPermissionSettingsDialog by remember { mutableStateOf(false) }
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -1078,8 +1112,9 @@ fun AddNoteScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AttachmentAction(
@@ -1129,9 +1164,33 @@ fun AddNoteScreen(
                             recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }
+                    AttachmentAction(
+                        icon = Icons.Default.Forum,
+                        label = "Conversation",
+                    ) {
+                        hideKeyboard()
+                        focusManager.clearFocus(force = true)
+                        conversationNoteContext = currentDraftContent()
+                        showConversation = true
+                    }
                 }
             }
         }
+    }
+
+    if (showConversation) {
+        AgentConversationDialog(
+            noteContext = conversationNoteContext,
+            onDismiss = { showConversation = false },
+            onInsertIntoNote = { response ->
+                appendAgentText(response)
+                Toast.makeText(
+                    context,
+                    "Added the agent response to this note",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+        )
     }
 
     if (showSketchPad) {

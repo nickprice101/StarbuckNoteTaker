@@ -78,7 +78,7 @@ class NoteViewModelAiAnswerTest {
     }
 
     @Test
-    fun askQuestionRewriteRequestCreatesCopyAndPreservesSource() {
+    fun askQuestionRewriteRequestQueuesAgentCopyAndPreservesSource() {
         val viewModel = NoteViewModel(SavedStateHandle())
         viewModel.loadNotes(appContext, "1234")
         viewModel.addNote(
@@ -106,15 +106,13 @@ class NoteViewModelAiAnswerTest {
         assertNotNull(rewritten)
         requireNotNull(rewritten)
         assertTrue(rewritten.title.startsWith("Reformatted - Client Meeting"))
-        assertTrue(rewritten.content.contains("Overview"))
-        assertTrue(rewritten.content.contains("Action Items"))
-        assertTrue(rewritten.content.contains("• Update launch doc."))
-        assertTrue(rewritten.styledContent?.spans?.isNotEmpty() == true)
+        assertEquals(originalContent, rewritten.content)
+        assertEquals("AI rewrite: ADK agent starting", rewritten.summary)
         assertTrue(viewModel.notes.none { it.title.startsWith("Answer") })
     }
 
     @Test
-    fun rewriteNoteCreatesQuickFormattedCopyAndPreservesSource() {
+    fun rewriteNoteQueuesAgentCopyAndPreservesSource() {
         val viewModel = NoteViewModel(SavedStateHandle())
         viewModel.loadNotes(appContext, "1234")
         viewModel.addNote(
@@ -141,14 +139,12 @@ class NoteViewModelAiAnswerTest {
         assertNotNull(rewritten)
         requireNotNull(rewritten)
         assertTrue(rewritten.title.startsWith("Reformatted - Planning"))
-        assertTrue(rewritten.content.contains("Overview"))
-        assertTrue(rewritten.content.contains("Action Items"))
-        assertTrue(rewritten.content.contains("• Schedule vendor call."))
-        assertTrue(rewritten.styledContent?.spans?.isNotEmpty() == true)
+        assertEquals(originalContent, rewritten.content)
+        assertEquals("AI rewrite: ADK agent starting", rewritten.summary)
     }
 
     @Test
-    fun rewriteNoteCanEditCurrentNoteWithoutCreatingCopy() {
+    fun rewriteNoteCanQueueCurrentNoteWithoutCreatingCopy() {
         val viewModel = NoteViewModel(SavedStateHandle())
         viewModel.loadNotes(appContext, "1234")
         viewModel.addNote(
@@ -175,9 +171,8 @@ class NoteViewModelAiAnswerTest {
         assertEquals(1, viewModel.notes.size)
         val rewritten = requireNotNull(viewModel.getNoteById(source.id))
         assertEquals("Board planning", rewritten.title)
-        assertTrue(rewritten.content.contains("Overview"))
-        assertTrue(rewritten.content.contains("• Schedule vendor call."))
-        assertTrue(rewritten.styledContent?.spans?.isNotEmpty() == true)
+        assertEquals(source.content, rewritten.content)
+        assertEquals("AI rewrite: ADK agent starting", rewritten.summary)
     }
 
     @Test

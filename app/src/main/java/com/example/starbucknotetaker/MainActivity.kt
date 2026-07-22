@@ -530,13 +530,6 @@ fun AppContent(
                             }
                         }
                     },
-                    onAskQuestion = { id, q ->
-                        noteViewModel.askQuestion(id, q)?.let { resultId ->
-                            navController.navigate("detail/$resultId") {
-                                launchSingleTop = true
-                            }
-                        }
-                    },
                     inferenceProgress = noteViewModel.inferenceProgress.collectAsState().value,
                 )
             } else {

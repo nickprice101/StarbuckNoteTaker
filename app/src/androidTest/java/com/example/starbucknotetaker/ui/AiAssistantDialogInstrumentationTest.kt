@@ -3,6 +3,7 @@ package com.example.starbucknotetaker.ui
 import androidx.compose.material.MaterialTheme
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.example.starbucknotetaker.RewriteDestination
 import org.junit.Assert.assertEquals
@@ -14,21 +15,20 @@ class AiAssistantDialogInstrumentationTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun reformatButtonOffersBothDestinationsAndCanEditCurrentNote() {
+    fun reformatDialogOffersBothDestinationsAndCanUpdateCurrentNote() {
         var selectedDestination: RewriteDestination? = null
         composeRule.setContent {
             MaterialTheme {
-                AiAssistantDialog(
+                ReformatDestinationDialog(
                     onDismiss = {},
-                    onAskQuestion = {},
                     onReformat = { selectedDestination = it },
                 )
             }
         }
 
-        composeRule.onNodeWithText("Reformat note").assertExists().performClick()
+        composeRule.onNodeWithText("Reformat note").assertExists()
         composeRule.onNodeWithText("Create new note").assertExists()
-        composeRule.onNodeWithText("Edit current note").assertExists().performClick()
+        composeRule.onNodeWithText("Update this note").assertExists().performClick()
 
         composeRule.runOnIdle {
             assertEquals(RewriteDestination.CURRENT_NOTE, selectedDestination)
@@ -36,23 +36,40 @@ class AiAssistantDialogInstrumentationTest {
     }
 
     @Test
-    fun reformatButtonCanCreateNewNote() {
+    fun reformatDialogCanCreateNewNote() {
         var selectedDestination: RewriteDestination? = null
         composeRule.setContent {
             MaterialTheme {
-                AiAssistantDialog(
+                ReformatDestinationDialog(
                     onDismiss = {},
-                    onAskQuestion = {},
                     onReformat = { selectedDestination = it },
                 )
             }
         }
 
-        composeRule.onNodeWithText("Reformat note").performClick()
         composeRule.onNodeWithText("Create new note").performClick()
 
         composeRule.runOnIdle {
             assertEquals(RewriteDestination.NEW_NOTE, selectedDestination)
         }
+    }
+
+    @Test
+    fun conversationUsesStandardPrivateChatSurface() {
+        composeRule.setContent {
+            MaterialTheme {
+                AgentConversationDialog(
+                    noteContext = "Project launch notes",
+                    onDismiss = {},
+                    onInsertIntoNote = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("agentConversation").assertExists()
+        composeRule.onNodeWithText("Conversation").assertExists()
+        composeRule.onNodeWithText("On-device AI").assertExists()
+        composeRule.onNodeWithTag("agentMessageInput").assertExists()
+        composeRule.onNodeWithTag("sendAgentMessage").assertExists()
     }
 }

@@ -106,8 +106,8 @@ class LlamaForegroundService : Service() {
                         engine.summarise(text, requestId)
                     }
                     LlamaEngine.Mode.REWRITE -> {
-                        broadcastProgress(requestId, "", "Refining formatted note", mode)
-                        engine.rewrite(text, requestId)
+                        broadcastProgress(requestId, "", "ADK agent is correcting and formatting", mode)
+                        NoteAiAgent.reformat(applicationContext, text, requestId)
                     }
                     LlamaEngine.Mode.QUESTION ->
                         answerQuestion(text, context, requestId)
