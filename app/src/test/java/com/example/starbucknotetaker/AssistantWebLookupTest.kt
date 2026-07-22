@@ -17,13 +17,10 @@ class AssistantWebLookupTest {
         assertTrue(AssistantWebLookup.shouldLookup("what is the stock price today?"))
         assertTrue(AssistantWebLookup.shouldLookup("summarize https://example.com/news"))
         assertTrue(AssistantWebLookup.shouldLookup("Who wrote The Hobbit?"))
-        assertTrue(AssistantWebLookup.shouldLookup("Explain how geothermal power works"))
-        assertTrue(AssistantWebLookup.shouldLookup("Tell me about the James Webb telescope"))
         assertFalse(AssistantWebLookup.shouldLookup("rewrite this note more clearly"))
         assertTrue(AssistantWebLookup.requiresInternet("what is the stock price today?"))
         assertFalse(AssistantWebLookup.requiresInternet("Who wrote The Hobbit?"))
         assertTrue(AssistantWebLookup.answerNeedsResearch("I don't know that answer."))
-        assertTrue(AssistantWebLookup.answerNeedsResearch("The note does not provide enough context."))
         assertFalse(AssistantWebLookup.answerNeedsResearch("The answer is available in this note."))
     }
 
@@ -126,7 +123,8 @@ class AssistantWebLookupTest {
 
         val answer = AssistantWebLookup.quickAnswer("latest example", result)
 
-        assertTrue(answer.contains("[Example](https://example.com/one)"))
+        assertTrue(answer.contains("Example Result"))
+        assertTrue(answer.contains("[Example Result](https://example.com/one)"))
         assertTrue(answer.contains("A concise result snippet."))
     }
 

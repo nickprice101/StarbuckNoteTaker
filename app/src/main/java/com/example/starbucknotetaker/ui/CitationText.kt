@@ -29,8 +29,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.starbucknotetaker.abbreviateCitationLabel
 import com.example.starbucknotetaker.richtext.MarkdownRichText
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextStyle
@@ -60,8 +58,8 @@ internal fun CitationRichText(
     val inlineContent = display.citations.associate { citation ->
         citation.id to InlineTextContent(
             placeholder = Placeholder(
-                width = (citation.label.length * 0.52f + 0.9f).coerceAtMost(6.2f).em,
-                height = 1.2f.em,
+                width = (citation.label.length * 0.61f + 1.8f).coerceAtMost(28f).em,
+                height = 1.55f.em,
                 placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
             ),
         ) {
@@ -93,14 +91,14 @@ internal fun CitationPillRow(
     if (citations.isEmpty()) return
     FlowRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         citations.forEach { citation ->
             CitationPill(
                 citation = citation,
                 onOpen = { runCatching { uriHandler.openUri(citation.url) } },
-                modifier = Modifier.widthIn(max = 96.dp),
+                modifier = Modifier.widthIn(max = 240.dp),
             )
         }
     }
@@ -120,12 +118,9 @@ private fun CitationPill(
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = citation.label,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                 color = MaterialTheme.colors.primary,
-                style = MaterialTheme.typography.caption.copy(
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
-                ),
+                style = MaterialTheme.typography.caption,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -164,9 +159,7 @@ internal fun buildCitationDisplay(document: RichTextDocument): CitationDisplay {
         var cursor = 0
         ranges.forEachIndexed { index, range ->
             if (range.start > cursor) append(document.slice(cursor, range.start).toAnnotatedString())
-            val label = abbreviateCitationLabel(
-                document.text.substring(range.start, range.end),
-            )
+            val label = document.text.substring(range.start, range.end).trim().ifBlank { "Source" }
             val id = "citation_$index"
             appendInlineContent(id, label)
             citations += CitationInline(id = id, label = label, url = range.url)

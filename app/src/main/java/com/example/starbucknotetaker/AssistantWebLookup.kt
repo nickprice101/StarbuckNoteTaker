@@ -255,8 +255,7 @@ internal class AssistantWebLookup(
             if (trimmed.isBlank()) return false
             if (extractUrls(trimmed, treatUnterminatedAsComplete = true).isNotEmpty()) return true
             return requiresInternet(question) ||
-                ((FACTUAL_QUESTION_REGEX.containsMatchIn(trimmed) ||
-                    KNOWLEDGE_REQUEST_REGEX.containsMatchIn(trimmed)) &&
+                (FACTUAL_QUESTION_REGEX.containsMatchIn(trimmed) &&
                     !NON_LOOKUP_QUESTION_REGEX.containsMatchIn(trimmed))
         }
 
@@ -375,7 +374,7 @@ internal data class WebLookupHttpResponse(
 )
 
 internal data class WebLookupEntry(val title: String, val url: String, val snippet: String) {
-    fun markdownLink(): String = "[${abbreviateCitationLabel(title)}]($url)"
+    fun markdownLink(): String = "[${title.take(48).ifBlank { "Source" }}]($url)"
 }
 
 internal enum class WebLookupErrorKind { OFFLINE, NO_RESULTS }
@@ -523,22 +522,6 @@ private fun shortSourceLabel(value: String): String = value
     .take(48)
     .ifBlank { "Source" }
 
-internal fun abbreviateCitationLabel(value: String): String {
-    val cleaned = value
-        .replace(Regex("[\\[\\]()]"), "")
-        .replace(Regex("\\s+"), " ")
-        .trim()
-        .ifBlank { "Source" }
-    if (cleaned.length <= MAX_CITATION_LABEL_CHARS) return cleaned
-
-    val wholeWords = cleaned.split(' ')
-        .runningFold("") { prefix, word -> if (prefix.isEmpty()) word else "$prefix $word" }
-        .takeWhile { it.length <= MAX_CITATION_LABEL_CHARS }
-        .lastOrNull()
-    if (!wholeWords.isNullOrBlank()) return wholeWords
-    return cleaned.take(MAX_CITATION_LABEL_CHARS - 1).trimEnd() + "…"
-}
-
 private fun urlEncode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
 
 private fun urlEncodePath(value: String): String =
@@ -570,7 +553,6 @@ private fun InputStream.readBytesLimited(maxBytes: Int): ByteArray {
 }
 
 private const val MAX_RESULTS = 4
-internal const val MAX_CITATION_LABEL_CHARS = 10
 private const val MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 private const val MAX_PAGE_RESPONSE_BYTES = 2 * 1024 * 1024
 private const val MAX_EXTRACTED_TEXT = 100_000
@@ -607,13 +589,7 @@ private val EXPLICIT_LOOKUP_REGEX = Regex(
     RegexOption.IGNORE_CASE,
 )
 private val FACTUAL_QUESTION_REGEX = Regex(
-    "^\\s*(?:who|what|when|where|which|why|how|name|list)\\b",
-    RegexOption.IGNORE_CASE,
-)
-private val KNOWLEDGE_REQUEST_REGEX = Regex(
-    "\\b(?:tell me about|explain|describe|research|find(?: out)?|information (?:about|on)|" +
-        "details (?:about|on)|overview of|background (?:about|on)|compare|fact[ -]?check|verify|" +
-        "learn about)\\b",
+    "^\\s*(?:who|what|when|where|which|how\\s+many|how\\s+much|name|list)\\b",
     RegexOption.IGNORE_CASE,
 )
 private val NON_LOOKUP_QUESTION_REGEX = Regex(
@@ -626,8 +602,6 @@ private val UNCERTAIN_ANSWER_REGEX = Regex(
         "cannot answer|can't answer|cannot verify|can't verify|unable to answer|" +
         "(?:do not|don't) have enough information|insufficient information|not enough information|" +
         "not (?:available|provided) in (?:the )?(?:note|context)|knowledge cutoff|" +
-        "(?:note|context) (?:does not|doesn't|cannot|can't) provide (?:enough )?(?:information|context)|" +
-        "(?:no|missing|insufficient) context (?:is )?(?:available|provided|in the note)|" +
         "outside my knowledge|no reliable information)\\b",
     RegexOption.IGNORE_CASE,
 )
