@@ -1386,7 +1386,7 @@ fun EditNoteScreen(
                     }
                     AttachmentAction(
                         icon = Icons.Default.Forum,
-                        label = "Conversation",
+                        label = "Chat",
                     ) {
                         hideKeyboard()
                         focusManager.clearFocus(force = true)

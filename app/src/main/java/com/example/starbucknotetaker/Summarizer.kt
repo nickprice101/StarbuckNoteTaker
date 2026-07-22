@@ -10,9 +10,9 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * On-device summariser backed by [LlamaEngine] (MLC LLM + Llama 3.2 3B).
+ * On-device summariser backed by [LlamaEngine] (LiteRT-LM + Qwen3 0.6B).
  *
- * When the MLC model has not been downloaded yet, or when the native library
+ * When the LiteRT-LM model has not been downloaded yet, or when the native runtime
  * is unavailable, all inference automatically falls back to the lightweight
  * rule-based heuristics defined in this class — behaviour identical to the
  * previous TFLite path.
@@ -33,7 +33,7 @@ class Summarizer(
     /** Retained for source compatibility with existing tests; not used at runtime. */
     @Suppress("UNUSED_PARAMETER")
     private val interpreterFactory: (java.nio.MappedByteBuffer) -> LiteInterpreter = {
-        throw UnsupportedOperationException("LiteInterpreter not used in MLC path")
+        throw UnsupportedOperationException("LiteInterpreter not used in LiteRT-LM path")
     },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", msg, t) },
     private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", msg) },
@@ -75,7 +75,7 @@ class Summarizer(
     // ------------------------------------------------------------------
 
     /**
-     * Warms up the summariser engine. When the MLC model is present the
+     * Warms up the summariser engine. When the LiteRT-LM model is present the
      * native context is initialised; otherwise the method returns [SummarizerState.Fallback]
      * to signal that heuristic summaries will be used.
      */

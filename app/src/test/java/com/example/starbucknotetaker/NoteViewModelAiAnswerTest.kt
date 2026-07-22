@@ -47,13 +47,13 @@ class NoteViewModelAiAnswerTest {
         assertTrue(answer.content.contains("study plan"))
         assertTrue(answer.content.contains("Live update:"))
         assertTrue(answer.content.contains("Received question"))
-        assertTrue(answer.content.contains("Checking for quick answer"))
+        assertTrue(answer.content.contains("Starting on-device AI"))
         assertTrue(answer.content.contains("Starting assistant service"))
         assertEquals("AI answer in progress", answer.summary)
     }
 
     @Test
-    fun askQuestionAnswersSimpleCapitalQuestionImmediately() {
+    fun askQuestionQueuesSimpleCapitalQuestionForOnDeviceModel() {
         val viewModel = NoteViewModel(SavedStateHandle())
         viewModel.loadNotes(appContext, "1234")
         viewModel.addNote(
@@ -72,9 +72,10 @@ class NoteViewModelAiAnswerTest {
         val answer = viewModel.notes.firstOrNull { it.title.startsWith("Answer") }
         assertNotNull(answer)
         requireNotNull(answer)
-        assertTrue(answer.content.contains("Answer:"))
-        assertTrue(answer.content.contains("Tehran"))
-        assertTrue(answer.summary.contains("Tehran"))
+        assertTrue(answer.content.contains("Question:"))
+        assertTrue(answer.content.contains("capital of Iran"))
+        assertTrue(answer.content.contains("Starting on-device AI"))
+        assertEquals("AI answer in progress", answer.summary)
     }
 
     @Test

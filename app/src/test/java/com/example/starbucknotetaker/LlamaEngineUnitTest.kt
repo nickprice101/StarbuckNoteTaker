@@ -12,15 +12,15 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.io.RandomAccessFile
 
 /**
- * Unit tests for [LlamaEngine] and [Summarizer] when running without the MLC LLM
- * native library (i.e. in the Robolectric JVM environment where native .so files
- * are not loaded).
+ * Unit tests for [LlamaEngine] and [Summarizer] when running without the
+ * LiteRT-LM Android native runtime.
  *
  * All tests exercise the rule-based fallback path, prompt-construction helpers,
  * and the public API surface that callers depend on.  They do not require the
- * ~2.0 GB Llama 3.2 3B model to be present on disk.
+ * downloaded model to be present on disk.
  */
 @RunWith(RobolectricTestRunner::class)
 class LlamaEngineUnitTest {
@@ -158,7 +158,7 @@ class LlamaEngineUnitTest {
         val manager = LlamaModelManager(appContext)
         val status = manager.modelStatus.value
         // On a fresh Robolectric context the model directory does not exist. Some host
-        // test environments also report an ABI that cannot run the Android MLC stack.
+        // Test environments may also report an ABI not packaged by LiteRT-LM.
         assertTrue(
             "Expected Missing or Unsupported status in test environment, got $status",
             status is LlamaModelManager.ModelStatus.Missing ||
@@ -174,45 +174,26 @@ class LlamaEngineUnitTest {
     }
 
     @Test
-    fun modelManager_getModelPath_returnsNull_whenManifestShardIsMissing() {
-        val dir = createModelMetadata(
-            """
-            {
-              "records": [
-                { "dataPath": "params_shard_0.bin", "nbytes": 3 },
-                { "dataPath": "params_shard_1.bin", "nbytes": 5 }
-              ]
-            }
-            """.trimIndent(),
-        )
-        File(dir, "params_shard_0.bin").writeText("abc")
+    fun modelManager_getModelPath_returnsNull_whenBundleIsPartial() {
+        val dir = File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR).also { it.mkdirs() }
+        File(dir, LlamaModelManager.MODEL_FILENAME).writeText("partial")
+        File(dir, ".model.sha256").writeText(LlamaModelManager.MODEL_SHA256)
 
         val manager = LlamaModelManager(appContext)
 
-        assertTrue(
-            "Expected null path when ndarray-cache.json lists a missing shard",
-            manager.getModelPath() == null,
-        )
+        assertTrue("Expected null path for a partial bundle", manager.getModelPath() == null)
     }
 
     @Test
-    fun modelManager_getModelPath_returnsPath_whenManifestShardsAreComplete() {
-        val dir = createModelMetadata(
-            """
-            {
-              "records": [
-                { "dataPath": "params_shard_0.bin", "nbytes": 3 },
-                { "dataPath": "params_shard_1.bin", "nbytes": 5 }
-              ]
-            }
-            """.trimIndent(),
-        )
-        File(dir, "params_shard_0.bin").writeText("abc")
-        File(dir, "params_shard_1.bin").writeText("12345")
+    fun modelManager_getModelPath_returnsPath_whenBundleAndChecksumArePresent() {
+        val dir = File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR).also { it.mkdirs() }
+        val bundle = File(dir, LlamaModelManager.MODEL_FILENAME)
+        RandomAccessFile(bundle, "rw").use { it.setLength(LlamaModelManager.MODEL_SIZE_BYTES) }
+        File(dir, ".model.sha256").writeText(LlamaModelManager.MODEL_SHA256)
 
         val manager = LlamaModelManager(appContext)
 
-        assertEquals(dir.absolutePath, manager.getModelPath())
+        assertEquals(bundle.absolutePath, manager.getModelPath())
     }
 
     @Test
@@ -223,43 +204,40 @@ class LlamaEngineUnitTest {
 
     @Test
     fun modelManager_modelSizeLabel_isCorrect() {
-        assertEquals("~2.0 GB", LlamaModelManager.MODEL_SIZE_LABEL)
+        assertEquals("~475 MB", LlamaModelManager.MODEL_SIZE_LABEL)
     }
 
     @Test
-    fun modelManager_hfRepoId_targetsLlama32_3B() {
+    fun modelManager_hfRepoId_targetsQwen3LiteRtBundle() {
         assertTrue(
-            "HuggingFace repo should reference Llama-3.2-3B",
-            LlamaModelManager.HF_REPO_ID.contains("Llama-3.2-3B", ignoreCase = true),
+            LlamaModelManager.HF_REPO_ID.contains("Qwen3-0.6B", ignoreCase = true),
         )
+        assertTrue(LlamaModelManager.MODEL_FILENAME.endsWith(".litertlm"))
     }
 
     @Test
-    fun modelManager_modelLibName_targetsLlama32_3B() {
-        assertTrue(
-            "Model lib name should reference Llama-3.2-3B",
-            LlamaModelManager.MODEL_LIB_NAME.contains("Llama-3.2-3B", ignoreCase = true),
-        )
-    }
-
-    @Test
-    fun modelManager_debugInfo_reportsTvmRuntimeLibrary() {
+    fun modelManager_debugInfo_reportsLiteRtModel() {
         val manager = LlamaModelManager(appContext)
         val debugInfo = manager.debugModelDirInfo()
 
-        assertTrue(debugInfo.contains(LlamaModelManager.TVM_RUNTIME_SO_FILENAME))
+        assertTrue(debugInfo.contains("LiteRT-LM"))
+        assertTrue(debugInfo.contains(LlamaModelManager.MODEL_FILENAME))
     }
 
     @Test
-    fun modelManager_systemLibHandle_usesMlcNormalizedName() {
-        assertEquals(
-            "system://llama_q4f16_0",
-            LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE,
-        )
-        assertEquals(
-            "system://llama_1b_q4f32_1",
-            LlamaModelManager.MODEL_LIB_SYSTEM_HANDLE_X86_64,
-        )
+    fun modelManager_downloadUrl_isPinnedAndChecksummed() {
+        assertTrue(LlamaModelManager.MODEL_URL.contains(LlamaModelManager.HF_REVISION))
+        assertEquals(64, LlamaModelManager.MODEL_SHA256.length)
+    }
+
+    @Test
+    fun modelManager_downloadPercentage_tracksDownloadedBytes() {
+        val total = 1_000L
+
+        assertEquals(0, LlamaModelManager.downloadProgressPercent(0L, total))
+        assertEquals(25, LlamaModelManager.downloadProgressPercent(250L, total))
+        assertEquals(50, LlamaModelManager.downloadProgressPercent(500L, total))
+        assertEquals(100, LlamaModelManager.downloadProgressPercent(1_500L, total))
     }
 
     @Test
@@ -298,12 +276,4 @@ class LlamaEngineUnitTest {
         assertEquals("arm64-v8a", abi)
     }
 
-    private fun createModelMetadata(ndarrayCacheJson: String): File {
-        val dir = File(appContext.filesDir, LlamaModelManager.MODEL_SUBDIR_X86_64)
-            .also { it.mkdirs() }
-        File(dir, "mlc-chat-config.json").writeText("{}")
-        File(dir, "ndarray-cache.json").writeText(ndarrayCacheJson)
-        File(dir, "tokenizer.json").writeText("{}")
-        return dir
-    }
 }

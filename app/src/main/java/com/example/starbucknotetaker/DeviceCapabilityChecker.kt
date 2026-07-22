@@ -6,7 +6,7 @@ import android.util.Log
 
 /**
  * Checks whether the current device has sufficient hardware to run the on-device
- * LLM (Llama 3.2 3B Instruct, q4f16_0 quantisation).
+ * LiteRT-LM Qwen3 0.6B mixed-INT4 model.
  *
  * The model requires approximately 1.8 GB for weights plus runtime overhead.
  * A minimum of [MIN_RAM_BYTES] (4 GB) total physical RAM is required to run the

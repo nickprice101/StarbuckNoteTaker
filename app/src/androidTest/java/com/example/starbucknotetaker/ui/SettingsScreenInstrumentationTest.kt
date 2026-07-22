@@ -85,8 +85,45 @@ class SettingsScreenInstrumentationTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText(
-            "loading weights and priming first-token generation",
+            "loading the LiteRT-LM model",
             substring = true,
         ).assertExists()
+    }
+
+    @Test
+    fun modelDownloadShowsByteLinkedPercentageProgress() {
+        composeRule.activityRule.scenario.onActivity { activity ->
+            val pinManager = PinManager(activity.applicationContext)
+            activity.setContent {
+                StarbuckNoteTakerTheme {
+                    SettingsScreen(
+                        pinManager = pinManager,
+                        biometricEnabled = false,
+                        onBiometricChanged = {},
+                        summarizerEnabled = true,
+                        onSummarizerChanged = {},
+                        modelStatus = LlamaModelManager.ModelStatus.Downloading(
+                            progressPercent = 50,
+                            label = "Downloading Qwen3 0.6B…",
+                            downloadedBytes = 250L * 1024L * 1024L,
+                            totalBytes = 500L * 1024L * 1024L,
+                            abi = "x86_64",
+                        ),
+                        onDownloadModel = {},
+                        onDeleteModel = {},
+                        isAiCapable = true,
+                        onBack = {},
+                        onImport = { _, _, _ -> false },
+                        onExport = {},
+                        onDisablePinCheck = {},
+                        onEnablePinCheck = {},
+                        onPinChanged = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("50%  (250 MB / 500 MB)").assertExists()
     }
 }

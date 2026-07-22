@@ -3,29 +3,12 @@ package com.example.starbucknotetaker
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AssistantResponsiveInstrumentationTest {
-    @Test
-    fun quickAnswer_handlesSimpleQuestionUnderBudget() {
-        val startedAt = SystemClock.elapsedRealtime()
-
-        val answer = QuickAssistantAnswerer.answer(
-            question = "what is the capital of Iran?",
-            noteContext = "General geography note",
-        )
-
-        val elapsedMs = SystemClock.elapsedRealtime() - startedAt
-        assertNotNull(answer)
-        requireNotNull(answer)
-        assertTrue(answer.answer.contains("Tehran"))
-        assertTrue("Quick answer took ${elapsedMs}ms", elapsedMs < 500L)
-    }
-
     @Test
     fun professionalRewriteDraft_formatsNoteUnderBudget() {
         val startedAt = SystemClock.elapsedRealtime()
