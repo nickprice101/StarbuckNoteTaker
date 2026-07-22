@@ -237,10 +237,6 @@ class NoteViewModel(
         const val PENDING_UNLOCK_NAVIGATION_NOTE_ID_KEY = "pending_unlock_navigation_note_id"
         const val SUMMARY_DEBOUNCE_MS = 250L
         const val MAX_ANSWER_STATUS_HISTORY = 6
-        val NOTE_CONTEXT_REQUEST_REGEX = Regex(
-            "\\b(?:this|the|current)\\s+note\\b|\\b(?:notes|above|context|word\\s+count)\\b",
-            RegexOption.IGNORE_CASE,
-        )
     }
 
     fun updateChecklistItems(id: Long, items: List<ChecklistItem>) {
@@ -955,7 +951,7 @@ class NoteViewModel(
             requestId = requestId,
             contextText = note.content
                 .take(LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT)
-                .takeIf { NOTE_CONTEXT_REQUEST_REGEX.containsMatchIn(trimmedQuestion) },
+                .takeIf { it.isNotBlank() },
         )
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {

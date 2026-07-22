@@ -44,6 +44,8 @@ def abiToLibcxxTriple = [
         'x86_64'   : 'x86_64-linux-android'
 ]
 def libcxxNativeLibsDir = "${buildDir}/generated/libcxxJniLibs"
+def generatedAgentPromptAssetsDir = "${buildDir}/generated/agentPromptAssets"
+def agentPromptSourceFile = rootProject.file('config/AI_AGENT_PROMPTS.txt')
 
 def resolveNdkHostTag(File ndkDir) {
     def prebuiltDir = new File(ndkDir, 'toolchains/llvm/prebuilt')
@@ -264,8 +266,27 @@ android {
             // default jniLibs source set so obsolete MLC model kernels are not
             // packaged into the APK.
             jniLibs.srcDirs = [penguinNativeLibsDir, libcxxNativeLibsDir]
+            // The editable source lives outside app/src so every APK receives the prompts only
+            // through the build pipeline, making prompt refinements independent of Kotlin code.
+            assets.srcDir generatedAgentPromptAssetsDir
         }
     }
+}
+
+def prepareAiAgentPrompts = tasks.register('prepareAiAgentPrompts', Copy) {
+    group = 'build setup'
+    description = 'Copies the editable AI agent prompt reference file into generated APK assets.'
+    from(agentPromptSourceFile)
+    into(generatedAgentPromptAssetsDir)
+    doFirst {
+        if (!agentPromptSourceFile.exists()) {
+            throw new GradleException("Missing AI agent prompt file: ${agentPromptSourceFile}")
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn prepareAiAgentPrompts
 }
 
 tasks.register("syncNoteClassifierAssetsFromScripts", Sync) {
