@@ -170,7 +170,7 @@ class LlamaForegroundService : Service() {
         broadcastProgress(requestId, "", "Preparing on-device model", LlamaEngine.Mode.QUESTION)
         val localAnswer = engine.answer(question, noteContext, requestId)
         return if (AssistantWebLookup.answerNeedsResearch(localAnswer)) {
-            broadcastProgress(requestId, "", "Checking with Crawl4AI", LlamaEngine.Mode.QUESTION)
+            broadcastProgress(requestId, "", "Checking the web on this phone", LlamaEngine.Mode.QUESTION)
             val lookup = webLookup.lookup(question)
             if (lookup.results.isNotEmpty()) {
                 AssistantWebLookup.quickAnswer(question, lookup)

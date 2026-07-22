@@ -10,17 +10,6 @@ plugins {
 }
 
 def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
-def buildConfigString = { value ->
-    value.toString().replace('\\', '\\\\').replace('"', '\\"')
-}
-def crawl4AiBaseUrl = providers.gradleProperty('CRAWL4AI_BASE_URL')
-        .orElse(providers.environmentVariable('CRAWL4AI_BASE_URL'))
-        .orElse('')
-        .get()
-def crawl4AiApiToken = providers.gradleProperty('CRAWL4AI_API_TOKEN')
-        .orElse(providers.environmentVariable('CRAWL4AI_API_TOKEN'))
-        .orElse('')
-        .get()
 def llamaModelName = 'Llama-3.2-3B-Instruct-q4f16_0-MLC'
 def llamaModelSoName = "lib${llamaModelName}.so"
 // x86 Android emulators cannot assume access to the host's discrete GPU. Use
@@ -195,9 +184,6 @@ android {
         targetSdk 34
         versionCode System.getenv("ANDROID_VERSION_CODE")?.toInteger() ?: 1
         versionName System.getenv("ANDROID_VERSION_NAME") ?: '1.0'
-        buildConfigField 'String', 'CRAWL4AI_BASE_URL', "\"${buildConfigString(crawl4AiBaseUrl)}\""
-        buildConfigField 'String', 'CRAWL4AI_API_TOKEN', "\"${buildConfigString(crawl4AiApiToken)}\""
-
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         ndk {
             abiFilters(*penguinSupportedAbis)
@@ -334,6 +320,7 @@ dependencies {
     implementation 'androidx.exifinterface:exifinterface:1.3.7'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation 'org.jsoup:jsoup:1.22.2'
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     implementation 'org.tensorflow:tensorflow-lite:2.16.1'
     implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1'

@@ -10,8 +10,8 @@ the existing 1B q4f32 compatibility profile.
 ADK owns the `LlmAgent`, instructions, runner, event stream, and in-memory conversation session.
 `MlcAdkModel` only translates ADK content into the local MLC chat protocol, so note inference does
 not require a hosted-model key. The note itself remains on-device. When a question needs research,
-the question is sent to public search providers for URL discovery and those public URLs are sent to
-the configured self-hosted Crawl4AI service; note context is not included in either request.
+only the question is sent to public search providers for URL discovery. The phone downloads,
+extracts, ranks, and caches the public pages locally; note context is not included in search requests.
 
 The project is pinned to `google-adk-kotlin-core-android:0.4.0`. That artifact is compatible with
 this AGP 8.6/R8 and Kotlin 2.1.20 build. The provider runtimes for hosted Gemini and ML Kit Gemini
@@ -64,8 +64,8 @@ or quantization.
 
 1. The Chat attachment action opens a full-screen chat with the current draft as context.
 2. A dedicated ADK `InMemorySessionService` retains user and model turns for that dialog.
-3. Current, explicit lookup, and unfamiliar questions use the configured Crawl4AI service; stable
-   questions fall back to the on-device model when internet is unavailable.
+3. Current, explicit lookup, and unfamiliar questions use on-device web extraction; stable questions
+   fall back to the on-device model when internet is unavailable.
 4. Responses stream into standard user/agent bubbles, with Markdown links rendered as citation pills.
 5. **Add to note** parses an agent response as Markdown and appends it to the draft while preserving
    citation metadata.

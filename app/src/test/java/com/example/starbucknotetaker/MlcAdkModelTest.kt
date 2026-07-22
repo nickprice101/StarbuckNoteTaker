@@ -264,7 +264,7 @@ class MlcAdkModelTest {
 
         assertTrue(answer.contains("[NASA](https://www.nasa.gov/mission/artemis-ii/)"))
         assertTrue(fakeModel.requests.single().contents.last().parts.first().text.orEmpty()
-            .contains("Crawl4AI web research"))
+            .contains("On-device web research"))
     }
 
     @Test
