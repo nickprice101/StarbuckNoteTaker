@@ -18,7 +18,7 @@ import java.nio.ByteOrder
  * Instrumentation tests for [Summarizer] and [LlamaModelManager] running on a real device.
  *
  * These tests exercise the fallback rule-based path (always available) and the
- * model-manager state machine without requiring the ~2 GB Llama 3.2 3B model
+ * model-manager state machine without requiring the LiteRT-LM model
  * to be present on the test device.
  */
 @RunWith(AndroidJUnit4::class)
@@ -92,7 +92,7 @@ class SummarizerModelInstrumentationTest {
     fun modelManager_statusIsMissingOnFreshDevice() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val manager = LlamaModelManager(context)
-        // On a CI/test device the ~2 GB model is typically not present.
+        // On a CI/test device the downloaded model is typically not present.
         val status = manager.modelStatus.value
         assertTrue(
             "Expected Missing, Present, or Unsupported, got $status",
@@ -103,9 +103,10 @@ class SummarizerModelInstrumentationTest {
     }
 
     @Test
-    fun modelManager_hfRepo_targetsLlama32_3B() {
+    fun modelManager_hfRepo_targetsQwen3LiteRt() {
         assertTrue(
-            LlamaModelManager.HF_REPO_ID.contains("Llama-3.2-3B", ignoreCase = true)
+            LlamaModelManager.HF_REPO_ID.contains("Qwen3-0.6B", ignoreCase = true)
         )
+        assertTrue(LlamaModelManager.MODEL_FILENAME.endsWith(".litertlm"))
     }
 }

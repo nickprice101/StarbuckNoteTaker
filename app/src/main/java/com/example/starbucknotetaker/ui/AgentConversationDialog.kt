@@ -146,7 +146,7 @@ internal fun AgentConversationDialog(
                 TopAppBar(
                     title = {
                         Column {
-                            Text("Conversation")
+                            Text("Chat")
                             Text(
                                 "On-device AI",
                                 style = MaterialTheme.typography.caption,
@@ -156,7 +156,7 @@ internal fun AgentConversationDialog(
                     },
                     navigationIcon = {
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close conversation")
+                            Icon(Icons.Default.Close, contentDescription = "Close chat")
                         }
                     },
                 )

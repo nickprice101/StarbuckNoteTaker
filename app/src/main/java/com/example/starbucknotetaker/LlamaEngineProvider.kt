@@ -1,7 +1,6 @@
 package com.example.starbucknotetaker
 
 import android.content.Context
-import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -14,7 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Process-local holder for the heavy MLC engine.
+ * Process-local holder for the LiteRT-LM engine.
  *
  * Keeping one engine warm for the app process avoids repeated model reloads
  * when the user asks a follow-up question or rewrites several notes in a row.
@@ -47,7 +46,7 @@ object LlamaEngineProvider {
         }
 
     /**
-     * Starts loading and priming the model before the user asks a question.
+     * Starts loading the model before the user asks a question.
      * Missing weights are detected cheaply; a completed download can call this
      * method again to begin the real preload.
      */
@@ -71,19 +70,10 @@ object LlamaEngineProvider {
                 delay(STARTUP_PREWARM_DELAY_MS)
                 val startedAt = SystemClock.elapsedRealtime()
                 val target = acquire(appContext)
-                // Model loading and priming are opportunistic background work. Giving this
-                // thread background priority ensures an immediate lookup, editor action, or
-                // UI frame wins CPU time even when warm-up is already under way. Native TVM
-                // worker threads are created from this thread and inherit its scheduling nice.
-                val originalPriority = runCatching {
-                    Process.getThreadPriority(Process.myTid())
-                }.getOrDefault(Process.THREAD_PRIORITY_DEFAULT)
-                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
-                val outcome = try {
-                    runCatching { target.warmUp() }
-                } finally {
-                    runCatching { Process.setThreadPriority(originalPriority) }
-                }
+                // LiteRT-LM initializes off the main thread and manages its own worker pools.
+                // Do not lower this thread's Linux priority: native workers can inherit that
+                // priority and make first-token latency dramatically worse for the whole process.
+                val outcome = runCatching { target.warmUp() }
                 val elapsedMs = SystemClock.elapsedRealtime() - startedAt
                 synchronized(lock) {
                     preloadJob = null

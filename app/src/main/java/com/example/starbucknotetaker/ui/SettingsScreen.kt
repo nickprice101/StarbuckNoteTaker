@@ -318,7 +318,7 @@ fun SettingsScreen(
                 )
             }
             Divider()
-            // ---- AI model (Llama 3.2 3B) download section ----
+            // ---- AI model (LiteRT-LM) download section ----
             AiModelDownloadSection(
                 modelStatus = modelStatus,
                 modelPreloadState = modelPreloadState,
@@ -549,7 +549,7 @@ private fun AiModelDownloadSection(
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("AI Model (Llama 3.2 3B)", style = MaterialTheme.typography.h6)
+        Text("AI Model (Qwen3 0.6B)", style = MaterialTheme.typography.h6)
         if (!isAiCapable) {
             Text(
                 "AI features are not available on this device. A minimum of 4 GB RAM " +
@@ -559,7 +559,7 @@ private fun AiModelDownloadSection(
             )
         } else {
             Text(
-                "Download the Llama 3.2 3B Instruct model to enable summarisation, " +
+                "Download the LiteRT-LM Qwen3 model to enable summarisation, " +
                     "rewriting, and Q&A without internet access.",
                 style = MaterialTheme.typography.body2,
             )
@@ -584,7 +584,9 @@ private fun AiModelDownloadSection(
                     val progressText = if (modelStatus.totalBytes > 0) {
                         val downloadedMb = modelStatus.downloadedBytes / (1024f * 1024f)
                         val totalMb = modelStatus.totalBytes / (1024f * 1024f)
-                        "$pct%  (%.0f MB / %.0f MB)".format(downloadedMb, totalMb)
+                        val downloadedLabel = "%.0f".format(downloadedMb)
+                        val totalLabel = "%.0f".format(totalMb)
+                        "$pct%  ($downloadedLabel MB / $totalLabel MB)"
                     } else {
                         "$pct%"
                     }
@@ -594,14 +596,14 @@ private fun AiModelDownloadSection(
                     val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
                     val sizeLabel = if (modelStatus.sizeBytes > 0) " (%.0f MB on disk)".format(sizeMb) else ""
                     Text(
-                        "✅ Model files downloaded — Llama 3.2 3B$sizeLabel",
+                        "Model downloaded - Qwen3 0.6B$sizeLabel",
                         style = MaterialTheme.typography.caption,
                         color = MaterialTheme.colors.primary,
                     )
                     when (modelPreloadState) {
                         LlamaEngineProvider.PreloadState.Loading -> {
                             Text(
-                                "Engine status: loading weights and priming first-token generation...",
+                                "Engine status: loading the LiteRT-LM model...",
                                 style = MaterialTheme.typography.caption,
                             )
                             LinearProgressIndicator(
@@ -669,14 +671,14 @@ private fun AiModelDownloadSection(
             val sizeMb = modelStatus.sizeBytes / (1024f * 1024f)
             "%.0f MB".format(sizeMb)
         } else {
-            "~2 GB"
+            LlamaModelManager.MODEL_SIZE_LABEL
         }
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Delete AI model?") },
             text = {
                 Text(
-                    "This will remove the Llama 3.2 3B model ($sizeLabel) from your device. " +
+                    "This will remove the Qwen3 0.6B model ($sizeLabel) from your device. " +
                         "AI features will fall back to simple rule-based previews until you " +
                         "re-download the model."
                 )

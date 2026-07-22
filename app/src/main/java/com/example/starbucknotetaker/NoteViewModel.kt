@@ -98,7 +98,7 @@ class NoteViewModel(
     private var llamaBroadcastReceiver: BroadcastReceiver? = null
     private var llamaModelManager: LlamaModelManager? = null
 
-    /** Download/presence status of the Llama 3.2 3B MLC model weights. */
+    /** Download/presence status of the portable LiteRT-LM model. */
     val modelStatus: StateFlow<LlamaModelManager.ModelStatus>
         get() = llamaModelManager?.modelStatus
             ?: MutableStateFlow(LlamaModelManager.ModelStatus.Missing)
@@ -926,13 +926,13 @@ class NoteViewModel(
 
         val requestId = java.util.UUID.randomUUID().toString()
         rememberAnswerStatus(requestId, "Received question")
-        rememberAnswerStatus(requestId, "Checking for quick answer")
+        rememberAnswerStatus(requestId, "Starting on-device AI")
         val answerNoteId = createAnswerNote(
             sourceNoteId = noteId,
             answer = buildAnswerProgressContent(
                 question = trimmedQuestion,
                 partialAnswer = "",
-                status = "Checking for quick answer",
+                status = "Starting on-device AI",
                 events = answerStatusHistory(requestId),
             ),
             summary = "AI answer in progress",
@@ -940,24 +940,6 @@ class NoteViewModel(
         pendingAnswerNoteIds[requestId] = answerNoteId
         pendingAnswerQuestions[requestId] = trimmedQuestion
         _inferenceProgress.value = LlamaEngine.InferenceProgress.Thinking("", requestId)
-
-        val quickAnswer = QuickAssistantAnswerer.answer(trimmedQuestion, note.content)
-        if (quickAnswer != null) {
-            rememberAnswerStatus(requestId, quickAnswer.status)
-            updatePendingAnswerProgress(
-                requestId = requestId,
-                partialAnswer = quickAnswer.answer,
-                status = quickAnswer.status,
-            )
-            _inferenceProgress.value = LlamaEngine.InferenceProgress.Done(requestId, quickAnswer.answer)
-            finishAnswerNote(
-                requestId = requestId,
-                sourceNoteId = noteId,
-                answer = quickAnswer.answer,
-                isError = false,
-            )
-            return answerNoteId
-        }
 
         rememberAnswerStatus(requestId, "Starting assistant service")
         updatePendingAnswerProgress(
@@ -996,7 +978,7 @@ class NoteViewModel(
     }
 
     /**
-     * Downloads the Llama 3.2 3B MLC model weights (~2 GB) from HuggingFace.
+     * Downloads the pinned LiteRT-LM model bundle from Hugging Face.
      * Progress is reflected in [modelStatus].
      */
     fun downloadAiModel() {

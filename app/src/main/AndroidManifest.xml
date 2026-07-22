@@ -23,6 +23,9 @@
         android:supportsRtl="true"
         android:hardwareAccelerated="true"
         android:theme="@style/Theme.StarbuckNoteTaker">
+        <!-- LiteRT-LM GPU acceleration uses the device's optional OpenCL stack. -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">

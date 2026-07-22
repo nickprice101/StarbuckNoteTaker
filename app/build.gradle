@@ -232,7 +232,16 @@ android {
         coreLibraryDesugaringEnabled true
     }
 
-packaging {
+    androidResources {
+        // Retain the old model archives as development inputs for the disabled
+        // legacy linker tasks, but do not ship them in the LiteRT-LM APK.
+        ignoreAssetsPatterns.addAll([
+                '!Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar',
+                '!Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64.tar'
+        ])
+    }
+
+    packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
@@ -251,7 +260,10 @@ packaging {
 
     sourceSets {
         main {
-            jniLibs.srcDirs += [penguinNativeLibsDir, libcxxNativeLibsDir]
+            // LiteRT-LM provides its own native runtime. Deliberately replace the
+            // default jniLibs source set so obsolete MLC model kernels are not
+            // packaged into the APK.
+            jniLibs.srcDirs = [penguinNativeLibsDir, libcxxNativeLibsDir]
         }
     }
 }
@@ -295,10 +307,10 @@ dependencies {
     implementation 'ai.djl.huggingface:tokenizers:0.33.0'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
-    // MLC LLM Android SDK (local module) for on-device Llama 3.2 3B inference
-    implementation project(':mlc4j')
-    // ADK 0.4 is the latest line compatible with this app's AGP/R8 toolchain. Hosted Gemini and
-    // Gemini Nano runtimes are omitted: MlcAdkModel is the only model provider in this app.
+    // Google's supported on-device LLM runtime. A single .litertlm model runs on
+    // ARM64 GPU/CPU and the x86_64 emulator, with coroutine-native token streaming.
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.14.0'
+    // ADK remains responsible for instructions, history, and agent event streaming.
     implementation('com.google.adk:google-adk-kotlin-core-android:0.4.0') {
         exclude group: 'com.google.genai', module: 'google-genai'
         exclude group: 'com.google.auth', module: 'google-auth-library-oauth2-http'
@@ -390,11 +402,11 @@ tasks.matching { it.name.startsWith('pre') && it.name.endsWith('Build') }.config
 }
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }.configureEach {
-    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared, 'buildModelLibSo')
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
 }
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('JniLibFolders') }.configureEach {
-    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared, 'buildModelLibSo')
+    dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
 }
 
 // ---------------------------------------------------------------------------

@@ -59,18 +59,18 @@ private class LlamaChatBackend(context: Context) : LocalChatBackend {
 }
 
 /**
- * Google ADK [Model] backed by the app's offline MLC/Llama runtime.
+ * Google ADK [Model] backed by the app's offline LiteRT-LM runtime.
  *
  * ADK remains responsible for instructions, session history, event streaming, and agent turns;
  * this class only translates ADK's provider-neutral request into the local OpenAI-style messages
- * accepted by MLC. No note content or chat message leaves the device.
+ * accepted by the local runtime. No note content or chat message leaves the device.
  */
 internal class MlcAdkModel(
     private val backend: LocalChatBackend,
 ) : Model {
     constructor(context: Context) : this(LlamaChatBackend(context))
 
-    override val name: String = "llama-3.2-3b-instruct-mlc-local"
+    override val name: String = "qwen3-0.6b-litertlm-local"
 
     /** Keeps a complete note fragment inside the prompt on the smaller emulator profile. */
     internal val recommendedReformatChunkChars: Int
