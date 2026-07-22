@@ -199,6 +199,75 @@ class MlcAdkModelTest {
     }
 
     @Test
+    fun `offline stable fact still uses the local model`() = runTest {
+        val fakeModel = RecordingAdkModel("J. R. R. Tolkien wrote The Hobbit.")
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "offline-fact",
+            noteContext = "",
+            systemInstruction = "Answer accurately.",
+            webResearcher = WebResearcher { WebLookupResult.offline(it) },
+        )
+
+        val updates = conversation.send("Who wrote The Hobbit?").toList()
+
+        assertEquals(1, fakeModel.requests.size)
+        assertEquals(
+            "J. R. R. Tolkien wrote The Hobbit.",
+            (updates.last() as AgentTurnUpdate.Complete).text,
+        )
+    }
+
+    @Test
+    fun `current fact alerts when internet research is unavailable`() = runTest {
+        val fakeModel = RecordingAdkModel("This must not be used.")
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "offline-current",
+            noteContext = "",
+            systemInstruction = "Answer accurately.",
+            webResearcher = WebResearcher { WebLookupResult.offline(it) },
+        )
+
+        val updates = conversation.send("What is the latest Android version?").toList()
+
+        assertTrue(fakeModel.requests.isEmpty())
+        assertEquals(
+            AssistantWebLookup.INTERNET_REQUIRED_MESSAGE,
+            (updates.last() as AgentTurnUpdate.Complete).text,
+        )
+    }
+
+    @Test
+    fun `researched answer always appends abbreviated markdown source links`() = runTest {
+        val fakeModel = RecordingAdkModel("The Artemis II mission is the next crewed test flight.")
+        val research = WebLookupResult(
+            query = "latest Artemis mission",
+            results = listOf(
+                WebLookupEntry(
+                    title = "NASA",
+                    url = "https://www.nasa.gov/mission/artemis-ii/",
+                    snippet = "NASA describes Artemis II as a crewed test flight.",
+                ),
+            ),
+        )
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "online-current",
+            noteContext = "Space notes",
+            systemInstruction = "Answer accurately.",
+            webResearcher = WebResearcher { research },
+        )
+
+        val updates = conversation.send("What is the latest Artemis mission?").toList()
+        val answer = (updates.last() as AgentTurnUpdate.Complete).text
+
+        assertTrue(answer.contains("[NASA](https://www.nasa.gov/mission/artemis-ii/)"))
+        assertTrue(fakeModel.requests.single().contents.last().parts.first().text.orEmpty()
+            .contains("Crawl4AI web research"))
+    }
+
+    @Test
     fun `chunker preserves long note content and bounds every fragment`() {
         val source = (1..20).joinToString("\n\n") { index ->
             "Paragraph $index contains a decision and a follow-up action for the project team."

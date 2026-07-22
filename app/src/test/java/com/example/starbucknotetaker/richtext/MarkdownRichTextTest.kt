@@ -38,8 +38,13 @@ class MarkdownRichTextTest {
         )
 
         assertEquals(
-            "Read the brief (https://example.com/brief).\n\n[[image:0]]",
+            "Read the brief.\n\n[[image:0]]",
             document.text,
         )
+        val citationIndex = document.text.indexOf("the brief")
+        val citation = document.toCharacterStyles()[citationIndex]
+            .filterIsInstance<RichTextStyle.Citation>()
+            .single()
+        assertEquals("https://example.com/brief", citation.url)
     }
 }

@@ -18,6 +18,10 @@ class AssistantWebLookupTest {
         assertTrue(AssistantWebLookup.shouldLookup("summarize https://example.com/news"))
         assertTrue(AssistantWebLookup.shouldLookup("Who wrote The Hobbit?"))
         assertFalse(AssistantWebLookup.shouldLookup("rewrite this note more clearly"))
+        assertTrue(AssistantWebLookup.requiresInternet("what is the stock price today?"))
+        assertFalse(AssistantWebLookup.requiresInternet("Who wrote The Hobbit?"))
+        assertTrue(AssistantWebLookup.answerNeedsResearch("I don't know that answer."))
+        assertFalse(AssistantWebLookup.answerNeedsResearch("The answer is available in this note."))
     }
 
     @Test
@@ -36,7 +40,27 @@ class AssistantWebLookupTest {
                     maxBytes: Int,
                 ): WebLookupHttpResponse =
                     WebLookupHttpResponse(200, html.toByteArray())
-            }
+
+                override suspend fun post(
+                    url: String,
+                    body: ByteArray,
+                    headers: Map<String, String>,
+                    maxBytes: Int,
+                ): WebLookupHttpResponse = WebLookupHttpResponse(
+                    200,
+                    """
+                    {
+                      "success": true,
+                      "results": [{
+                        "url": "https://example.com/one",
+                        "success": true,
+                        "markdown": {"fit_markdown": "Example facts extracted by Crawl4AI for the concise result snippet."}
+                      }]
+                    }
+                    """.trimIndent().toByteArray(),
+                )
+            },
+            crawl4AiConfig = Crawl4AiConfig("https://crawl4ai.test", "test-token"),
         )
 
         val result = lookup.lookup("latest example")
@@ -45,7 +69,7 @@ class AssistantWebLookupTest {
         assertEquals(1, result.results.size)
         assertEquals("Example Result", result.results[0].title)
         assertEquals("https://example.com/one", result.results[0].url)
-        assertTrue(result.results[0].snippet.contains("concise result"))
+        assertTrue(result.results[0].snippet.contains("extracted by Crawl4AI"))
     }
 
     @Test
@@ -64,7 +88,32 @@ class AssistantWebLookupTest {
         val answer = AssistantWebLookup.quickAnswer("latest example", result)
 
         assertTrue(answer.contains("Example Result"))
-        assertTrue(answer.contains("https://example.com/one"))
+        assertTrue(answer.contains("[Example Result](https://example.com/one)"))
         assertTrue(answer.contains("A concise result snippet."))
+    }
+
+    @Test
+    fun offlineLookupReportsConnectivityWithoutIssuingRequests() = runBlocking {
+        var requested = false
+        val lookup = AssistantWebLookup(
+            httpClient = object : AssistantWebLookup.HttpClient {
+                override suspend fun get(
+                    url: String,
+                    headers: Map<String, String>,
+                    maxBytes: Int,
+                ): WebLookupHttpResponse {
+                    requested = true
+                    error("Network should not be called")
+                }
+            },
+            crawl4AiConfig = Crawl4AiConfig("https://crawl4ai.test"),
+            internetAvailable = { false },
+        )
+
+        val result = lookup.lookup("latest Android version")
+
+        assertEquals(WebLookupErrorKind.OFFLINE, result.errorKind)
+        assertTrue(result.results.isEmpty())
+        assertFalse(requested)
     }
 }

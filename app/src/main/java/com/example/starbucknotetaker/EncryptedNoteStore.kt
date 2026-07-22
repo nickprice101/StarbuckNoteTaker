@@ -367,6 +367,10 @@ class EncryptedNoteStore(
                 put("type", "text_color")
                 put("color", colorToHex(style.color))
             }
+            is RichTextStyle.Citation -> JSONObject().apply {
+                put("type", "citation")
+                put("url", style.url)
+            }
         }
     }
 
@@ -385,6 +389,8 @@ class EncryptedNoteStore(
                 "text_color" -> entry.optString("color").takeIf { it.isNotEmpty() }
                     ?.let { parseColorHex(it) }
                     ?.let { RichTextStyle.TextColor(it) }
+                "citation" -> entry.optString("url").takeIf { it.isNotBlank() }
+                    ?.let { RichTextStyle.Citation(it) }
                 else -> null
             }
             else -> null

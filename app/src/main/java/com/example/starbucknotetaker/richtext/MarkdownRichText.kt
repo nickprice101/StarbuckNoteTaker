@@ -142,9 +142,13 @@ object MarkdownRichText {
                 val labelEnd = input.indexOf("](", index + 1)
                 val urlEnd = if (labelEnd >= 0) input.indexOf(')', labelEnd + 2) else -1
                 if (labelEnd > index + 1 && urlEnd > labelEnd + 2) {
-                    appendInline(input.substring(index + 1, labelEnd), baseStyles, output)
                     val url = input.substring(labelEnd + 2, urlEnd).trim()
-                    if (url.isNotBlank()) output.append(" ($url)", baseStyles)
+                    val label = input.substring(index + 1, labelEnd).trim()
+                    if (url.isNotBlank() && label.isNotBlank()) {
+                        output.append(label, baseStyles + RichTextStyle.Citation(url))
+                    } else {
+                        output.append(input.substring(index, urlEnd + 1), baseStyles)
+                    }
                     index = urlEnd + 1
                     continue
                 }

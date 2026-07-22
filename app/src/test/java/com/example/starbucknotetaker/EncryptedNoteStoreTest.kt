@@ -2,6 +2,9 @@ package com.example.starbucknotetaker
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.RichTextStyle
+import com.example.starbucknotetaker.richtext.StyleRange
 import java.io.File
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -57,6 +60,26 @@ class EncryptedNoteStoreTest {
         val store = EncryptedNoteStore(context)
         val loaded = store.loadNotesFromBytes(bytes, "1234")
         assertEquals(notes, loaded)
+    }
+
+    @Test
+    fun citationMetadataSurvivesEncryptedRoundTrip() {
+        val document = RichTextDocument(
+            text = "Read NASA",
+            spans = listOf(
+                StyleRange(
+                    start = 5,
+                    end = 9,
+                    styles = setOf(RichTextStyle.Citation("https://www.nasa.gov")),
+                ),
+            ),
+        )
+        val note = Note(title = "Sources", content = document.text, styledContent = document)
+        val store = EncryptedNoteStore(context)
+
+        store.saveNotes(listOf(note), "1234")
+
+        assertEquals(document, store.loadNotes("1234").single().styledContent)
     }
 
     private fun legacyBytes(notes: List<Note>, pin: String): ByteArray {
