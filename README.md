@@ -1,7 +1,7 @@
 # Starbuck Note Taker
 
-Web research for the on-device chat assistant is provided through a self-hosted Crawl4AI service.
-See [Crawl4AI research setup](docs/CRAWL4AI_RESEARCH.md).
+Web research for the chat assistant is crawled, extracted, ranked, and cached on the Android device.
+See [on-device web research](docs/ON_DEVICE_WEB_RESEARCH.md).
 
 Starbuck Note Taker is an Android note-taking app built with Kotlin + Jetpack Compose. It is designed to keep core note functionality available offline while storing note data locally in encrypted form.
 
@@ -34,6 +34,7 @@ Starbuck Note Taker is an Android note-taking app built with Kotlin + Jetpack Co
 The app is offline-first for note creation, editing, storage, reminders, and summarization.
 
 Network may still be used for:
+- discovering and downloading public pages for assistant web research,
 - fetching new link-preview metadata,
 - speech recognition depending on the device’s speech engine configuration,
 - downloading Llama 3.2 3B model weights (~2 GB) on first use (stored locally under `filesDir/models/` afterward).

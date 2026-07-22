@@ -178,7 +178,7 @@ internal class NoteConversationAgent(
         require(trimmed.isNotBlank()) { "Message cannot be empty." }
         var research: WebLookupResult? = null
         if (AssistantWebLookup.shouldLookup(trimmed)) {
-            emit(AgentTurnUpdate.Partial("Researching with Crawl4AI…"))
+            emit(AgentTurnUpdate.Partial("Researching on this phone…"))
             val lookup = webResearcher.lookup(trimmed)
             if (lookup.results.isNotEmpty()) {
                 research = lookup
@@ -199,7 +199,7 @@ internal class NoteConversationAgent(
         // The local model gets the first opportunity for non-current questions. If it explicitly
         // says it cannot answer, research is attempted; an outage then produces a clear alert.
         if (research == null && AssistantWebLookup.answerNeedsResearch(finalText)) {
-            emit(AgentTurnUpdate.Partial("Checking the web with Crawl4AI…"))
+            emit(AgentTurnUpdate.Partial("Checking the web on this phone…"))
             val lookup = webResearcher.lookup(trimmed)
             if (lookup.results.isEmpty()) {
                 finalText = AssistantWebLookup.INTERNET_REQUIRED_MESSAGE

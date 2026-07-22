@@ -25,42 +25,31 @@ class AssistantResponsiveInstrumentationTest {
     }
 
     @Test
-    fun webLookup_parsesResultsOnDeviceWithoutWaitingForModel() = runBlocking {
+    fun webLookup_extractsResultsOnDeviceWithoutWaitingForModel() = runBlocking {
         val startedAt = SystemClock.elapsedRealtime()
         val lookup = AssistantWebLookup(
-            object : AssistantWebLookup.HttpClient {
+            httpClient = object : AssistantWebLookup.HttpClient {
                 override suspend fun get(
                     url: String,
-                    headers: Map<String, String>,
-                    maxBytes: Int,
-                ): WebLookupHttpResponse =
-                    WebLookupHttpResponse(
-                        statusCode = 200,
-                        body = """
-                            <html><body>
-                              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fbaltic">Baltic Sea source</a>
-                              <a class="result__snippet">The Baltic Sea is bordered by Denmark, Germany, Sweden, and other countries.</a>
-                            </body></html>
-                        """.trimIndent().toByteArray(),
-                    )
-
-                override suspend fun post(
-                    url: String,
-                    body: ByteArray,
                     headers: Map<String, String>,
                     maxBytes: Int,
                 ): WebLookupHttpResponse = WebLookupHttpResponse(
                     statusCode = 200,
                     body = """
-                        {"success":true,"results":[{
-                          "url":"https://example.com/baltic",
-                          "success":true,
-                          "markdown":{"fit_markdown":"The Baltic Sea is bordered by Denmark, Germany, Sweden, and other countries."}
-                        }]}
+                        <html><head><title>Baltic Sea source</title></head><body><article>
+                          <h1>Baltic Sea borders</h1>
+                          <p>The Baltic Sea is bordered by Denmark, Germany, Sweden, Finland, Poland, and other countries.</p>
+                          <p>This page provides enough additional context for local extraction and relevance ranking.</p>
+                        </article></body></html>
                     """.trimIndent().toByteArray(),
+                    finalUrl = url,
                 )
             },
-            crawl4AiConfig = Crawl4AiConfig("https://crawl4ai.test", "test-token"),
+            searchProviders = listOf(
+                WebSearchProvider {
+                    listOf(WebLookupEntry("Baltic Sea source", "https://example.com/baltic", ""))
+                },
+            ),
         )
 
         val question = "What countries border the Baltic Sea?"
@@ -72,8 +61,8 @@ class AssistantResponsiveInstrumentationTest {
         assertTrue(result.results.isNotEmpty())
         assertTrue(answer.contains("Denmark"))
         assertTrue(answer.contains("https://example.com/baltic"))
-        // SwiftShader and a concurrent background model preload introduce emulator
-        // scheduling jitter; a sub-second local lookup remains an interactive response.
-        assertTrue("Generic lookup took ${elapsedMs}ms", elapsedMs < 1_000L)
+        // The first Jsoup call pays DEX/class-loading cost on a cold emulator. Subsequent lookups
+        // use the local research cache and avoid both discovery and page parsing.
+        assertTrue("Cold on-device lookup took ${elapsedMs}ms", elapsedMs < 5_000L)
     }
 }
