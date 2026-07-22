@@ -44,7 +44,7 @@ object TarExtractor {
             val header = ByteArray(BLOCK)
             while (true) {
                 // Read the 512-byte header block
-                val read = src.readNBytes(header, 0, BLOCK)
+                val read = src.readFullyCompat(header, 0, BLOCK)
                 if (read < BLOCK) break
 
                 // An all-zero block signals the end of archive
@@ -115,7 +115,7 @@ object TarExtractor {
     // ------------------------------------------------------------------
 
     /** Reads exactly [n] bytes from the stream into [buf] starting at [off]. */
-    private fun InputStream.readNBytes(buf: ByteArray, off: Int, n: Int): Int {
+    private fun InputStream.readFullyCompat(buf: ByteArray, off: Int, n: Int): Int {
         var total = 0
         while (total < n) {
             val r = read(buf, off + total, n - total)

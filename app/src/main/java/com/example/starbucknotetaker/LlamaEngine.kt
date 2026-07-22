@@ -44,8 +44,9 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * The model weights (~2 GB) are not bundled in the APK; [LlamaModelManager]
  * downloads the matching ABI-specific weight profile under `filesDir/models/`.
- * Until the weights are present, every inference call falls back to the
- * rule-based heuristics in [Summarizer].
+ * Until the weights are present, legacy summary/question helpers can fall back to
+ * rule-based behavior. ADK agent calls fail with actionable download guidance so an
+ * apparent reformat or conversation is never produced by heuristics.
  *
  * Devices with less than [DeviceCapabilityChecker.MIN_RAM_BYTES] (4 GB) total RAM are
  * considered incapable and will always receive the rule-based fallback without
@@ -68,6 +69,11 @@ class LlamaEngine(private val context: Context) {
     // ------------------------------------------------------------------
 
     enum class Mode { SUMMARISE, REWRITE, QUESTION }
+
+    /** A provider-neutral chat message used by the ADK model adapter. */
+    data class ChatMessage(val role: String, val content: String)
+
+    class ModelUnavailableException(message: String) : IllegalStateException(message)
 
     sealed class InferenceProgress {
         object Idle : InferenceProgress()
@@ -148,6 +154,77 @@ class LlamaEngine(private val context: Context) {
         taskId: String = newTaskId(),
         maxTokensOverride: Int? = null,
     ): String = infer(Mode.QUESTION, question, context, taskId, maxTokensOverride)
+
+    /**
+     * Completes an ADK-managed conversation with the installed on-device model.
+     *
+     * Unlike the legacy convenience methods, this API never substitutes a rule-based answer:
+     * an agent turn either comes from the language model or fails visibly. This is important for
+     * reformatting, where spelling and grammar correction cannot be guaranteed by heuristics.
+     */
+    suspend fun completeChat(
+        messages: List<ChatMessage>,
+        taskId: String = newTaskId(),
+        maxTokens: Int = AGENT_MAX_OUTPUT_TOKENS,
+        temperature: Float = 0.25f,
+        topP: Float = 0.9f,
+        onToken: (String) -> Unit = {},
+    ): String = withContext(Dispatchers.Default) {
+        inferenceMutex.withLock {
+            agentUnavailableReason()?.let { throw ModelUnavailableException(it) }
+            val modelPath = modelManager.getModelPath()
+                ?: error("Agent availability changed while starting inference.")
+            checkThermalThrottle()
+            try {
+                ensureEngineLoaded(modelPath)
+                generateAgentWithMlc(
+                    messages = messages,
+                    taskId = taskId,
+                    maxTokens = maxTokens,
+                    temperature = temperature,
+                    topP = topP,
+                    onToken = onToken,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                Log.e(TAG, "ADK model turn failed taskId=$taskId", failure)
+                _progress.value = InferenceProgress.Error(
+                    taskId,
+                    failure.message ?: "On-device agent inference failed",
+                )
+                throw failure
+            }
+        }
+    }
+
+    /** Fast preflight used before ADK starts a turn, so missing-model errors never enter its loop. */
+    fun agentUnavailableReason(): String? {
+        if (!DeviceCapabilityChecker.isAiCapable(context)) {
+            return "This device needs at least 4 GB RAM for the on-device AI agent."
+        }
+        val status = modelManager.modelStatus.value
+        if (status is LlamaModelManager.ModelStatus.Unsupported) return status.message
+        if (modelManager.getModelPath() == null) {
+            return "Download the on-device AI model in Settings before using the agent."
+        }
+        return null
+    }
+
+    /** Conservative prompt budget for the active ABI profile. */
+    val agentPromptCharLimit: Int
+        get() = if (isCompactEmulatorProfile()) {
+            AGENT_PROMPT_CHARS_EMULATOR
+        } else {
+            AGENT_PROMPT_CHARS_DEVICE
+        }
+
+    val agentMaxOutputTokens: Int
+        get() = if (isCompactEmulatorProfile()) {
+            AGENT_MAX_OUTPUT_TOKENS_EMULATOR
+        } else {
+            AGENT_MAX_OUTPUT_TOKENS
+        }
 
     /**
      * Loads the native engine and model weights without generating text.
@@ -496,6 +573,85 @@ class LlamaEngine(private val context: Context) {
         return result
     }
 
+    private fun generateAgentWithMlc(
+        messages: List<ChatMessage>,
+        taskId: String,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
+        onToken: (String) -> Unit,
+    ): String {
+        require(messages.any { it.content.isNotBlank() }) { "Agent prompt cannot be empty" }
+        val thermalLimit = if (isThermallyThrottled()) {
+            maxOf(MIN_MAX_TOKENS, agentMaxOutputTokens / 2)
+        } else {
+            agentMaxOutputTokens
+        }
+        val boundedMaxTokens = maxTokens.coerceIn(MIN_MAX_TOKENS, thermalLimit)
+        val request = OpenAIProtocol.ChatCompletionRequest(
+            messages = messages
+                .filter { it.content.isNotBlank() }
+                .map { message ->
+                    OpenAIProtocol.ChatCompletionMessage(
+                        role = message.role,
+                        content = message.content,
+                    )
+                },
+            model = LlamaModelManager.MODEL_DISPLAY_NAME,
+            stream = true,
+            maxTokens = boundedMaxTokens,
+            temperature = temperature.coerceIn(0f, 1f),
+            topP = topP.coerceIn(0.1f, 1f),
+        )
+
+        val result = StringBuilder()
+        val firstTokenMs = AtomicLong(-1L)
+        val startedAt = SystemClock.elapsedRealtime()
+        _progress.value = InferenceProgress.Thinking("", taskId)
+        try {
+            mlcEngine.reset()
+            mlcEngine.chat.completions.create(
+                request,
+                timeoutSeconds = TIMEOUT_AGENT_SECONDS,
+            ) { response ->
+                response.choices.firstOrNull()?.delta?.content?.let { token ->
+                    if (token.isNotEmpty()) {
+                        firstTokenMs.compareAndSet(-1L, SystemClock.elapsedRealtime() - startedAt)
+                        result.append(token)
+                        onToken(token)
+                        _progress.value = InferenceProgress.Thinking(result.toString(), taskId)
+                    }
+                }
+            }
+        } catch (timeout: TimeoutException) {
+            val partial = result.toString().trim()
+            if (partial.isNotBlank()) {
+                _progress.value = InferenceProgress.Done(taskId, partial)
+                return partial
+            }
+            throw ModelUnavailableException(
+                "The on-device agent did not respond within $TIMEOUT_AGENT_SECONDS seconds.",
+            )
+        }
+
+        val completed = result.toString().trim()
+        if (completed.isBlank()) {
+            throw IllegalStateException("The on-device agent returned an empty response.")
+        }
+        Log.i(
+            TAG,
+            "ADK model turn complete taskId=$taskId chars=${completed.length} " +
+                "maxTokens=$boundedMaxTokens firstTokenMs=${firstTokenMs.get()} " +
+                "elapsedMs=${SystemClock.elapsedRealtime() - startedAt}",
+        )
+        _progress.value = InferenceProgress.Done(taskId, completed)
+        return completed
+    }
+
+    private fun isCompactEmulatorProfile(): Boolean =
+        modelManager.getRuntimeMlcDeviceType() == "cpu" &&
+            Build.SUPPORTED_ABIS.any { it == "x86_64" || it == "x86" }
+
     /**
      * Returns a rule-based fallback result for [mode].
      *
@@ -630,6 +786,10 @@ class LlamaEngine(private val context: Context) {
         private const val MAX_TOKENS_SUMMARISE = 64
         private const val MAX_TOKENS_REWRITE   = 160
         private const val MAX_TOKENS_QUESTION  = 128
+        private const val AGENT_MAX_OUTPUT_TOKENS = 768
+        private const val AGENT_MAX_OUTPUT_TOKENS_EMULATOR = 320
+        private const val AGENT_PROMPT_CHARS_DEVICE = 6_000
+        private const val AGENT_PROMPT_CHARS_EMULATOR = 2_200
         private const val MAX_CONTEXT_CHARS_SUMMARISE = 900
         private const val MAX_CONTEXT_CHARS_REWRITE = 2_000
         internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_000
@@ -639,6 +799,7 @@ class LlamaEngine(private val context: Context) {
         // moments before its first token arrives.
         private const val TIMEOUT_SUMMARISE_SECONDS = 30L
         private const val TIMEOUT_INTERACTIVE_SECONDS = 30L
+        private const val TIMEOUT_AGENT_SECONDS = 60L
         private const val WARMUP_TIMEOUT_SECONDS = 90L
         private const val MAX_CPU_THREADS = 8
         private const val BYTES_PER_GIB = 1_073_741_824.0

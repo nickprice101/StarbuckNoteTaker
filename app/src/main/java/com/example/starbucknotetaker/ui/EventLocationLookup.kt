@@ -2,9 +2,11 @@ package com.example.starbucknotetaker.ui
 
 import android.location.Geocoder
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import android.util.Log
 import java.util.Locale
@@ -22,10 +24,11 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
     val context = LocalContext.current
     val geocoder = remember(context) { Geocoder(context, Locale.getDefault()) }
     
-    val display by produceState(initialValue = fallback, key1 = query, key2 = geocoder) {
+    var display by remember(query, geocoder) { mutableStateOf(fallback) }
+    LaunchedEffect(query, geocoder) {
         Log.d("EventLocationLookup", "Processing query: '$query'")
         
-        val result = withContext(Dispatchers.IO) {
+        display = withContext(Dispatchers.IO) {
             // Step 1: Always check if user input is a venue name first
             val userVenueName = extractAndFormatVenueName(query)
 
@@ -97,8 +100,6 @@ internal fun rememberEventLocationDisplay(location: String?): EventLocationDispl
                 venueResult ?: fallback
             }
         }
-        
-        value = result
     }
     
     return display

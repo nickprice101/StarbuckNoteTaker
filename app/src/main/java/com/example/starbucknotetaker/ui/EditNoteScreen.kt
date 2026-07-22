@@ -25,6 +25,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,8 +36,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -71,6 +75,7 @@ import com.example.starbucknotetaker.REMINDER_MINUTE_OPTIONS
 import com.example.starbucknotetaker.R
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextDocumentBuilder
+import com.example.starbucknotetaker.richtext.MarkdownRichText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -86,69 +91,31 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 @Composable
-fun AiAssistantDialog(
+fun ReformatDestinationDialog(
     onDismiss: () -> Unit,
-    onAskQuestion: (String) -> Unit,
-    onReformat: ((RewriteDestination) -> Unit)? = null,
+    onReformat: (RewriteDestination) -> Unit,
 ) {
-    var question by remember { mutableStateOf("") }
-    var chooseReformatDestination by remember { mutableStateOf(false) }
-
-    if (chooseReformatDestination) {
-        AlertDialog(
-            onDismissRequest = { chooseReformatDestination = false },
-            title = { Text("Reformat note") },
-            text = {
-                Text(
-                    "Would you like to create a new reformatted note or edit the current note?",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { onReformat?.invoke(RewriteDestination.NEW_NOTE) }) {
-                    Text("Create new note")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { onReformat?.invoke(RewriteDestination.CURRENT_NOTE) }) {
-                    Text("Edit current note")
-                }
-            },
-        )
-        return
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Ask the AI") },
+        title = { Text("Reformat note") },
         text = {
-            Column {
-                if (onReformat != null) {
-                    Button(
-                        onClick = { chooseReformatDestination = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Reformat note")
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
-                OutlinedTextField(
-                    value = question,
-                    onValueChange = { question = it },
-                    label = { Text("Your question") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            Text(
+                "The on-device AI agent will correct spelling and grammar, then add headings, " +
+                    "lists, and indentation where useful. Where should the result go?",
+            )
         },
         confirmButton = {
-            TextButton(
-                enabled = question.isNotBlank(),
-                onClick = { onAskQuestion(question.trim()) },
-            ) {
-                Text("Ask")
+            TextButton(onClick = { onReformat(RewriteDestination.CURRENT_NOTE) }) {
+                Text("Update this note")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Row {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = { onReformat(RewriteDestination.NEW_NOTE) }) {
+                    Text("Create new note")
+                }
+            }
         },
     )
 }
@@ -164,7 +131,6 @@ fun EditNoteScreen(
     summarizerState: Summarizer.SummarizerState,
     openAttachment: suspend (String) -> ByteArray?,
     onRewriteNote: ((Long, String?, String, RewriteDestination) -> Unit)? = null,
-    onAskQuestion: ((Long, String) -> Unit)? = null,
     inferenceProgress: LlamaEngine.InferenceProgress = LlamaEngine.InferenceProgress.Idle,
 ) {
     var title by remember { mutableStateOf(note.title) }
@@ -600,8 +566,24 @@ fun EditNoteScreen(
         }
     }
 
+    fun appendAgentText(text: String) {
+        val document = MarkdownRichText.parse(text.trim())
+        if (document.text.isBlank()) return
+        markDirty()
+        val block = EditBlock.Text(RichTextValue.fromDocument(document))
+        val lastIndex = blocks.lastIndex
+        if ((blocks.getOrNull(lastIndex) as? EditBlock.Text)?.value?.text?.isBlank() == true) {
+            blocks[lastIndex] = block
+        } else {
+            blocks.add(block)
+        }
+        blocks.add(EditBlock.Text(RichTextValue.fromPlainText("")))
+    }
+
     var showTranscriptionDialog by remember { mutableStateOf(false) }
     var showSketchPad by remember { mutableStateOf(false) }
+    var showConversation by remember { mutableStateOf(false) }
+    var conversationNoteContext by remember { mutableStateOf("") }
     var showAudioPermissionSettingsDialog by remember { mutableStateOf(false) }
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -670,31 +652,28 @@ fun EditNoteScreen(
                     },
                     actions = {
                         // ---- AI toolbar buttons ----
-                        if (onAskQuestion != null) {
-                            var showAskDialog by remember { mutableStateOf(false) }
-                            IconButton(onClick = { showAskDialog = true }) {
+                        if (onRewriteNote != null) {
+                            var showReformatDialog by remember { mutableStateOf(false) }
+                            IconButton(
+                                onClick = { showReformatDialog = true },
+                                modifier = Modifier.testTag("reformatNote"),
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.QuestionAnswer,
-                                    contentDescription = "Ask AI ❓",
+                                    imageVector = Icons.Default.AutoFixHigh,
+                                    contentDescription = "Reformat note",
                                 )
                             }
-                            if (showAskDialog) {
-                                AiAssistantDialog(
-                                    onDismiss = { showAskDialog = false },
-                                    onAskQuestion = { question ->
-                                        onAskQuestion(note.id, question)
-                                        showAskDialog = false
-                                    },
-                                    onReformat = onRewriteNote?.let { rewrite ->
-                                        { destination ->
-                                            rewrite(
-                                                note.id,
-                                                title,
-                                                currentDraftContent(),
-                                                destination,
-                                            )
-                                            showAskDialog = false
-                                        }
+                            if (showReformatDialog) {
+                                ReformatDestinationDialog(
+                                    onDismiss = { showReformatDialog = false },
+                                    onReformat = { destination ->
+                                        onRewriteNote(
+                                            note.id,
+                                            title,
+                                            currentDraftContent(),
+                                            destination,
+                                        )
+                                        showReformatDialog = false
                                     },
                                 )
                             }
@@ -1353,8 +1332,9 @@ fun EditNoteScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AttachmentAction(
@@ -1404,9 +1384,33 @@ fun EditNoteScreen(
                             recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }
+                    AttachmentAction(
+                        icon = Icons.Default.Forum,
+                        label = "Conversation",
+                    ) {
+                        hideKeyboard()
+                        focusManager.clearFocus(force = true)
+                        conversationNoteContext = currentDraftContent()
+                        showConversation = true
+                    }
                 }
             }
         }
+    }
+
+    if (showConversation) {
+        AgentConversationDialog(
+            noteContext = conversationNoteContext,
+            onDismiss = { showConversation = false },
+            onInsertIntoNote = { response ->
+                appendAgentText(response)
+                Toast.makeText(
+                    context,
+                    "Added the agent response to this note",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+        )
     }
 
     if (showSketchPad) {
