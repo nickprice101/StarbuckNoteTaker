@@ -30,19 +30,6 @@ internal object NoteAiAgent {
     private const val USER_ID = "local-note-user"
     private const val REFORMAT_CHUNK_CHARS = 2_700
 
-    private val reformatInstruction = Instruction(
-        """
-        You are an expert note editor running privately on the user's device.
-        Reformat the supplied note into clear Markdown while preserving every fact, name, date,
-        link, decision, and action. Correct spelling, punctuation, capitalization, and grammar.
-        Add short descriptive headings only when they improve navigation. Use bullet lists for
-        unordered related items and numbered lists only for sequences or priorities. Apply useful
-        indentation to nested items. Keep ordinary prose as prose; do not force every sentence into
-        a list. Never invent information, summarize away details, add commentary, or use a code
-        fence. Return only the corrected and reformatted note fragment.
-        """.trimIndent(),
-    )
-
     suspend fun reformat(
         context: Context,
         noteText: String,
@@ -52,6 +39,7 @@ internal object NoteAiAgent {
         val source = noteText.trim()
         require(source.isNotBlank()) { "The note has no text to reformat." }
         (model as? MlcAdkModel)?.requireAvailable()
+        val reformatInstruction = Instruction(AiAgentPrompts.load(context).reformatting)
         val chunkChars = (model as? MlcAdkModel)?.recommendedReformatChunkChars
             ?: REFORMAT_CHUNK_CHARS
         val chunks = NoteTextChunker.chunk(source, chunkChars)
@@ -86,7 +74,10 @@ internal object NoteAiAgent {
             )
             validateReformat(chunk, output)
         }
-        return reformatted.joinToString("\n\n").trim()
+        val deduplicated = ReformattedNoteDeduplicator.removeRepeatedContent(
+            reformatted.joinToString("\n\n"),
+        )
+        return validateReformat(source, deduplicated)
     }
 
     fun conversation(
@@ -98,6 +89,7 @@ internal object NoteAiAgent {
         model = model,
         sessionId = sessionId,
         noteContext = noteContext,
+        systemInstruction = AiAgentPrompts.load(context).chatbot,
     )
 
     private fun validateReformat(source: String, output: String): String {
@@ -152,27 +144,20 @@ internal object NoteAiAgent {
 internal class NoteConversationAgent(
     private val model: Model,
     private val sessionId: String,
-    noteContext: String,
+    private val noteContext: String,
+    private val systemInstruction: String,
 ) {
     private val sessionService = InMemorySessionService()
+    private val recentTurns = ArrayDeque<ConversationTurn>()
+    private val userPromptCharLimit =
+        ((model as? MlcAdkModel)?.promptCharLimit ?: DEFAULT_MODEL_PROMPT_CHARS) -
+            systemInstruction.length - MODEL_PROMPT_MARGIN_CHARS
     private val agent = LlmAgent(
         name = NoteAiAgent.AGENT_NAME,
         description = "A private conversational assistant for the note currently being edited.",
         model = model,
-        instruction = Instruction(
-            buildString {
-                appendLine("You are a concise, friendly note-taking assistant running entirely on-device.")
-                appendLine("Answer the user's message directly. Use the current note as context when relevant.")
-                appendLine("Do not invent details. If the note does not support an answer, say so clearly.")
-                if (noteContext.isNotBlank()) {
-                    appendLine()
-                    appendLine("Current note context:")
-                    appendLine("<note>")
-                    appendLine(noteContext.take(MAX_NOTE_CONTEXT_CHARS))
-                    append("</note>")
-                }
-            },
-        ),
+        instruction = Instruction(systemInstruction),
+        includeContents = LlmAgent.IncludeContents.NONE,
         generateContentConfig = GenerateContentConfig(
             temperature = 0.3f,
             topP = 0.9f,
@@ -190,13 +175,19 @@ internal class NoteConversationAgent(
         val trimmed = message.trim()
         require(trimmed.isNotBlank()) { "Message cannot be empty." }
         (model as? MlcAdkModel)?.requireAvailable()
+        val turnPrompt = AgentContextPromptBuilder.build(
+            currentNote = noteContext,
+            recentConversation = recentTurns.render(),
+            userRequest = trimmed,
+            maxChars = userPromptCharLimit.coerceAtLeast(MIN_USER_PROMPT_CHARS),
+        )
         val accumulated = StringBuilder()
         var finalText = ""
         withTimeout(NoteAiAgent.AGENT_TURN_TIMEOUT_MS) {
             runner.runAsync(
                 userId = "local-note-user",
                 sessionId = sessionId,
-                newMessage = Content(role = Role.USER, parts = listOf(Part(text = trimmed))),
+                newMessage = Content(role = Role.USER, parts = listOf(Part(text = turnPrompt))),
                 runConfig = RunConfig(streamingMode = StreamingMode.SSE),
             ).collect { event ->
                 event.errorMessage?.takeIf { it.isNotBlank() }?.let { error(it) }
@@ -211,12 +202,65 @@ internal class NoteConversationAgent(
             }
         }
         require(finalText.isNotBlank()) { "The on-device agent returned no reply." }
+        recentTurns += ConversationTurn(user = trimmed, assistant = finalText)
+        while (recentTurns.size > MAX_RECENT_EXCHANGES) recentTurns.removeFirst()
         emit(AgentTurnUpdate.Complete(finalText))
     }
 
-    private companion object {
-        const val MAX_NOTE_CONTEXT_CHARS = 2_800
+    private fun Collection<ConversationTurn>.render(): String = joinToString("\n\n") { turn ->
+        "User: ${turn.user}\nAssistant: ${turn.assistant}"
     }
+
+    private data class ConversationTurn(val user: String, val assistant: String)
+
+    private companion object {
+        const val DEFAULT_MODEL_PROMPT_CHARS = 4_000
+        const val MODEL_PROMPT_MARGIN_CHARS = 64
+        const val MIN_USER_PROMPT_CHARS = 320
+        const val MAX_RECENT_EXCHANGES = 4
+    }
+}
+
+/** Removes model-created exact repetitions while leaving unique note information untouched. */
+internal object ReformattedNoteDeduplicator {
+    private val markdownPrefix = Regex("^\\s*(?:#{1,6}\\s+|[-*+]\\s+|\\d+[.)]\\s+|>\\s+)")
+    private val markdownDecoration = Regex("[`*_~]")
+    private val nonSemanticCharacters = Regex("[^\\p{L}\\p{N}]+")
+
+    fun removeRepeatedContent(text: String): String {
+        val seen = mutableSetOf<String>()
+        val kept = mutableListOf<String>()
+        var insideCodeFence = false
+
+        text.replace("\r\n", "\n").lines().forEach { line ->
+            if (line.trimStart().startsWith("```")) {
+                insideCodeFence = !insideCodeFence
+                kept += line.trimEnd()
+                return@forEach
+            }
+            if (line.isBlank()) {
+                if (kept.lastOrNull()?.isNotBlank() == true) kept += ""
+                return@forEach
+            }
+            if (insideCodeFence) {
+                kept += line.trimEnd()
+                return@forEach
+            }
+            val key = line
+                .replace(markdownPrefix, "")
+                .replace(markdownDecoration, "")
+                .lowercase()
+                .replace(nonSemanticCharacters, " ")
+                .trim()
+            if (key.length < MIN_DEDUPLICATION_KEY_CHARS || seen.add(key)) {
+                kept += line.trimEnd()
+            }
+        }
+
+        return kept.joinToString("\n").trim()
+    }
+
+    private const val MIN_DEDUPLICATION_KEY_CHARS = 4
 }
 
 internal object NoteTextChunker {

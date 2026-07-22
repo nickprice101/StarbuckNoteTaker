@@ -12,6 +12,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowApplication
 
 @RunWith(RobolectricTestRunner::class)
 class NoteViewModelAiAnswerTest {
@@ -66,6 +67,7 @@ class NoteViewModelAiAnswerTest {
             skipAiSummary = true,
         )
         val source = viewModel.notes.first { it.title == "Geography" }
+        ShadowApplication.getInstance().clearStartedServices()
 
         viewModel.askQuestion(source.id, "what is the capital of Iran?")
 
@@ -76,6 +78,11 @@ class NoteViewModelAiAnswerTest {
         assertTrue(answer.content.contains("capital of Iran"))
         assertTrue(answer.content.contains("Starting on-device AI"))
         assertEquals("AI answer in progress", answer.summary)
+        val serviceIntent = ShadowApplication.getInstance().nextStartedService
+        assertEquals(
+            source.content,
+            serviceIntent.getStringExtra(LlamaForegroundService.EXTRA_CONTEXT_TEXT),
+        )
     }
 
     @Test

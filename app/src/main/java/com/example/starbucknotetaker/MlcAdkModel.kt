@@ -72,9 +72,12 @@ internal class MlcAdkModel(
 
     override val name: String = "qwen3-0.6b-litertlm-local"
 
+    internal val promptCharLimit: Int
+        get() = backend.promptCharLimit
+
     /** Keeps a complete note fragment inside the prompt on the smaller emulator profile. */
     internal val recommendedReformatChunkChars: Int
-        get() = (backend.promptCharLimit - PROMPT_OVERHEAD_CHARS)
+        get() = (promptCharLimit - PROMPT_OVERHEAD_CHARS)
             .coerceIn(MIN_REFORMAT_CHUNK_CHARS, MAX_REFORMAT_CHUNK_CHARS)
 
     internal fun requireAvailable() {

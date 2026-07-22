@@ -220,7 +220,7 @@ class LlamaEngine(private val context: Context) {
                 }
                 val maxTokens = maxTokensOverride?.coerceIn(MIN_MAX_TOKENS, thermalMaxTokens)
                     ?: thermalMaxTokens
-                generate(
+                val generated = generate(
                     messages = buildMessages(mode, primaryText, secondaryText),
                     taskId = taskId,
                     maxTokens = maxTokens,
@@ -232,6 +232,11 @@ class LlamaEngine(private val context: Context) {
                     topP = 0.9f,
                     timeoutMs = timeoutMsFor(mode),
                 )
+                if (mode == Mode.REWRITE) {
+                    ReformattedNoteDeduplicator.removeRepeatedContent(generated)
+                } else {
+                    generated
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -452,18 +457,16 @@ class LlamaEngine(private val context: Context) {
             Mode.SUMMARISE ->
                 "You are a concise note-taking assistant. Summarise the note in at most 3 short " +
                     "lines. Output only the summary."
-            Mode.REWRITE ->
-                "Rewrite the note in clear professional Markdown. Preserve every fact and detail. " +
-                    "Output only the rewritten note."
-            Mode.QUESTION -> if (secondary != null) {
-                "Answer the user's question from the supplied context. Be concise and do not invent details."
-            } else {
-                "Answer the user's question concisely and accurately."
-            }
+            Mode.REWRITE -> AiAgentPrompts.load(context).reformatting
+            Mode.QUESTION -> AiAgentPrompts.load(context).chatbot
         }
         val contextLimit = contextCharLimitFor(mode)
-        val user = if (mode == Mode.QUESTION && secondary != null) {
-            "Context:\n${secondary.take(contextLimit)}\n\nQuestion: ${primary.take(MAX_QUESTION_CHARS)}"
+        val user = if (mode == Mode.QUESTION) {
+            AgentContextPromptBuilder.build(
+                currentNote = secondary.orEmpty().take(contextLimit),
+                userRequest = primary.take(MAX_QUESTION_CHARS),
+                maxChars = QUESTION_STRUCTURED_PROMPT_CHARS,
+            )
         } else {
             primary.take(contextLimit)
         }
@@ -532,7 +535,8 @@ class LlamaEngine(private val context: Context) {
         private const val AGENT_PROMPT_CHARS_EMULATOR = 2_200
         private const val MAX_CONTEXT_CHARS_SUMMARISE = 900
         private const val MAX_CONTEXT_CHARS_REWRITE = 2_000
-        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_000
+        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_600
+        private const val QUESTION_STRUCTURED_PROMPT_CHARS = 2_300
         private const val MAX_QUESTION_CHARS = 500
         private const val MODEL_CONTEXT_TOKENS = 2_048
         private const val DEFAULT_TOP_K = 40

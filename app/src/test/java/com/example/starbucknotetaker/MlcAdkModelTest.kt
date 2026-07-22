@@ -25,6 +25,18 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class MlcAdkModelTest {
     @Test
+    fun `editable agent prompts are packaged as a build asset`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        val prompts = AiAgentPrompts.load(context)
+
+        assertTrue(prompts.chatbot.startsWith("Role: You are a knowledge retrieval assistant"))
+        assertTrue(prompts.chatbot.contains("existing note as the primary source"))
+        assertTrue(prompts.reformatting.startsWith("Role: You are a document formatting assistant"))
+        assertTrue(prompts.reformatting.contains("Treat all attached images, files, and linked content"))
+    }
+
+    @Test
     fun `adapter maps ADK instruction and turns and streams local tokens`() = runTest {
         val backend = RecordingBackend(result = "Corrected note.")
         val model = MlcAdkModel(backend)
@@ -102,7 +114,7 @@ class MlcAdkModelTest {
     }
 
     @Test
-    fun `conversation reuses ADK session history across turns`() = runTest {
+    fun `conversation sends current note and recent turns as explicit context`() = runTest {
         val fakeModel = RecordingAdkModel("A concise reply.")
         val conversation = NoteAiAgent.conversation(
             context = ApplicationProvider.getApplicationContext<Context>(),
@@ -118,9 +130,53 @@ class MlcAdkModelTest {
         val secondTurnText = fakeModel.requests.last().contents
             .flatMap { it.parts }
             .mapNotNull { it.text }
+            .joinToString("\n")
         assertTrue(secondTurnText.contains("When is launch?"))
         assertTrue(secondTurnText.contains("A concise reply."))
         assertTrue(secondTurnText.contains("What day was that?"))
+        assertTrue(secondTurnText.contains("<current_note>\nLaunch on Friday.\n</current_note>"))
+        assertTrue(secondTurnText.contains("<recent_conversation>"))
+        assertEquals(
+            AiAgentPrompts.load(ApplicationProvider.getApplicationContext()).chatbot,
+            fakeModel.requests.last().config.systemInstruction?.parts?.first()?.text,
+        )
+    }
+
+    @Test
+    fun `structured context keeps note history and current request within budget`() {
+        val note = "Opening fact. " + "middle detail ".repeat(200) + "Latest decision is Friday."
+
+        val prompt = AgentContextPromptBuilder.build(
+            currentNote = note,
+            recentConversation = "User: Who owns it?\nAssistant: Priya owns it.",
+            userRequest = "When is the latest decision due?",
+            maxChars = 1_100,
+        )
+
+        assertTrue(prompt.length <= 1_100)
+        assertTrue(prompt.contains("Opening fact."))
+        assertTrue(prompt.contains("Latest decision is Friday."))
+        assertTrue(prompt.contains("Priya owns it."))
+        assertTrue(prompt.contains("<user_request>\nWhen is the latest decision due?\n</user_request>"))
+    }
+
+    @Test
+    fun `reformat deduplicator removes repeated prose but preserves code`() {
+        val formatted = ReformattedNoteDeduplicator.removeRepeatedContent(
+            """
+            ## Launch
+            Launch is Friday.
+            - Launch is Friday.
+
+            ```text
+            repeat-me
+            repeat-me
+            ```
+            """.trimIndent(),
+        )
+
+        assertEquals(1, Regex("Launch is Friday\\.").findAll(formatted).count())
+        assertEquals(2, Regex("repeat-me").findAll(formatted).count())
     }
 
     @Test
