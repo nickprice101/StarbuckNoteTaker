@@ -230,6 +230,10 @@ fun RichTextEditor(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         innerTextField()
+                        CitationPillRow(
+                            document = state.value.toDocument(),
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                     }
                 },
                 placeholder = null,

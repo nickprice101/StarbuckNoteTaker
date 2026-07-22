@@ -30,6 +30,9 @@ data class RichTextDocument(
             spans.forEach { range ->
                 range.styles.forEach { style ->
                     addStyle(style.toSpanStyle(), range.start, range.end)
+                    if (style is RichTextStyle.Citation) {
+                        addStringAnnotation(CITATION_URL_TAG, style.url, range.start, range.end)
+                    }
                 }
             }
         }
@@ -127,6 +130,11 @@ private fun RichTextStyle.toSpanStyle(): SpanStyle = when (this) {
     RichTextStyle.Underline -> SpanStyle(textDecoration = TextDecoration.Underline)
     is RichTextStyle.Highlight -> SpanStyle(background = color)
     is RichTextStyle.TextColor -> SpanStyle(color = color)
+    is RichTextStyle.Citation -> SpanStyle(
+        color = Color(0xFF0B57D0),
+        background = Color(0x1A0B57D0),
+        fontWeight = FontWeight.Medium,
+    )
 }
 
 /**

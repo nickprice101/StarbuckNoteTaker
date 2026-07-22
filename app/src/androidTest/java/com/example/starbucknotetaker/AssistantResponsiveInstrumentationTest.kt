@@ -43,7 +43,24 @@ class AssistantResponsiveInstrumentationTest {
                             </body></html>
                         """.trimIndent().toByteArray(),
                     )
+
+                override suspend fun post(
+                    url: String,
+                    body: ByteArray,
+                    headers: Map<String, String>,
+                    maxBytes: Int,
+                ): WebLookupHttpResponse = WebLookupHttpResponse(
+                    statusCode = 200,
+                    body = """
+                        {"success":true,"results":[{
+                          "url":"https://example.com/baltic",
+                          "success":true,
+                          "markdown":{"fit_markdown":"The Baltic Sea is bordered by Denmark, Germany, Sweden, and other countries."}
+                        }]}
+                    """.trimIndent().toByteArray(),
+                )
             },
+            crawl4AiConfig = Crawl4AiConfig("https://crawl4ai.test", "test-token"),
         )
 
         val question = "What countries border the Baltic Sea?"

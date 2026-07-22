@@ -67,8 +67,8 @@ class AiAssistantDialogInstrumentationTest {
         }
 
         composeRule.onNodeWithTag("agentConversation").assertExists()
-        composeRule.onNodeWithText("Conversation").assertExists()
-        composeRule.onNodeWithText("On-device AI").assertExists()
+        composeRule.onNodeWithText("Chat").assertExists()
+        composeRule.onNodeWithText("On-device AI + web research").assertExists()
         composeRule.onNodeWithTag("agentMessageInput").assertExists()
         composeRule.onNodeWithTag("sendAgentMessage").assertExists()
     }

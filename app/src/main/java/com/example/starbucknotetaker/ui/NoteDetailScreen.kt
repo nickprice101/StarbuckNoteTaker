@@ -70,6 +70,7 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import com.example.starbucknotetaker.ChecklistItem
 import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.RichTextStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -238,29 +239,11 @@ fun NoteDetailScreen(
                 if (start > cursor) {
                     val segment = styledSource.slice(cursor, start)
                     if (segment.text.isNotEmpty()) {
-                        val base = segment.toAnnotatedString()
-                        val builder = AnnotatedString.Builder(base)
-                        val matcher = Patterns.WEB_URL.matcher(segment.text)
-                        while (matcher.find()) {
-                            val url = segment.text.substring(matcher.start(), matcher.end())
-                            builder.addStringAnnotation("URL", url, matcher.start(), matcher.end())
-                            builder.addStyle(
-                                SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
-                                matcher.start(),
-                                matcher.end()
-                            )
-                        }
-                        val annotated = builder.toAnnotatedString()
-                        ClickableText(
-                            text = annotated,
-                            onClick = { offset ->
-                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
-                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))) }
-                                }
-                            },
+                        NoteContentText(
+                            document = segment,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 8.dp)
+                                .padding(bottom = 8.dp),
                         )
                     }
                 }
@@ -366,29 +349,11 @@ fun NoteDetailScreen(
             if (cursor < contentText.length) {
                 val segment = styledSource.slice(cursor, contentText.length)
                 if (segment.text.isNotEmpty()) {
-                    val base = segment.toAnnotatedString()
-                    val builder = AnnotatedString.Builder(base)
-                    val matcher = Patterns.WEB_URL.matcher(segment.text)
-                    while (matcher.find()) {
-                        val url = segment.text.substring(matcher.start(), matcher.end())
-                        builder.addStringAnnotation("URL", url, matcher.start(), matcher.end())
-                        builder.addStyle(
-                            SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
-                            matcher.start(),
-                            matcher.end()
-                        )
-                    }
-                    val annotated = builder.toAnnotatedString()
-                    ClickableText(
-                        text = annotated,
-                        onClick = { offset ->
-                            annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { sa ->
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sa.item))) }
-                            }
-                        },
+                    NoteContentText(
+                        document = segment,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp)
+                            .padding(bottom = 8.dp),
                     )
                 }
             }
@@ -854,6 +819,47 @@ internal fun resolveShareMimeTypeFromMimeTypes(mimeTypes: List<String>): String 
 
 private fun resolveShareMimeType(attachments: List<PreparedAttachment>): String {
     return resolveShareMimeTypeFromMimeTypes(attachments.map { attachment -> attachment.mimeType })
+}
+
+@Composable
+private fun NoteContentText(
+    document: RichTextDocument,
+    modifier: Modifier = Modifier,
+) {
+    val hasCitations = document.spans.any { range ->
+        range.styles.any { it is RichTextStyle.Citation }
+    }
+    if (hasCitations) {
+        CitationRichText(document = document, modifier = modifier)
+        return
+    }
+
+    val context = LocalContext.current
+    val annotated = remember(document) {
+        val builder = AnnotatedString.Builder(document.toAnnotatedString())
+        val matcher = Patterns.WEB_URL.matcher(document.text)
+        while (matcher.find()) {
+            val url = document.text.substring(matcher.start(), matcher.end())
+            builder.addStringAnnotation("URL", url, matcher.start(), matcher.end())
+            builder.addStyle(
+                SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
+                matcher.start(),
+                matcher.end(),
+            )
+        }
+        builder.toAnnotatedString()
+    }
+    ClickableText(
+        text = annotated,
+        onClick = { offset ->
+            annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { annotation ->
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(annotation.item)))
+                }
+            }
+        },
+        modifier = modifier,
+    )
 }
 
 private fun buildShareText(

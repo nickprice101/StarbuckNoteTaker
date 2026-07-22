@@ -90,6 +90,7 @@ internal object NoteAiAgent {
         sessionId = sessionId,
         noteContext = noteContext,
         systemInstruction = AiAgentPrompts.load(context).chatbot,
+        webResearcher = AssistantWebLookup(context.applicationContext),
     )
 
     private fun validateReformat(source: String, output: String): String {
@@ -146,6 +147,7 @@ internal class NoteConversationAgent(
     private val sessionId: String,
     private val noteContext: String,
     private val systemInstruction: String,
+    private val webResearcher: WebResearcher,
 ) {
     private val sessionService = InMemorySessionService()
     private val recentTurns = ArrayDeque<ConversationTurn>()
@@ -174,20 +176,68 @@ internal class NoteConversationAgent(
     fun send(message: String): Flow<AgentTurnUpdate> = flow {
         val trimmed = message.trim()
         require(trimmed.isNotBlank()) { "Message cannot be empty." }
+        var research: WebLookupResult? = null
+        if (AssistantWebLookup.shouldLookup(trimmed)) {
+            emit(AgentTurnUpdate.Partial("Researching with Crawl4AI…"))
+            val lookup = webResearcher.lookup(trimmed)
+            if (lookup.results.isNotEmpty()) {
+                research = lookup
+            } else if (AssistantWebLookup.requiresInternet(trimmed)) {
+                val alert = AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
+                rememberTurn(trimmed, alert)
+                emit(AgentTurnUpdate.Complete(alert))
+                return@flow
+            }
+        }
+
         (model as? MlcAdkModel)?.requireAvailable()
-        val turnPrompt = AgentContextPromptBuilder.build(
-            currentNote = noteContext,
+        var finalText = generate(
+            prompt = buildTurnPrompt(trimmed, research),
+            onPartial = { emit(AgentTurnUpdate.Partial(it)) },
+        )
+
+        // The local model gets the first opportunity for non-current questions. If it explicitly
+        // says it cannot answer, research is attempted; an outage then produces a clear alert.
+        if (research == null && AssistantWebLookup.answerNeedsResearch(finalText)) {
+            emit(AgentTurnUpdate.Partial("Checking the web with Crawl4AI…"))
+            val lookup = webResearcher.lookup(trimmed)
+            if (lookup.results.isEmpty()) {
+                finalText = AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
+            } else {
+                research = lookup
+                finalText = generate(
+                    prompt = buildTurnPrompt(trimmed, lookup),
+                    onPartial = { emit(AgentTurnUpdate.Partial(it)) },
+                )
+            }
+        }
+
+        require(finalText.isNotBlank()) { "The on-device agent returned no reply." }
+        research?.let { finalText = AssistantWebLookup.appendMarkdownSources(finalText, it) }
+        rememberTurn(trimmed, finalText)
+        emit(AgentTurnUpdate.Complete(finalText))
+    }
+
+    private fun buildTurnPrompt(message: String, research: WebLookupResult?): String =
+        AgentContextPromptBuilder.build(
+            currentNote = research?.let { AssistantWebLookup.mergeWithNoteContext(noteContext, it) }
+                ?: noteContext,
             recentConversation = recentTurns.render(),
-            userRequest = trimmed,
+            userRequest = message,
             maxChars = userPromptCharLimit.coerceAtLeast(MIN_USER_PROMPT_CHARS),
         )
+
+    private suspend fun generate(
+        prompt: String,
+        onPartial: suspend (String) -> Unit,
+    ): String {
         val accumulated = StringBuilder()
         var finalText = ""
         withTimeout(NoteAiAgent.AGENT_TURN_TIMEOUT_MS) {
             runner.runAsync(
                 userId = "local-note-user",
                 sessionId = sessionId,
-                newMessage = Content(role = Role.USER, parts = listOf(Part(text = turnPrompt))),
+                newMessage = Content(role = Role.USER, parts = listOf(Part(text = prompt))),
                 runConfig = RunConfig(streamingMode = StreamingMode.SSE),
             ).collect { event ->
                 event.errorMessage?.takeIf { it.isNotBlank() }?.let { error(it) }
@@ -195,16 +245,18 @@ internal class NoteConversationAgent(
                 val text = event.content?.parts?.mapNotNull { it.text }?.joinToString("").orEmpty()
                 if (event.partial) {
                     accumulated.append(text)
-                    emit(AgentTurnUpdate.Partial(accumulated.toString()))
+                    onPartial(accumulated.toString())
                 } else {
                     finalText = text.ifBlank { accumulated.toString() }.trim()
                 }
             }
         }
-        require(finalText.isNotBlank()) { "The on-device agent returned no reply." }
-        recentTurns += ConversationTurn(user = trimmed, assistant = finalText)
+        return finalText
+    }
+
+    private fun rememberTurn(user: String, assistant: String) {
+        recentTurns += ConversationTurn(user = user, assistant = assistant)
         while (recentTurns.size > MAX_RECENT_EXCHANGES) recentTurns.removeFirst()
-        emit(AgentTurnUpdate.Complete(finalText))
     }
 
     private fun Collection<ConversationTurn>.render(): String = joinToString("\n\n") { turn ->

@@ -148,7 +148,7 @@ internal fun AgentConversationDialog(
                         Column {
                             Text("Chat")
                             Text(
-                                "On-device AI",
+                                "On-device AI + web research",
                                 style = MaterialTheme.typography.caption,
                                 color = MaterialTheme.colors.onPrimary.copy(alpha = 0.75f),
                             )
@@ -174,7 +174,7 @@ internal fun AgentConversationDialog(
                         tint = MaterialTheme.colors.primary,
                     )
                     Text(
-                        "Messages stay on this device and this chat can use the current note as context.",
+                        "Your note stays on this device. Questions that need current or unfamiliar facts can use web research.",
                         modifier = Modifier.padding(start = 8.dp),
                         style = MaterialTheme.typography.caption,
                     )
@@ -294,8 +294,8 @@ private fun ConversationBubble(
                         )
                     }
                 } else {
-                    Text(
-                        text = message.text,
+                    MarkdownCitationText(
+                        markdown = message.text,
                         color = when {
                             message.isError -> MaterialTheme.colors.error
                             isUser -> MaterialTheme.colors.onPrimary

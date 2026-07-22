@@ -8,8 +8,10 @@ The production profile remains Llama 3.2 3B Instruct q4f16 on ARM64; the x86_64 
 the existing 1B q4f32 compatibility profile.
 
 ADK owns the `LlmAgent`, instructions, runner, event stream, and in-memory conversation session.
-`MlcAdkModel` only translates ADK content into the local MLC chat protocol. No API key is needed
-and note/chat content is not sent off-device.
+`MlcAdkModel` only translates ADK content into the local MLC chat protocol, so note inference does
+not require a hosted-model key. The note itself remains on-device. When a question needs research,
+the question is sent to public search providers for URL discovery and those public URLs are sent to
+the configured self-hosted Crawl4AI service; note context is not included in either request.
 
 The project is pinned to `google-adk-kotlin-core-android:0.4.0`. That artifact is compatible with
 this AGP 8.6/R8 and Kotlin 2.1.20 build. The provider runtimes for hosted Gemini and ML Kit Gemini
@@ -58,13 +60,16 @@ or quantization.
 4. `MlcAdkModel` streams the request through the shared local MLC engine.
 5. Valid Markdown is parsed back into the rich-text document and applied to the destination.
 
-### Conversation
+### Chat
 
-1. The Conversation attachment action opens a full-screen chat with the current draft as context.
+1. The Chat attachment action opens a full-screen chat with the current draft as context.
 2. A dedicated ADK `InMemorySessionService` retains user and model turns for that dialog.
-3. Responses stream into standard user/agent bubbles.
-4. **Add to note** parses an agent response as Markdown and appends it to the draft.
-5. Closing the dialog discards that in-memory chat; chat messages are not saved as note data.
+3. Current, explicit lookup, and unfamiliar questions use the configured Crawl4AI service; stable
+   questions fall back to the on-device model when internet is unavailable.
+4. Responses stream into standard user/agent bubbles, with Markdown links rendered as citation pills.
+5. **Add to note** parses an agent response as Markdown and appends it to the draft while preserving
+   citation metadata.
+6. Closing the dialog discards that in-memory chat; chat messages are not saved as note data.
 
 ## Relevant official references
 

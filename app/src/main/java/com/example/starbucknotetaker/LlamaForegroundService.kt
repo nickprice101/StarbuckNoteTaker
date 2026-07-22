@@ -55,7 +55,7 @@ class LlamaForegroundService : Service() {
         super.onCreate()
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         engine = LlamaEngineProvider.acquire(applicationContext)
-        webLookup = AssistantWebLookup()
+        webLookup = AssistantWebLookup(applicationContext)
         createNotificationChannel()
     }
 
@@ -162,36 +162,24 @@ class LlamaForegroundService : Service() {
                 // works while the 3B engine is still preloading.
                 return AssistantWebLookup.quickAnswer(question, lookup)
             }
-            val detail = lookup.error?.takeIf { it.isNotBlank() } ?: "No results found"
-            return "I could not complete that lookup quickly. $detail"
+            if (AssistantWebLookup.requiresInternet(question)) {
+                return AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
+            }
         }
 
         broadcastProgress(requestId, "", "Preparing on-device model", LlamaEngine.Mode.QUESTION)
-        return engine.answer(question, noteContext, requestId)
-    }
-
-    private fun appendWebSources(answer: String, webLookup: WebLookupResult): String {
-        val cleanAnswer = answer.trim()
-        if (webLookup.results.isEmpty()) return cleanAnswer
-        if (cleanAnswer.contains("Sources:", ignoreCase = true)) return cleanAnswer
-        val sources = webLookup.results.take(3).joinToString("\n") { result ->
-            "- ${result.title}: ${result.url}"
+        val localAnswer = engine.answer(question, noteContext, requestId)
+        return if (AssistantWebLookup.answerNeedsResearch(localAnswer)) {
+            broadcastProgress(requestId, "", "Checking with Crawl4AI", LlamaEngine.Mode.QUESTION)
+            val lookup = webLookup.lookup(question)
+            if (lookup.results.isNotEmpty()) {
+                AssistantWebLookup.quickAnswer(question, lookup)
+            } else {
+                AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
+            }
+        } else {
+            localAnswer
         }
-        return buildString {
-            append(cleanAnswer)
-            if (cleanAnswer.isNotBlank()) appendLine().appendLine()
-            appendLine("Sources:")
-            append(sources)
-        }.trim()
-    }
-
-    private fun String.shouldUseWebFallback(): Boolean {
-        val lower = lowercase(java.util.Locale.US)
-        return lower.contains("not yet downloaded") ||
-            lower.contains("not available") ||
-            lower.contains("does not meet the minimum") ||
-            lower.contains("did not produce output") ||
-            lower.contains("failed to run")
     }
 
     override fun onDestroy() {

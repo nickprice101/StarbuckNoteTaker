@@ -12,12 +12,12 @@ class RichTextState(initialValue: RichTextValue) {
     var value by mutableStateOf(initialValue)
         private set
 
-    var activeStyles by mutableStateOf(value.stylesAt(value.selection))
+    var activeStyles by mutableStateOf(value.editableStylesAt(value.selection))
         private set
 
     fun setExternalValue(newValue: RichTextValue) {
         value = newValue
-        activeStyles = value.stylesAt(value.selection)
+        activeStyles = value.editableStylesAt(value.selection)
     }
 
     fun asTextFieldValue(): TextFieldValue {
@@ -56,7 +56,7 @@ class RichTextState(initialValue: RichTextValue) {
         value = RichTextValue(newText, adjustedSelection, adjustedStyles)
         val selectionChanged = oldSelection != adjustedSelection
         if (selectionChanged) {
-            activeStyles = value.stylesAt(adjustedSelection)
+            activeStyles = value.editableStylesAt(adjustedSelection)
         }
     }
 
@@ -86,7 +86,7 @@ class RichTextState(initialValue: RichTextValue) {
             }
         }
         value = value.copy(characterStyles = updated)
-        activeStyles = value.stylesAt(selection)
+        activeStyles = value.editableStylesAt(selection)
     }
 
     fun toggleHighlight(color: Color) {
@@ -109,13 +109,13 @@ class RichTextState(initialValue: RichTextValue) {
         if (newValue != value) {
             value = newValue
         }
-        activeStyles = value.stylesAt(value.selection)
+        activeStyles = value.editableStylesAt(value.selection)
     }
 
     fun handleEnterKey(): Boolean {
         val newValue = value.handleListEnter() ?: return false
         value = newValue
-        activeStyles = value.stylesAt(value.selection)
+        activeStyles = value.editableStylesAt(value.selection)
         return true
     }
 
@@ -146,6 +146,10 @@ class RichTextState(initialValue: RichTextValue) {
             updated[index] = set
         }
         value = value.copy(characterStyles = updated)
-        activeStyles = value.stylesAt(selection)
+        activeStyles = value.editableStylesAt(selection)
     }
 }
+
+/** Citation styling is semantic metadata and must never leak into newly typed characters. */
+private fun RichTextValue.editableStylesAt(selection: TextRange): Set<RichTextStyle> =
+    stylesAt(selection).filterNotTo(mutableSetOf()) { it is RichTextStyle.Citation }
