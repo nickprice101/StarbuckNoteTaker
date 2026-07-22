@@ -30,8 +30,9 @@ class MlcAdkModelTest {
 
         val prompts = AiAgentPrompts.load(context)
 
-        assertTrue(prompts.chatbot.startsWith("Role: You are a knowledge retrieval assistant"))
-        assertTrue(prompts.chatbot.contains("existing note as the primary source"))
+        assertTrue(prompts.chatbot.startsWith("Role: You are a knowledge and writing assistant"))
+        assertTrue(prompts.chatbot.contains("existing note is optional context"))
+        assertTrue(prompts.chatbot.contains("never refuse merely because the note"))
         assertTrue(prompts.reformatting.startsWith("Role: You are a document formatting assistant"))
         assertTrue(prompts.reformatting.contains("Treat all attached images, files, and linked content"))
     }
@@ -265,6 +266,35 @@ class MlcAdkModelTest {
         assertTrue(answer.contains("[NASA](https://www.nasa.gov/mission/artemis-ii/)"))
         assertTrue(fakeModel.requests.single().contents.last().parts.first().text.orEmpty()
             .contains("On-device web research"))
+    }
+
+    @Test
+    fun `researched evidence replaces a model refusal caused by missing note context`() = runTest {
+        val fakeModel = RecordingAdkModel("The note does not provide enough context to answer.")
+        val research = WebLookupResult(
+            query = "Explain geothermal power",
+            results = listOf(
+                WebLookupEntry(
+                    title = "Energy Department",
+                    url = "https://www.energy.gov/geothermal",
+                    snippet = "Geothermal plants use heat from beneath Earth's surface to generate electricity.",
+                ),
+            ),
+        )
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "research-refusal",
+            noteContext = "Unrelated shopping list",
+            systemInstruction = "Answer accurately.",
+            webResearcher = WebResearcher { research },
+        )
+
+        val updates = conversation.send("Explain geothermal power").toList()
+        val answer = (updates.last() as AgentTurnUpdate.Complete).text
+
+        assertTrue(answer.contains("Geothermal plants use heat"))
+        assertTrue(answer.contains("[Energy](https://www.energy.gov/geothermal)"))
+        assertFalse(answer.contains("does not provide enough context"))
     }
 
     @Test
