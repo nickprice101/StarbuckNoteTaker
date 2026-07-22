@@ -176,10 +176,14 @@ internal class NoteConversationAgent(
     fun send(message: String): Flow<AgentTurnUpdate> = flow {
         val trimmed = message.trim()
         require(trimmed.isNotBlank()) { "Message cannot be empty." }
+        val answerRequest = AssistantWebLookup.resolveResearchQuery(
+            message = trimmed,
+            previousRequests = recentTurns.map(ConversationTurn::user),
+        )
         var research: WebLookupResult? = null
         if (AssistantWebLookup.shouldLookup(trimmed)) {
-            emit(AgentTurnUpdate.Partial("Researching on this phone…"))
-            val lookup = webResearcher.lookup(trimmed)
+            emit(AgentTurnUpdate.Partial(AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE))
+            val lookup = webResearcher.lookup(answerRequest)
             if (lookup.results.isNotEmpty()) {
                 research = lookup
             } else if (AssistantWebLookup.requiresInternet(trimmed)) {
@@ -192,21 +196,21 @@ internal class NoteConversationAgent(
 
         (model as? MlcAdkModel)?.requireAvailable()
         var finalText = generate(
-            prompt = buildTurnPrompt(trimmed, research),
+            prompt = buildTurnPrompt(answerRequest, research),
             onPartial = { emit(AgentTurnUpdate.Partial(it)) },
         )
 
         // The local model gets the first opportunity for non-current questions. If it explicitly
         // says it cannot answer, research is attempted; an outage then produces a clear alert.
         if (research == null && AssistantWebLookup.answerNeedsResearch(finalText)) {
-            emit(AgentTurnUpdate.Partial("Checking the web on this phone…"))
-            val lookup = webResearcher.lookup(trimmed)
+            emit(AgentTurnUpdate.Partial(AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE))
+            val lookup = webResearcher.lookup(answerRequest)
             if (lookup.results.isEmpty()) {
                 finalText = AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
             } else {
                 research = lookup
                 finalText = generate(
-                    prompt = buildTurnPrompt(trimmed, lookup),
+                    prompt = buildTurnPrompt(answerRequest, lookup),
                     onPartial = { emit(AgentTurnUpdate.Partial(it)) },
                 )
             }
@@ -215,7 +219,7 @@ internal class NoteConversationAgent(
         // Extracted page evidence is still useful if the small local model incorrectly treats an
         // empty or unrelated note as a reason to refuse the request.
         if (research != null && AssistantWebLookup.answerNeedsResearch(finalText)) {
-            finalText = AssistantWebLookup.quickAnswer(trimmed, research)
+            finalText = AssistantWebLookup.quickAnswer(answerRequest, research)
         }
 
         require(finalText.isNotBlank()) { "The on-device agent returned no reply." }
@@ -226,8 +230,8 @@ internal class NoteConversationAgent(
 
     private fun buildTurnPrompt(message: String, research: WebLookupResult?): String =
         AgentContextPromptBuilder.build(
-            currentNote = research?.let { AssistantWebLookup.mergeWithNoteContext(noteContext, it) }
-                ?: noteContext,
+            currentNote = noteContext,
+            webResearch = research?.toPromptContext().orEmpty(),
             recentConversation = recentTurns.render(),
             userRequest = message,
             maxChars = userPromptCharLimit.coerceAtLeast(MIN_USER_PROMPT_CHARS),
