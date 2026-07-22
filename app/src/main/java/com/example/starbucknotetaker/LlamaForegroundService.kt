@@ -147,39 +147,66 @@ class LlamaForegroundService : Service() {
         noteContext: String?,
         requestId: String,
     ): String {
+        var research: WebLookupResult? = null
         if (AssistantWebLookup.shouldLookup(question)) {
-            broadcastProgress(requestId, "", "Looking up web context", LlamaEngine.Mode.QUESTION)
+            broadcastProgress(
+                requestId,
+                "",
+                AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
+                LlamaEngine.Mode.QUESTION,
+            )
             val lookup = webLookup.lookup(question)
             if (lookup.results.isNotEmpty()) {
+                research = lookup
                 broadcastProgress(
                     requestId = requestId,
-                    partialText = lookup.progressPreview(),
-                    status = "Lookup complete",
+                    partialText = "",
+                    status = "Web research complete; composing a concise answer",
                     mode = LlamaEngine.Mode.QUESTION,
                 )
-                // Lookup questions already have bounded factual context. Returning
-                // it directly avoids paying model prefill/decode latency and also
-                // works while the 3B engine is still preloading.
-                return AssistantWebLookup.quickAnswer(question, lookup)
-            }
-            if (AssistantWebLookup.requiresInternet(question)) {
+            } else if (AssistantWebLookup.requiresInternet(question)) {
                 return AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
             }
         }
 
-        broadcastProgress(requestId, "", "Preparing on-device model", LlamaEngine.Mode.QUESTION)
-        val localAnswer = engine.answer(question, noteContext, requestId)
-        return if (AssistantWebLookup.answerNeedsResearch(localAnswer)) {
-            broadcastProgress(requestId, "", "Checking the web on this phone", LlamaEngine.Mode.QUESTION)
+        broadcastProgress(requestId, "", "Preparing a direct answer", LlamaEngine.Mode.QUESTION)
+        var finalAnswer = engine.answer(
+            question = question,
+            context = noteContext,
+            taskId = requestId,
+            webResearch = research?.toPromptContext(),
+        )
+        if (research == null && AssistantWebLookup.answerNeedsResearch(finalAnswer)) {
+            broadcastProgress(
+                requestId,
+                "",
+                AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
+                LlamaEngine.Mode.QUESTION,
+            )
             val lookup = webLookup.lookup(question)
             if (lookup.results.isNotEmpty()) {
-                AssistantWebLookup.quickAnswer(question, lookup)
+                research = lookup
+                broadcastProgress(
+                    requestId,
+                    "",
+                    "Web research complete; composing a concise answer",
+                    LlamaEngine.Mode.QUESTION,
+                )
+                finalAnswer = engine.answer(
+                    question = question,
+                    context = noteContext,
+                    taskId = requestId,
+                    webResearch = lookup.toPromptContext(),
+                )
             } else {
-                AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
+                return AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
             }
-        } else {
-            localAnswer
         }
+        if (research != null && AssistantWebLookup.answerNeedsResearch(finalAnswer)) {
+            finalAnswer = AssistantWebLookup.quickAnswer(question, research)
+        }
+        return research?.let { AssistantWebLookup.appendMarkdownSources(finalAnswer, it) }
+            ?: finalAnswer
     }
 
     override fun onDestroy() {

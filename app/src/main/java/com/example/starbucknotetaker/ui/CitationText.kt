@@ -30,10 +30,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.starbucknotetaker.abbreviateCitationLabel
+import com.example.starbucknotetaker.websiteName
 import com.example.starbucknotetaker.richtext.MarkdownRichText
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextStyle
+import java.net.URI
+import java.util.Locale
 
 /** Compose equivalent of a CSS citation chip for assistant Markdown links. */
 @Composable
@@ -60,7 +62,7 @@ internal fun CitationRichText(
     val inlineContent = display.citations.associate { citation ->
         citation.id to InlineTextContent(
             placeholder = Placeholder(
-                width = (citation.label.length * 0.52f + 0.9f).coerceAtMost(6.2f).em,
+                width = (citation.label.length * 0.52f + 0.9f).coerceAtMost(12f).em,
                 height = 1.2f.em,
                 placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
             ),
@@ -100,7 +102,7 @@ internal fun CitationPillRow(
             CitationPill(
                 citation = citation,
                 onOpen = { runCatching { uriHandler.openUri(citation.url) } },
-                modifier = Modifier.widthIn(max = 96.dp),
+                modifier = Modifier.widthIn(max = 160.dp),
             )
         }
     }
@@ -112,16 +114,17 @@ private fun CitationPill(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val siteStyle = remember(citation.url) { citationSiteStyle(citation.url) }
     Surface(
         modifier = modifier.clickable(onClick = onOpen),
         shape = RoundedCornerShape(percent = 50),
-        color = MaterialTheme.colors.primary.copy(alpha = 0.14f),
+        color = siteStyle.background,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = citation.label,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                color = MaterialTheme.colors.primary,
+                color = siteStyle.foreground,
                 style = MaterialTheme.typography.caption.copy(
                     fontSize = 10.sp,
                     lineHeight = 12.sp,
@@ -145,6 +148,11 @@ internal data class CitationInline(
     val url: String,
 )
 
+internal data class CitationSiteStyle(
+    val background: Color,
+    val foreground: Color,
+)
+
 internal fun buildCitationDisplay(document: RichTextDocument): CitationDisplay {
     val candidates = document.spans.mapNotNull { range ->
         range.styles.filterIsInstance<RichTextStyle.Citation>().firstOrNull()?.let { citation ->
@@ -164,9 +172,7 @@ internal fun buildCitationDisplay(document: RichTextDocument): CitationDisplay {
         var cursor = 0
         ranges.forEachIndexed { index, range ->
             if (range.start > cursor) append(document.slice(cursor, range.start).toAnnotatedString())
-            val label = abbreviateCitationLabel(
-                document.text.substring(range.start, range.end),
-            )
+            val label = websiteName(range.url)
             val id = "citation_$index"
             appendInlineContent(id, label)
             citations += CitationInline(id = id, label = label, url = range.url)
@@ -178,3 +184,42 @@ internal fun buildCitationDisplay(document: RichTextDocument): CitationDisplay {
 }
 
 private data class CitationRange(val start: Int, val end: Int, val url: String)
+
+/** Uses recognizable site colors, with a stable domain-specific palette for other websites. */
+internal fun citationSiteStyle(url: String): CitationSiteStyle {
+    val host = runCatching { URI(url).host.orEmpty().lowercase(Locale.US) }
+        .getOrDefault("")
+        .removePrefix("www.")
+    val background = when {
+        host.matchesDomain("wikipedia.org") -> Color(0xFF202122)
+        host.matchesDomain("nasa.gov") -> Color(0xFF0B3D91)
+        host.matchesDomain("youtube.com") || host == "youtu.be" -> Color(0xFFFF0000)
+        host.matchesDomain("reddit.com") -> Color(0xFFFF4500)
+        host.matchesDomain("github.com") -> Color(0xFF24292F)
+        host.matchesDomain("stackoverflow.com") -> Color(0xFFF48024)
+        host.matchesDomain("bbc.co.uk") || host.matchesDomain("bbc.com") -> Color(0xFFB80000)
+        host.matchesDomain("reuters.com") -> Color(0xFFFF8000)
+        host.matchesDomain("nytimes.com") -> Color(0xFF121212)
+        host.matchesDomain("theguardian.com") -> Color(0xFF052962)
+        host.matchesDomain("microsoft.com") -> Color(0xFF0067B8)
+        host.matchesDomain("google.com") -> Color(0xFF4285F4)
+        host.matchesDomain("apple.com") -> Color(0xFF1D1D1F)
+        host.matchesDomain("arxiv.org") -> Color(0xFFB31B1B)
+        host.matchesDomain("who.int") -> Color(0xFF007EB4)
+        host.matchesDomain("gov.uk") -> Color(0xFF1D70B8)
+        else -> GENERIC_SITE_COLORS[(host.hashCode().ushr(1) % GENERIC_SITE_COLORS.size)]
+    }
+    val foreground = if (host.matchesDomain("reuters.com")) Color(0xFF1A1A1A) else Color.White
+    return CitationSiteStyle(background = background, foreground = foreground)
+}
+
+private fun String.matchesDomain(domain: String): Boolean = this == domain || endsWith(".$domain")
+
+private val GENERIC_SITE_COLORS = listOf(
+    Color(0xFF1565C0),
+    Color(0xFF00695C),
+    Color(0xFF6A1B9A),
+    Color(0xFFAD1457),
+    Color(0xFF455A64),
+    Color(0xFF283593),
+)

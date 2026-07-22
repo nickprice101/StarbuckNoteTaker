@@ -18,13 +18,60 @@ class AssistantWebLookupTest {
         assertTrue(AssistantWebLookup.shouldLookup("summarize https://example.com/news"))
         assertTrue(AssistantWebLookup.shouldLookup("Who wrote The Hobbit?"))
         assertTrue(AssistantWebLookup.shouldLookup("Explain how geothermal power works"))
+        assertTrue(AssistantWebLookup.shouldLookup("Could you explain how geothermal power works?"))
+        assertTrue(AssistantWebLookup.shouldLookup("Is geothermal energy renewable?"))
         assertTrue(AssistantWebLookup.shouldLookup("Tell me about the James Webb telescope"))
         assertFalse(AssistantWebLookup.shouldLookup("rewrite this note more clearly"))
         assertTrue(AssistantWebLookup.requiresInternet("what is the stock price today?"))
         assertFalse(AssistantWebLookup.requiresInternet("Who wrote The Hobbit?"))
         assertTrue(AssistantWebLookup.answerNeedsResearch("I don't know that answer."))
         assertTrue(AssistantWebLookup.answerNeedsResearch("The note does not provide enough context."))
+        assertTrue(AssistantWebLookup.answerNeedsResearch(
+            "The information provided in the note is not relevant to answering the question.",
+        ))
+        assertTrue(AssistantWebLookup.answerNeedsResearch(
+            "To conduct your own web research, you can use on-device tools or platforms.",
+        ))
+        assertTrue(AssistantWebLookup.answerNeedsResearch(
+            "I can conduct my own web research if you would like.",
+        ))
+        assertTrue(AssistantWebLookup.answerNeedsResearch(
+            "The on-device AI model is not downloaded.",
+        ))
         assertFalse(AssistantWebLookup.answerNeedsResearch("The answer is available in this note."))
+    }
+
+    @Test
+    fun bareResearchFollowUpReusesOriginalQuestion() {
+        assertEquals(
+            "What caused the Carrington Event?",
+            AssistantWebLookup.resolveResearchQuery(
+                "Conduct your own web research",
+                listOf("What caused the Carrington Event?"),
+            ),
+        )
+        assertEquals(
+            "Research the Carrington Event",
+            AssistantWebLookup.resolveResearchQuery(
+                "Research the Carrington Event",
+                listOf("Earlier question"),
+            ),
+        )
+    }
+
+    @Test
+    fun citationsUseWebsiteNames() {
+        assertEquals("Wikipedia", websiteName("https://en.wikipedia.org/wiki/Geothermal_energy"))
+        assertEquals("NASA", websiteName("https://science.nasa.gov/mission/webb/"))
+        assertEquals("Example", websiteName("https://news.example.com/article"))
+        assertEquals(
+            "[Wikipedia](https://en.wikipedia.org/wiki/Geothermal_energy)",
+            WebLookupEntry(
+                title = "Geothermal energy - Wikipedia",
+                url = "https://en.wikipedia.org/wiki/Geothermal_energy",
+                snippet = "",
+            ).markdownLink(),
+        )
     }
 
     @Test

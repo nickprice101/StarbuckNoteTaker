@@ -57,19 +57,29 @@ internal object AgentContextPromptBuilder {
         currentNote: String,
         userRequest: String,
         recentConversation: String = "",
+        webResearch: String = "",
         maxChars: Int,
     ): String {
         require(maxChars >= 320) { "Agent context budget is too small" }
         val includeRecentConversation = recentConversation.isNotBlank()
+        val includeWebResearch = webResearch.isNotBlank()
         val structuralChars = baseStructuralChars + if (includeRecentConversation) {
             recentConversationStructuralChars
         } else {
             0
-        }
+        } + if (includeWebResearch) webResearchStructuralChars else 0
         var remaining = (maxChars - structuralChars).coerceAtLeast(0)
         val requestBudget = minOf(MAX_USER_REQUEST_CHARS, remaining * 2 / 5)
         val request = compact(userRequest.trim(), requestBudget)
         remaining -= request.length
+
+        val researchBudget = if (!includeWebResearch) {
+            0
+        } else {
+            minOf(MAX_WEB_RESEARCH_CHARS, remaining * 2 / 3)
+        }
+        val research = compact(webResearch.trim(), researchBudget)
+        remaining -= research.length
 
         val recentBudget = if (!includeRecentConversation) {
             0
@@ -84,6 +94,12 @@ internal object AgentContextPromptBuilder {
             appendLine(CURRENT_NOTE_OPEN)
             appendLine(note)
             appendLine(CURRENT_NOTE_CLOSE)
+            if (research.isNotBlank()) {
+                appendLine()
+                appendLine(WEB_RESEARCH_OPEN)
+                appendLine(research)
+                appendLine(WEB_RESEARCH_CLOSE)
+            }
             if (recent.isNotBlank()) {
                 appendLine()
                 appendLine(RECENT_CONVERSATION_OPEN)
@@ -114,8 +130,11 @@ internal object AgentContextPromptBuilder {
 
     private const val MAX_USER_REQUEST_CHARS = 600
     private const val MAX_RECENT_CONVERSATION_CHARS = 800
+    private const val MAX_WEB_RESEARCH_CHARS = 2_400
     private const val CURRENT_NOTE_OPEN = "<current_note>"
     private const val CURRENT_NOTE_CLOSE = "</current_note>"
+    private const val WEB_RESEARCH_OPEN = "<web_research>"
+    private const val WEB_RESEARCH_CLOSE = "</web_research>"
     private const val RECENT_CONVERSATION_OPEN = "<recent_conversation>"
     private const val RECENT_CONVERSATION_CLOSE = "</recent_conversation>"
     private const val USER_REQUEST_OPEN = "<user_request>"
@@ -124,4 +143,6 @@ internal object AgentContextPromptBuilder {
         CURRENT_NOTE_CLOSE.length + USER_REQUEST_OPEN.length + USER_REQUEST_CLOSE.length + 6
     private val recentConversationStructuralChars = RECENT_CONVERSATION_OPEN.length +
         RECENT_CONVERSATION_CLOSE.length + 4
+    private val webResearchStructuralChars = WEB_RESEARCH_OPEN.length +
+        WEB_RESEARCH_CLOSE.length + 4
 }

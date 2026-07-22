@@ -89,7 +89,8 @@ class LlamaEngine(private val context: Context) {
         context: String? = null,
         taskId: String = newTaskId(),
         maxTokensOverride: Int? = null,
-    ): String = infer(Mode.QUESTION, question, context, taskId, maxTokensOverride)
+        webResearch: String? = null,
+    ): String = infer(Mode.QUESTION, question, context, taskId, maxTokensOverride, webResearch)
 
     /** Completes an ADK-owned turn using real local model output. */
     suspend fun completeChat(
@@ -186,6 +187,7 @@ class LlamaEngine(private val context: Context) {
         secondaryText: String? = null,
         taskId: String,
         maxTokensOverride: Int? = null,
+        webResearch: String? = null,
     ): String = withContext(Dispatchers.Default) {
         inferenceMutex.withLock {
             if (!DeviceCapabilityChecker.isAiCapable(context)) {
@@ -221,7 +223,7 @@ class LlamaEngine(private val context: Context) {
                 val maxTokens = maxTokensOverride?.coerceIn(MIN_MAX_TOKENS, thermalMaxTokens)
                     ?: thermalMaxTokens
                 val generated = generate(
-                    messages = buildMessages(mode, primaryText, secondaryText),
+                    messages = buildMessages(mode, primaryText, secondaryText, webResearch),
                     taskId = taskId,
                     maxTokens = maxTokens,
                     temperature = when (mode) {
@@ -452,6 +454,7 @@ class LlamaEngine(private val context: Context) {
         mode: Mode,
         primary: String,
         secondary: String?,
+        webResearch: String? = null,
     ): List<ChatMessage> {
         val system = when (mode) {
             Mode.SUMMARISE ->
@@ -465,6 +468,7 @@ class LlamaEngine(private val context: Context) {
             AgentContextPromptBuilder.build(
                 currentNote = secondary.orEmpty().take(contextLimit),
                 userRequest = primary.take(MAX_QUESTION_CHARS),
+                webResearch = webResearch.orEmpty(),
                 maxChars = QUESTION_STRUCTURED_PROMPT_CHARS,
             )
         } else {

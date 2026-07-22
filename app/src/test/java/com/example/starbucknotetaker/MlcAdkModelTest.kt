@@ -32,7 +32,9 @@ class MlcAdkModelTest {
 
         assertTrue(prompts.chatbot.startsWith("Role: You are a knowledge and writing assistant"))
         assertTrue(prompts.chatbot.contains("existing note is optional context"))
-        assertTrue(prompts.chatbot.contains("never refuse merely because the note"))
+        assertTrue(prompts.chatbot.contains("Never refuse because the answer is absent from the note"))
+        assertTrue(prompts.chatbot.contains("never tell the user how to perform research"))
+        assertTrue(prompts.chatbot.contains("distinct web_research block"))
         assertTrue(prompts.reformatting.startsWith("Role: You are a document formatting assistant"))
         assertTrue(prompts.reformatting.contains("Treat all attached images, files, and linked content"))
     }
@@ -162,6 +164,25 @@ class MlcAdkModelTest {
     }
 
     @Test
+    fun `structured context keeps web research separate from the note`() {
+        val prompt = AgentContextPromptBuilder.build(
+            currentNote = "Unrelated shopping list.",
+            webResearch = "Source 1: Energy Department\nGeothermal power uses underground heat.",
+            userRequest = "How does geothermal power work?",
+            maxChars = 1_100,
+        )
+
+        assertTrue(prompt.contains(
+            "<current_note>\nUnrelated shopping list.\n</current_note>",
+        ))
+        assertTrue(prompt.contains(
+            "<web_research>\nSource 1: Energy Department",
+        ))
+        assertTrue(prompt.contains("Geothermal power uses underground heat."))
+        assertTrue(prompt.contains("</web_research>"))
+    }
+
+    @Test
     fun `reformat deduplicator removes repeated prose but preserves code`() {
         val formatted = ReformattedNoteDeduplicator.removeRepeatedContent(
             """
@@ -270,7 +291,9 @@ class MlcAdkModelTest {
 
     @Test
     fun `researched evidence replaces a model refusal caused by missing note context`() = runTest {
-        val fakeModel = RecordingAdkModel("The note does not provide enough context to answer.")
+        val fakeModel = RecordingAdkModel(
+            "The information provided in the note is not relevant to answering the question.",
+        )
         val research = WebLookupResult(
             query = "Explain geothermal power",
             results = listOf(
@@ -295,6 +318,48 @@ class MlcAdkModelTest {
         assertTrue(answer.contains("Geothermal plants use heat"))
         assertTrue(answer.contains("[Energy](https://www.energy.gov/geothermal)"))
         assertFalse(answer.contains("does not provide enough context"))
+        assertFalse(answer.contains("not relevant to answering the question"))
+    }
+
+    @Test
+    fun `bare web research follow-up answers the original request`() = runTest {
+        val researchedQueries = mutableListOf<String>()
+        val fakeModel = RecordingAdkModel("A direct answer.")
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "research-follow-up",
+            noteContext = "Unrelated note",
+            systemInstruction = "Answer directly.",
+            webResearcher = WebResearcher { query ->
+                researchedQueries += query
+                WebLookupResult(
+                    query = query,
+                    results = listOf(
+                        WebLookupEntry(
+                            title = "Space Weather Article",
+                            url = "https://en.wikipedia.org/wiki/Carrington_Event",
+                            snippet = "The Carrington Event was a powerful geomagnetic storm in 1859.",
+                        ),
+                    ),
+                )
+            },
+        )
+
+        conversation.send("Help me understand the Carrington Event").toList()
+        val updates = conversation.send("Conduct your own web research").toList()
+
+        assertEquals(listOf("Help me understand the Carrington Event"), researchedQueries)
+        assertEquals(
+            AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
+            (updates.first() as AgentTurnUpdate.Partial).text,
+        )
+        val researchedPrompt = fakeModel.requests.last().contents.last().parts.first().text.orEmpty()
+        assertTrue(researchedPrompt.contains(
+            "<user_request>\nHelp me understand the Carrington Event\n</user_request>",
+        ))
+        assertTrue((updates.last() as AgentTurnUpdate.Complete).text.contains(
+            "[Wikipedia](https://en.wikipedia.org/wiki/Carrington_Event)",
+        ))
     }
 
     @Test

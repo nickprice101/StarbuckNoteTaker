@@ -249,13 +249,17 @@ internal class AssistantWebLookup(
         const val INTERNET_REQUIRED_MESSAGE =
             "This question requires internet research to answer properly. " +
                 "Connect this phone to the internet, then try again."
+        const val RESEARCH_PROGRESS_MESSAGE =
+            "Searching the web for a reliable answer… This may take a little longer."
 
         fun shouldLookup(question: String): Boolean {
             val trimmed = question.trim()
             if (trimmed.isBlank()) return false
             if (extractUrls(trimmed, treatUnterminatedAsComplete = true).isNotEmpty()) return true
             return requiresInternet(question) ||
-                ((FACTUAL_QUESTION_REGEX.containsMatchIn(trimmed) ||
+                ((trimmed.contains('?') ||
+                    FACTUAL_QUESTION_REGEX.containsMatchIn(trimmed) ||
+                    AUXILIARY_QUESTION_REGEX.containsMatchIn(trimmed) ||
                     KNOWLEDGE_REQUEST_REGEX.containsMatchIn(trimmed)) &&
                     !NON_LOOKUP_QUESTION_REGEX.containsMatchIn(trimmed))
         }
@@ -269,17 +273,19 @@ internal class AssistantWebLookup(
                 CURRENT_INFO_REGEX.containsMatchIn(trimmed)
         }
 
-        fun answerNeedsResearch(answer: String): Boolean = UNCERTAIN_ANSWER_REGEX.containsMatchIn(answer)
+        fun answerNeedsResearch(answer: String): Boolean =
+            UNCERTAIN_ANSWER_REGEX.containsMatchIn(answer) ||
+                RESEARCH_INSTRUCTION_REGEX.containsMatchIn(answer)
 
-        fun mergeWithNoteContext(noteContext: String?, webLookup: WebLookupResult): String = buildString {
-            val note = noteContext?.trim().orEmpty()
-            if (note.isNotEmpty()) {
-                appendLine("Note context:")
-                appendLine(note)
-                appendLine()
-            }
-            append(webLookup.toPromptContext())
-        }.trim()
+        /** Reuses the original question when the user follows a non-answer with “research it”. */
+        fun resolveResearchQuery(message: String, previousRequests: List<String>): String {
+            if (!isBareResearchFollowUp(message)) return message.trim()
+            return previousRequests.asReversed()
+                .firstOrNull { previous -> !isBareResearchFollowUp(previous) }
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: message.trim()
+        }
 
         fun quickAnswer(question: String, webLookup: WebLookupResult): String {
             if (webLookup.results.isEmpty()) return INTERNET_REQUIRED_MESSAGE
@@ -307,6 +313,16 @@ internal class AssistantWebLookup(
             DuckDuckGoSearchProvider(httpClient),
             WikipediaSearchProvider(httpClient),
         )
+
+        private fun isBareResearchFollowUp(message: String): Boolean {
+            if (!EXPLICIT_LOOKUP_REGEX.containsMatchIn(message)) return false
+            return message
+                .lowercase(Locale.US)
+                .replace(RESEARCH_FOLLOW_UP_FILLER_REGEX, " ")
+                .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+                .trim()
+                .isBlank()
+        }
     }
 }
 
@@ -375,7 +391,7 @@ internal data class WebLookupHttpResponse(
 )
 
 internal data class WebLookupEntry(val title: String, val url: String, val snippet: String) {
-    fun markdownLink(): String = "[${abbreviateCitationLabel(title)}]($url)"
+    fun markdownLink(): String = "[${websiteName(url)}]($url)"
 }
 
 internal enum class WebLookupErrorKind { OFFLINE, NO_RESULTS }
@@ -393,18 +409,15 @@ internal data class WebLookupResult(
             error?.let { appendLine("Research error: $it") }
             return@buildString
         }
-        appendLine("Use only relevant facts below. Cite sources as abbreviated Markdown links.")
+        appendLine("Use relevant facts below to answer directly. Cite sources with the website name.")
         results.forEachIndexed { index, result ->
             appendLine()
             appendLine("Source ${index + 1}: ${result.title}")
+            appendLine("Website: ${websiteName(result.url)}")
             appendLine("URL: ${result.url}")
             appendLine("Extracted text: ${result.snippet}")
         }
     }.trim()
-
-    fun progressPreview(): String = results.take(2).joinToString("\n") { result ->
-        "${result.title}: ${result.snippet}"
-    }.take(500)
 
     companion object {
         fun offline(query: String): WebLookupResult = WebLookupResult(
@@ -512,9 +525,7 @@ private fun resolveDuckDuckGoRedirect(rawUrl: String): String {
     return runCatching { URLDecoder.decode(encoded, Charsets.UTF_8.name()) }.getOrElse { rawUrl }
 }
 
-private fun sourceLabel(url: String): String = runCatching {
-    URI(url).host.removePrefix("www.").substringBefore('.').replaceFirstChar { it.uppercase() }
-}.getOrDefault("Source")
+private fun sourceLabel(url: String): String = websiteName(url)
 
 private fun shortSourceLabel(value: String): String = value
     .replace(Regex("[\\[\\]()]"), "")
@@ -523,20 +534,23 @@ private fun shortSourceLabel(value: String): String = value
     .take(48)
     .ifBlank { "Source" }
 
-internal fun abbreviateCitationLabel(value: String): String {
-    val cleaned = value
-        .replace(Regex("[\\[\\]()]"), "")
-        .replace(Regex("\\s+"), " ")
-        .trim()
-        .ifBlank { "Source" }
-    if (cleaned.length <= MAX_CITATION_LABEL_CHARS) return cleaned
+internal fun websiteName(url: String): String {
+    val host = runCatching { URI(url).host.orEmpty().lowercase(Locale.US) }.getOrDefault("")
+        .removePrefix("www.")
+        .trimEnd('.')
+    if (host.isBlank()) return "Source"
 
-    val wholeWords = cleaned.split(' ')
-        .runningFold("") { prefix, word -> if (prefix.isEmpty()) word else "$prefix $word" }
-        .takeWhile { it.length <= MAX_CITATION_LABEL_CHARS }
-        .lastOrNull()
-    if (!wholeWords.isNullOrBlank()) return wholeWords
-    return cleaned.take(MAX_CITATION_LABEL_CHARS - 1).trimEnd() + "…"
+    WEBSITE_NAMES.entries.firstOrNull { (domain, _) ->
+        host == domain || host.endsWith(".$domain")
+    }?.value?.let { return it }
+
+    val labels = host.split('.').filter(String::isNotBlank)
+    val suffixSize = if (labels.size >= 3 && labels.takeLast(2).joinToString(".") in MULTIPART_SUFFIXES) 2 else 1
+    val brand = labels.getOrNull(labels.size - suffixSize - 1) ?: labels.firstOrNull() ?: return "Source"
+    return brand.split('-', '_')
+        .filter(String::isNotBlank)
+        .joinToString(" ") { part -> part.replaceFirstChar { it.titlecase(Locale.US) } }
+        .ifBlank { "Source" }
 }
 
 private fun urlEncode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
@@ -570,7 +584,6 @@ private fun InputStream.readBytesLimited(maxBytes: Int): ByteArray {
 }
 
 private const val MAX_RESULTS = 4
-internal const val MAX_CITATION_LABEL_CHARS = 10
 private const val MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 private const val MAX_PAGE_RESPONSE_BYTES = 2 * 1024 * 1024
 private const val MAX_EXTRACTED_TEXT = 100_000
@@ -610,6 +623,10 @@ private val FACTUAL_QUESTION_REGEX = Regex(
     "^\\s*(?:who|what|when|where|which|why|how|name|list)\\b",
     RegexOption.IGNORE_CASE,
 )
+private val AUXILIARY_QUESTION_REGEX = Regex(
+    "^\\s*(?:is|are|am|was|were|do|does|did|has|have|had|can|could|should|would|will|may|might)\\b",
+    RegexOption.IGNORE_CASE,
+)
 private val KNOWLEDGE_REQUEST_REGEX = Regex(
     "\\b(?:tell me about|explain|describe|research|find(?: out)?|information (?:about|on)|" +
         "details (?:about|on)|overview of|background (?:about|on)|compare|fact[ -]?check|verify|" +
@@ -617,7 +634,7 @@ private val KNOWLEDGE_REQUEST_REGEX = Regex(
     RegexOption.IGNORE_CASE,
 )
 private val NON_LOOKUP_QUESTION_REGEX = Regex(
-    "\\b(?:should|could|would|this\\s+note|current\\s+note|rewrite|reformat|format|" +
+    "\\b(?:(?:this|the|current)\\s+note|rewrite|reformat|format|" +
         "summari[sz]e|brainstorm|draft|create)\\b",
     RegexOption.IGNORE_CASE,
 )
@@ -628,6 +645,44 @@ private val UNCERTAIN_ANSWER_REGEX = Regex(
         "not (?:available|provided) in (?:the )?(?:note|context)|knowledge cutoff|" +
         "(?:note|context) (?:does not|doesn't|cannot|can't) provide (?:enough )?(?:information|context)|" +
         "(?:no|missing|insufficient) context (?:is )?(?:available|provided|in the note)|" +
+        "(?:information|content)(?: provided)? in (?:the )?note is not (?:relevant|sufficient)|" +
+        "no such information (?:is )?available in (?:the )?note|" +
+        "on-device (?:ai )?model (?:is )?(?:not downloaded|missing|unavailable|failed)|" +
         "outside my knowledge|no reliable information)\\b",
     RegexOption.IGNORE_CASE,
+)
+private val RESEARCH_INSTRUCTION_REGEX = Regex(
+    "\\b(?:(?:i|you) (?:can|could|should|would|will|may) |to )" +
+        "(?:conduct|do|perform|try|use)?\\s*(?:(?:my|your) own )?(?:web|internet|online) " +
+        "(?:research|search|tools?|platforms?)\\b|" +
+        "\\b(?:i|you) (?:can|could|should|would|will|may) (?:search|research|look (?:it )?up)\\b",
+    RegexOption.IGNORE_CASE,
+)
+private val RESEARCH_FOLLOW_UP_FILLER_REGEX = Regex(
+    "\\b(?:yes|okay|ok|please|now|can|could|would|will|you|your|own|for|me|conduct|do|perform|" +
+        "try|use|this|that|it|the|a|an|web|internet|online|research|search|lookup|look|up|instead)\\b",
+    RegexOption.IGNORE_CASE,
+)
+private val WEBSITE_NAMES = linkedMapOf(
+    "wikipedia.org" to "Wikipedia",
+    "nasa.gov" to "NASA",
+    "youtube.com" to "YouTube",
+    "youtu.be" to "YouTube",
+    "reddit.com" to "Reddit",
+    "github.com" to "GitHub",
+    "stackoverflow.com" to "Stack Overflow",
+    "bbc.co.uk" to "BBC",
+    "bbc.com" to "BBC",
+    "reuters.com" to "Reuters",
+    "nytimes.com" to "The New York Times",
+    "theguardian.com" to "The Guardian",
+    "microsoft.com" to "Microsoft",
+    "google.com" to "Google",
+    "apple.com" to "Apple",
+    "arxiv.org" to "arXiv",
+    "who.int" to "WHO",
+    "gov.uk" to "GOV.UK",
+)
+private val MULTIPART_SUFFIXES = setOf(
+    "co.uk", "org.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "com.br",
 )

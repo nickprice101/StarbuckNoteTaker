@@ -1,22 +1,20 @@
 package com.example.starbucknotetaker.ui
 
-import com.example.starbucknotetaker.MAX_CITATION_LABEL_CHARS
+import androidx.compose.ui.graphics.Color
 import com.example.starbucknotetaker.richtext.MarkdownRichText
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CitationTextTest {
     @Test
-    fun `citation pills abbreviate labels to ten characters`() {
+    fun `citation pills use website name instead of article label`() {
         val document = MarkdownRichText.parse(
-            "Read [National Aeronautics and Space Administration](https://www.nasa.gov).",
+            "Read [Geothermal energy - Wikipedia](https://en.wikipedia.org/wiki/Geothermal_energy).",
         )
 
         val citation = buildCitationDisplay(document).citations.single()
 
-        assertEquals("National", citation.label)
-        assertTrue(citation.label.length <= MAX_CITATION_LABEL_CHARS)
+        assertEquals("Wikipedia", citation.label)
     }
 
     @Test
@@ -24,5 +22,17 @@ class CitationTextTest {
         val document = MarkdownRichText.parse("Read [NASA](https://www.nasa.gov).")
 
         assertEquals("NASA", buildCitationDisplay(document).citations.single().label)
+    }
+
+    @Test
+    fun `citation pills use recognizable website colors`() {
+        assertEquals(
+            Color(0xFF202122),
+            citationSiteStyle("https://en.wikipedia.org/wiki/Notes").background,
+        )
+        assertEquals(
+            Color(0xFFFF0000),
+            citationSiteStyle("https://youtube.com/watch?v=123").background,
+        )
     }
 }
