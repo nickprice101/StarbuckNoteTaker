@@ -212,6 +212,12 @@ internal class NoteConversationAgent(
             }
         }
 
+        // Extracted page evidence is still useful if the small local model incorrectly treats an
+        // empty or unrelated note as a reason to refuse the request.
+        if (research != null && AssistantWebLookup.answerNeedsResearch(finalText)) {
+            finalText = AssistantWebLookup.quickAnswer(trimmed, research)
+        }
+
         require(finalText.isNotBlank()) { "The on-device agent returned no reply." }
         research?.let { finalText = AssistantWebLookup.appendMarkdownSources(finalText, it) }
         rememberTurn(trimmed, finalText)
