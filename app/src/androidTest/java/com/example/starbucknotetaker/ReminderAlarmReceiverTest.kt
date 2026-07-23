@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -49,8 +50,21 @@ class ReminderAlarmReceiverTest {
         )
         val intent = ReminderAlarmReceiver.createIntent(context, payload)
         ReminderAlarmReceiver().onReceive(context, intent)
-        val active = notificationManager.activeNotifications
-        assertTrue(active.any { it.id == payload.requestCode() })
+        assertTrue(
+            "Expected fallback notification ${payload.requestCode()} to be shown",
+            waitForNotification(payload.requestCode()),
+        )
+    }
+
+    private fun waitForNotification(notificationId: Int): Boolean {
+        val timeoutAt = SystemClock.uptimeMillis() + NOTIFICATION_TIMEOUT_MS
+        do {
+            if (notificationManager.activeNotifications.any { it.id == notificationId }) {
+                return true
+            }
+            SystemClock.sleep(NOTIFICATION_POLL_INTERVAL_MS)
+        } while (SystemClock.uptimeMillis() < timeoutAt)
+        return false
     }
 
     private fun grantNotificationPermissionIfNeeded() {
@@ -59,5 +73,10 @@ class ReminderAlarmReceiverTest {
             context.packageName,
             Manifest.permission.POST_NOTIFICATIONS
         )
+    }
+
+    private companion object {
+        const val NOTIFICATION_TIMEOUT_MS = 2_000L
+        const val NOTIFICATION_POLL_INTERVAL_MS = 50L
     }
 }

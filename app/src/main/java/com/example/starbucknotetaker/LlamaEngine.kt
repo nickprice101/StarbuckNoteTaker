@@ -224,7 +224,7 @@ class LlamaEngine(private val context: Context) {
     ): String {
         val raw = completeChat(
             messages = listOf(
-                ChatMessage("system", QwenSummaryProtocol.systemPrompt),
+                ChatMessage("system", AiAgentPrompts.load(context).summariser),
                 ChatMessage(
                     "user",
                     buildString {
@@ -621,7 +621,7 @@ class LlamaEngine(private val context: Context) {
         conversationMemory: String? = null,
     ): List<ChatMessage> {
         val system = when (mode) {
-            Mode.SUMMARISE -> QwenSummaryProtocol.systemPrompt
+            Mode.SUMMARISE -> AiAgentPrompts.load(context).summariser
             Mode.REWRITE -> AiAgentPrompts.load(context).reformatting
             Mode.QUESTION -> AiAgentPrompts.load(context).chatbot
         }

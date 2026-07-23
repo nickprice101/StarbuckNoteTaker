@@ -30,6 +30,9 @@ class MlcAdkModelTest {
 
         val prompts = AiAgentPrompts.load(context)
 
+        assertTrue(prompts.summariser.startsWith("Role: You are the on-device note summariser"))
+        assertTrue(prompts.summariser.contains("exactly one JSON object"))
+        assertTrue(prompts.summariser.contains("category-aware enhanced summary"))
         assertTrue(prompts.chatbot.startsWith("Role: You are a knowledge and writing assistant"))
         assertTrue(prompts.chatbot.contains("existing note is optional context"))
         assertTrue(prompts.chatbot.contains("Never refuse because the answer is absent from the note"))

@@ -480,7 +480,14 @@ fun AppContent(
                 }
                 NoteDetailScreen(
                     note = note,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        if (!navController.popBackStack("list", inclusive = false)) {
+                            navController.navigate("list") {
+                                popUpTo(navController.graph.id) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
+                    },
                     onEdit = {
                         if (note.checklistItems != null) {
                             navController.navigate("edit_checklist/$noteId")

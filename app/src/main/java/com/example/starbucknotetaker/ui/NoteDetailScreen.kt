@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import android.util.Base64
 import android.util.Patterns
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -93,6 +94,7 @@ fun NoteDetailScreen(
     val eventLocationDisplay = rememberEventLocationDisplay(note.event?.location)
     val scrollState = rememberScrollState()
     var isChecklistDragging by remember { mutableStateOf(false) }
+    BackHandler(onBack = onBack)
     Scaffold(topBar = {
         TopAppBar(
             title = {
