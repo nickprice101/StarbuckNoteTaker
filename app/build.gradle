@@ -1,7 +1,6 @@
 import com.android.build.gradle.internal.tasks.MergeNativeLibsTask
 import com.android.build.gradle.tasks.GenerateResValues
 import groovy.io.FileType
-import org.gradle.process.ExecSpec
 
 plugins {
     id 'com.android.application'
@@ -10,32 +9,6 @@ plugins {
 }
 
 def penguinSupportedAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
-def llamaModelName = 'Llama-3.2-3B-Instruct-q4f16_0-MLC'
-def llamaModelSoName = "lib${llamaModelName}.so"
-// x86 Android emulators cannot assume access to the host's discrete GPU. Use
-// the compact q4f32 CPU profile so CI/web emulators remain portable, while
-// physical ARM64 devices retain the full 3B OpenCL/FP16 profile below.
-def x86LlamaModelName = 'Llama-3.2-1B-Instruct-q4f32_1-MLC'
-def llamaModelAbiProfiles = [
-        'arm64-v8a': [
-                clangPrefix: 'aarch64-linux-android',
-                target     : 'aarch64-linux-android26',
-                tarAsset   : "src/main/assets/${llamaModelName}-android.tar",
-                modelSoName: llamaModelSoName,
-                systemLibPrefix: 'llama_q4f16_0',
-        ],
-]
-def x86MlcTar = file("src/main/assets/${x86LlamaModelName}-android-x86_64.tar")
-def includeX86MlcModel = System.getenv('MLC_ARM64_ONLY_RUNTIME') != '1' && x86MlcTar.exists()
-if (includeX86MlcModel) {
-    llamaModelAbiProfiles['x86_64'] = [
-            clangPrefix: 'x86_64-linux-android',
-            target     : 'x86_64-linux-android26',
-            tarAsset   : "src/main/assets/${x86LlamaModelName}-android-x86_64.tar",
-            modelSoName: "lib${x86LlamaModelName}.so",
-            systemLibPrefix: 'llama_1b_q4f32_1',
-    ]
-}
 def penguinNativeLibsDir = "${buildDir}/generated/penguinJniLibs"
 def abiToLibcxxTriple = [
         'arm64-v8a': 'aarch64-linux-android',
@@ -141,38 +114,6 @@ def ensurePlaceholderResValuesAction = { File outputDir ->
     }
 }
 
-def nativeLibraryContainsAscii = { File library, String needle ->
-    if (library == null || !library.exists()) {
-        return false
-    }
-    byte[] pattern = needle.getBytes(java.nio.charset.StandardCharsets.US_ASCII)
-    if (pattern.length == 0) {
-        return true
-    }
-    int matched = 0
-    boolean found = false
-    library.withInputStream { stream ->
-        int next
-        while (!found && (next = stream.read()) != -1) {
-            byte value = (byte) (next & 0xff)
-            if (value == pattern[matched]) {
-                matched++
-                if (matched == pattern.length) {
-                    found = true
-                }
-            } else {
-                matched = (value == pattern[0]) ? 1 : 0
-            }
-        }
-    }
-    return found
-}
-
-def runtimeSupportsTvmFfiSystemLib = { File runtime ->
-    nativeLibraryContainsAscii(runtime, 'ffi.SystemLib') &&
-            nativeLibraryContainsAscii(runtime, 'TVMFFIEnvModRegisterSystemLibSymbol')
-}
-
 android {
     namespace 'com.example.starbucknotetaker'
     compileSdk 34
@@ -233,15 +174,6 @@ android {
         coreLibraryDesugaringEnabled true
     }
 
-    androidResources {
-        // Retain the old model archives as development inputs for the disabled
-        // legacy linker tasks, but do not ship them in the LiteRT-LM APK.
-        ignoreAssetsPatterns.addAll([
-                '!Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar',
-                '!Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64.tar'
-        ])
-    }
-
     packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
@@ -261,9 +193,8 @@ android {
 
     sourceSets {
         main {
-            // LiteRT-LM provides its own native runtime. Deliberately replace the
-            // default jniLibs source set so obsolete MLC model kernels are not
-            // packaged into the APK.
+            // LiteRT-LM provides the model runtime. The generated directories add
+            // tokenizer and C++ support libraries needed by the current app.
             jniLibs.srcDirs = [penguinNativeLibsDir, libcxxNativeLibsDir]
             // The editable source lives outside app/src so every APK receives the prompts only
             // through the build pipeline, making prompt refinements independent of Kotlin code.
@@ -288,22 +219,6 @@ tasks.named('preBuild').configure {
     dependsOn prepareAiAgentPrompts
 }
 
-tasks.register("syncNoteClassifierAssetsFromScripts", Sync) {
-    group = "verification"
-    description = "Copies generated note-classifier artifacts from assets/scripts into app runtime assets."
-
-    from("src/main/assets/scripts") {
-        include "note_classifier.tflite"
-        include "category_mapping.json"
-        include "deployment_metadata.json"
-        include "tokenizer_vocabulary_v2.txt"
-    }
-    into("src/main/assets")
-    doFirst {
-        logger.lifecycle("Syncing note-classifier artifacts from assets/scripts to assets")
-    }
-}
-
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
@@ -322,8 +237,6 @@ dependencies {
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation 'org.jsoup:jsoup:1.22.2'
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
-    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
-    implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1'
     implementation 'ai.djl.android:tokenizer-native:0.33.0'
     implementation 'ai.djl.huggingface:tokenizers:0.33.0'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
@@ -428,244 +341,6 @@ tasks.matching { it.name.startsWith('merge') && it.name.endsWith('NativeLibs') }
 
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('JniLibFolders') }.configureEach {
     dependsOn(preparePenguinNativeLibs, prepareLibcxxShared)
-}
-
-// ---------------------------------------------------------------------------
-// Task: buildModelLibSoArm64Legacy
-//
-// Disabled reference path for the old Android-09262024 runtime. The active
-// buildModelLibSo task below requires a TVM FFI-capable runtime and links the
-// model objects directly against it.
-//
-// The legacy shim can link the object files against the older runtime, but that
-// runtime cannot process the newer library_bin metadata needed to expose
-// vm_load_executable.
-// ---------------------------------------------------------------------------
-tasks.register('buildModelLibSoArm64Legacy') {
-    group = 'setup'
-    description = 'Compiles TVM compat shim and links model .o files into libLlama-3.2-3B-Instruct-q4f16_0-MLC.so'
-    enabled = false
-
-    // Ensure the TVM runtime .so is present before we link against it.
-    dependsOn(':mlc4j:downloadTvmRuntime')
-
-    def tarAsset    = file("src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar")
-    def compatSrc   = rootProject.file("scripts/tvm_compat.c")
-    def tvmSoDir    = project(':mlc4j').file("src/main/jniLibs/arm64-v8a")
-    def outputDir   = file("src/main/jniLibs/arm64-v8a")
-    def outputSo    = new File(outputDir, "libLlama-3.2-3B-Instruct-q4f16_0-MLC.so")
-
-    inputs.file(tarAsset)
-    inputs.file(compatSrc)
-    outputs.file(outputSo)
-
-    doLast {
-        if (!tarAsset.exists()) {
-            throw new GradleException("Model .tar not found: ${tarAsset}. " +
-                "Run scripts/compile_model_tar.sh or let the CI workflow compile it.")
-        }
-        if (!compatSrc.exists()) {
-            throw new GradleException("TVM compat shim not found: ${compatSrc}")
-        }
-
-        // Locate NDK clang for arm64
-        def ndkDir  = android.ndkDirectory
-        def hostTag = resolveNdkHostTag(ndkDir)
-        def clangName = hostTag.startsWith('windows') ?
-                'aarch64-linux-android26-clang.cmd' :
-                'aarch64-linux-android26-clang'
-        def clang   = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/bin/${clangName}")
-        if (!clang.exists()) {
-            throw new GradleException("NDK clang not found at ${clang}. " +
-                "Ensure NDK 26+ is installed via the Android SDK Manager.")
-        }
-
-        // Extract .o files from the model .tar into a temporary directory
-        def tmpDir = new File(buildDir, "model_obj_build")
-        tmpDir.deleteDir()
-        tmpDir.mkdirs()
-        exec {
-            commandLine 'tar', '-xf', tarAsset.absolutePath, '-C', tmpDir.absolutePath
-            ignoreExitValue = false
-        }
-
-        def lib0     = new File(tmpDir, 'lib0.o')
-        def devcObj  = new File(tmpDir, 'llama_q4f16_0_devc.o')
-        if (!lib0.exists())    { throw new GradleException("lib0.o not found in ${tarAsset}") }
-        if (!devcObj.exists()) { throw new GradleException("llama_q4f16_0_devc.o not found in ${tarAsset}") }
-
-        // Compile the TVM API compatibility shim to an .o file
-        def compatObj = new File(tmpDir, 'tvm_compat.o')
-        exec {
-            commandLine clang.absolutePath,
-                '-target', 'aarch64-linux-android26',
-                '-fPIC', '-O2',
-                '-c', compatSrc.absolutePath,
-                '-o', compatObj.absolutePath
-        }
-
-        outputDir.mkdirs()
-
-        // Link: model .o + compat shim → shared library depending on the TVM runtime
-        exec {
-            commandLine clang.absolutePath,
-                '-target', 'aarch64-linux-android26',
-                '-shared',
-                "-Wl,-soname,libLlama-3.2-3B-Instruct-q4f16_0-MLC.so",
-                '-Wl,--build-id',
-                '-Wl,-z,nocopyreloc',
-                '-o', outputSo.absolutePath,
-                lib0.absolutePath,
-                devcObj.absolutePath,
-                compatObj.absolutePath,
-                "-L${tvmSoDir.absolutePath}",
-                '-ltvm4j_runtime_packed',
-                '-llog', '-lm', '-lc', '-ldl'
-        }
-
-        logger.lifecycle("buildModelLibSo: built ${outputSo} (${outputSo.length()} bytes)")
-    }
-}
-
-tasks.register('buildModelLibSo') {
-    group = 'setup'
-    description = 'Links ABI-specific MLC model object files into native shared libraries'
-
-    dependsOn(':mlc4j:downloadTvmRuntime')
-
-    def tvmSoDirs = llamaModelAbiProfiles.collectEntries { abi, profile ->
-        [(abi): rootProject.file("mlc4j/src/main/jniLibs/${abi}")]
-    }
-    llamaModelAbiProfiles.each { abi, profile ->
-        inputs.file(file(profile.tarAsset)).withPropertyName("modelTar_${abi}")
-        inputs.file(new File(tvmSoDirs[abi], 'libtvm4j_runtime_packed.so')).withPropertyName("tvmRuntime_${abi}")
-        outputs.file(new File(file("src/main/jniLibs/${abi}"), profile.modelSoName))
-    }
-
-    doLast {
-        def ndkDir  = android.ndkDirectory
-        def hostTag = resolveNdkHostTag(ndkDir)
-
-        llamaModelAbiProfiles.each { abi, profile ->
-            def tarAsset = file(profile.tarAsset)
-            if (!tarAsset.exists()) {
-                throw new GradleException("Model .tar not found for ABI ${abi}: ${tarAsset}. " +
-                    "Run TARGET_ABI=${abi} scripts/compile_model_tar.sh or let CI compile it.")
-            }
-
-            def tvmSoDir = tvmSoDirs[abi]
-            def tvmSo = new File(tvmSoDir, 'libtvm4j_runtime_packed.so')
-            if (!tvmSo.exists()) {
-                throw new GradleException("TVM runtime not found for ABI ${abi}: ${tvmSo}. " +
-                    "Run TARGET_ABI=${abi} scripts/fetch_mlc_native.sh or scripts/build_mlc_tvm_runtime.sh.")
-            }
-            if (!runtimeSupportsTvmFfiSystemLib(tvmSo)) {
-                throw new GradleException("TVM runtime for ABI ${abi} does not support TVM FFI system libraries: ${tvmSo}. " +
-                    "The bundled Llama archive requires ffi.SystemLib to load library_bin and expose vm_load_executable. " +
-                    "Run TARGET_ABI=${abi} scripts/fetch_mlc_native.sh to rebuild libtvm4j_runtime_packed.so from MLC source.")
-            }
-
-            def clangBaseName = "${profile.clangPrefix}26-clang"
-            def clangName = hostTag.startsWith('windows') ? "${clangBaseName}.cmd" : clangBaseName
-            def clang = new File(ndkDir, "toolchains/llvm/prebuilt/${hostTag}/bin/${clangName}")
-            if (!clang.exists()) {
-                throw new GradleException("NDK clang not found for ABI ${abi} at ${clang}. " +
-                    "Ensure NDK 26+ is installed via the Android SDK Manager.")
-            }
-
-            def tmpDir = new File(buildDir, "model_obj_build/${abi}")
-            tmpDir.deleteDir()
-            tmpDir.mkdirs()
-            exec {
-                commandLine 'tar', '-xf', tarAsset.absolutePath, '-C', tmpDir.absolutePath
-                ignoreExitValue = false
-            }
-
-            def objectFiles = []
-            tmpDir.eachFileRecurse(FileType.FILES) { File objectFile ->
-                if (objectFile.name.endsWith('.o')) {
-                    objectFiles.add(objectFile)
-                }
-            }
-            objectFiles = objectFiles.sort { it.name }
-            def lib0 = objectFiles.find { it.name == 'lib0.o' }
-            def modelObjects = objectFiles.findAll { it.name != 'lib0.o' }
-            if (lib0 == null) {
-                throw new GradleException("lib0.o not found in ${tarAsset}")
-            }
-            if (modelObjects.isEmpty() && abi != 'x86_64') {
-                throw new GradleException("No model object files found in ${tarAsset}")
-            } else if (modelObjects.isEmpty()) {
-                logger.lifecycle("buildModelLibSo: ${abi} archive has lib0.o only; linking CPU model objects from lib0.o")
-            }
-
-            def outputDir = file("src/main/jniLibs/${abi}")
-            def outputSo = new File(outputDir, profile.modelSoName)
-            outputDir.mkdirs()
-
-            def aliasObject = null
-            if (abi == 'x86_64') {
-                def actualBlobSymbol = "${profile.systemLibPrefix}__tvm_ffi__library_bin"
-                def mlcExpectedBlobSymbol = "${profile.systemLibPrefix}___tvm_ffi__library_bin"
-                def actualContextSymbol = "${profile.systemLibPrefix}__tvm_ffi__library_ctx"
-                def mlcExpectedContextSymbol = "${profile.systemLibPrefix}___tvm_ffi__library_ctx"
-                def hasActualBlobSymbol = objectFiles.any { nativeLibraryContainsAscii(it, actualBlobSymbol) }
-                def hasMlcExpectedBlobSymbol = objectFiles.any { nativeLibraryContainsAscii(it, mlcExpectedBlobSymbol) }
-                if (hasActualBlobSymbol && !hasMlcExpectedBlobSymbol) {
-                    def aliasSrc = new File(tmpDir, 'mlc_system_lib_alias.c')
-                    aliasSrc.text = """
-extern const unsigned char ${actualBlobSymbol}[];
-extern void* ${actualContextSymbol};
-extern int TVMFFIEnvModRegisterSystemLibSymbol(const char* name, void* symbol);
-
-__attribute__((constructor))
-static void register_mlc_system_lib_alias(void) {
-    (void)TVMFFIEnvModRegisterSystemLibSymbol(
-        \"${mlcExpectedBlobSymbol}\",
-        (void*)${actualBlobSymbol});
-    (void)TVMFFIEnvModRegisterSystemLibSymbol(
-        \"${mlcExpectedContextSymbol}\",
-        (void*)&${actualContextSymbol});
-}
-"""
-                    aliasObject = new File(tmpDir, 'mlc_system_lib_alias.o')
-                    exec {
-                        commandLine clang.absolutePath,
-                            '-target', profile.target,
-                            '-fPIC', '-O2',
-                            '-c', aliasSrc.absolutePath,
-                            '-o', aliasObject.absolutePath
-                    }
-                    logger.lifecycle("buildModelLibSo: ${abi} adds blob/context aliases for MLC system-lib lookup")
-                }
-            }
-
-            def linkCommand = [
-                clang.absolutePath,
-                '-target', profile.target,
-                '-shared',
-                "-Wl,-soname,${profile.modelSoName}",
-                '-Wl,--build-id',
-                '-Wl,-z,nocopyreloc',
-                '-o', outputSo.absolutePath,
-                lib0.absolutePath,
-            ]
-            linkCommand.addAll(modelObjects.collect { it.absolutePath })
-            if (aliasObject != null) {
-                linkCommand.add(aliasObject.absolutePath)
-            }
-            linkCommand.addAll([
-                "-L${tvmSoDir.absolutePath}",
-                '-ltvm4j_runtime_packed',
-                '-llog', '-lm', '-lc', '-ldl'
-            ])
-            exec {
-                commandLine linkCommand
-            }
-
-            logger.lifecycle("buildModelLibSo: built ${abi} ${outputSo} (${outputSo.length()} bytes)")
-        }
-    }
 }
 
 def robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")

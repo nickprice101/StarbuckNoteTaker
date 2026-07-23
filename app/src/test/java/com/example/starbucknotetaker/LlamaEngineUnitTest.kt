@@ -142,13 +142,6 @@ class LlamaEngineUnitTest {
         assertFalse(result.contains("  "))
     }
 
-    @Test
-    fun tokenizeForModelInput_outputIsFixedLength() {
-        val vocab = TokenizerVocabulary.from(listOf("[UNK]", "hello", "world"))
-        val tokens = Summarizer.tokenizeForModelInput("hello world", vocab)
-        assertEquals(120, tokens.size)
-    }
-
     // ------------------------------------------------------------------
     // LlamaModelManager — unit tests (no network, no file-system changes)
     // ------------------------------------------------------------------

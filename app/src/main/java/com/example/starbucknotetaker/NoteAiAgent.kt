@@ -23,7 +23,7 @@ sealed interface AgentTurnUpdate {
     data class Complete(val text: String) : AgentTurnUpdate
 }
 
-/** ADK-owned note agent workflows backed by [MlcAdkModel]. */
+/** ADK-owned note agent workflows backed by [QwenAdkModel]. */
 internal object NoteAiAgent {
     const val AGENT_NAME = "starbuck_note_agent"
     private const val APP_NAME = "StarbuckNoteTaker"
@@ -34,13 +34,13 @@ internal object NoteAiAgent {
         context: Context,
         noteText: String,
         taskId: String = UUID.randomUUID().toString(),
-        model: Model = MlcAdkModel(context.applicationContext),
+        model: Model = QwenAdkModel(context.applicationContext),
         userInstruction: String? = null,
         webResearch: String? = null,
     ): String {
         val source = noteText.trim()
         require(source.isNotBlank()) { "The note has no text to reformat." }
-        (model as? MlcAdkModel)?.requireAvailable()
+        (model as? QwenAdkModel)?.requireAvailable()
         val systemInstruction = buildString {
             append(AiAgentPrompts.load(context).reformatting)
             appendLine()
@@ -70,7 +70,7 @@ internal object NoteAiAgent {
             maxSteps = 1,
         )
         val runner = InMemoryRunner(agent = agent, appName = APP_NAME)
-        val chunkChars = (model as? MlcAdkModel)?.recommendedReformatChunkChars
+        val chunkChars = (model as? QwenAdkModel)?.recommendedReformatChunkChars
             ?: REFORMAT_CHUNK_CHARS
         val chunks = NoteTextChunker.chunkForQwen(
             source,
@@ -171,7 +171,7 @@ internal object NoteAiAgent {
         sessionId: String,
         noteContext: String,
         relatedNotes: List<Note> = emptyList(),
-        model: Model = MlcAdkModel(context.applicationContext),
+        model: Model = QwenAdkModel(context.applicationContext),
         initialMemory: String = "",
         onMemoryUpdated: (String) -> Unit = {},
     ): NoteConversationAgent = NoteConversationAgent(
@@ -331,7 +331,7 @@ internal class NoteConversationAgent(
     private val recentTurns = ArrayDeque<ConversationTurn>()
     private var conversationMemory = initialMemory.trim()
     private val userPromptCharLimit =
-        ((model as? MlcAdkModel)?.promptCharLimit ?: DEFAULT_MODEL_PROMPT_CHARS) -
+        ((model as? QwenAdkModel)?.promptCharLimit ?: DEFAULT_MODEL_PROMPT_CHARS) -
             systemInstruction.length - MODEL_PROMPT_MARGIN_CHARS
     private val agent = LlmAgent(
         name = NoteAiAgent.AGENT_NAME,
@@ -359,7 +359,7 @@ internal class NoteConversationAgent(
             message = trimmed,
             previousRequests = recentTurns.map(ConversationTurn::user),
         )
-        val researchPlan = if (model is MlcAdkModel) {
+        val researchPlan = if (model is QwenAdkModel) {
             emit(AgentTurnUpdate.Partial("Planning local and online evidence…"))
             runCatching {
                 val raw = NoteAiAgent.auxiliaryTurn(
@@ -396,7 +396,7 @@ internal class NoteConversationAgent(
             }
         }
 
-        (model as? MlcAdkModel)?.requireAvailable()
+        (model as? QwenAdkModel)?.requireAvailable()
         var finalText = generate(
             prompt = buildTurnPrompt(answerRequest, research),
             onPartial = { emit(AgentTurnUpdate.Partial(it)) },
@@ -423,9 +423,9 @@ internal class NoteConversationAgent(
         require(finalText.isNotBlank()) { "The on-device agent returned no reply." }
         if (research != null &&
             AssistantWebLookup.answerNeedsResearch(finalText) &&
-            model !is MlcAdkModel
+            model !is QwenAdkModel
         ) {
-            // Test/custom providers do not have the Qwen verifier. Production MlcAdkModel turns
+            // Test/custom providers do not have the Qwen verifier. Production QwenAdkModel turns
             // always use the Qwen verification pass below.
             finalText = AssistantWebLookup.quickAnswer(answerRequest, research)
         }
@@ -457,7 +457,7 @@ internal class NoteConversationAgent(
         draft: String,
         research: WebLookupResult?,
     ): String {
-        if (model !is MlcAdkModel) return draft
+        if (model !is QwenAdkModel) return draft
         return runCatching {
             NoteAiAgent.auxiliaryTurn(
                 model = model,
@@ -481,7 +481,7 @@ internal class NoteConversationAgent(
     }
 
     private suspend fun updateMemory(question: String, answer: String) {
-        if (model !is MlcAdkModel) return
+        if (model !is QwenAdkModel) return
         val updated = runCatching {
             NoteAiAgent.auxiliaryTurn(
                 model = model,
