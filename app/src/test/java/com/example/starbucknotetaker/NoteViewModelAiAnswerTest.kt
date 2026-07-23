@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.core.app.ApplicationProvider
 import com.example.starbucknotetaker.richtext.RichTextDocument
+import com.example.starbucknotetaker.richtext.MarkdownRichText
+import com.example.starbucknotetaker.richtext.RichTextStyle
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -149,6 +151,34 @@ class NoteViewModelAiAnswerTest {
         assertTrue(rewritten.title.startsWith("Reformatted - Planning"))
         assertEquals(originalContent, rewritten.content)
         assertEquals("AI rewrite: ADK agent starting", rewritten.summary)
+    }
+
+    @Test
+    fun rewriteNoteQueuesCopyWithCitationMetadataIntact() {
+        val viewModel = NoteViewModel(SavedStateHandle())
+        viewModel.loadNotes(appContext, "1234")
+        val styled = MarkdownRichText.parse(
+            "Review [NASA](https://www.nasa.gov) before the meeting.",
+        )
+        viewModel.addNote(
+            title = "Research",
+            content = styled.text,
+            styledContent = styled,
+            images = emptyList(),
+            files = emptyList(),
+            linkPreviews = emptyList(),
+            skipAiSummary = true,
+        )
+        val source = viewModel.notes.single()
+
+        val rewrittenId = requireNotNull(viewModel.rewriteNote(source.id))
+        val rewritten = requireNotNull(viewModel.getNoteById(rewrittenId))
+        val citation = rewritten.styledContent?.spans
+            ?.flatMap { it.styles }
+            ?.filterIsInstance<RichTextStyle.Citation>()
+            ?.single()
+
+        assertEquals("https://www.nasa.gov", citation?.url)
     }
 
     @Test

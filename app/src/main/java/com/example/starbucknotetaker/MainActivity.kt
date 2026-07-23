@@ -518,11 +518,12 @@ fun AppContent(
                     onEnablePinCheck = {},
                     summarizerState = summarizerState,
                     openAttachment = { id -> noteViewModel.openAttachment(id) },
-                    onRewriteNote = { id, currentTitle, currentContent, destination ->
+                    onRewriteNote = { id, currentTitle, currentContent, currentStyledContent, destination ->
                         noteViewModel.rewriteNote(
                             id,
                             currentTitle,
                             currentContent,
+                            currentStyledContent,
                             destination,
                         )?.let { resultId ->
                             navController.navigate("detail/$resultId") {

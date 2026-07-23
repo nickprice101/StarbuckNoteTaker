@@ -1,12 +1,14 @@
 package com.example.starbucknotetaker.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
@@ -30,6 +32,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import com.example.starbucknotetaker.websiteName
 import com.example.starbucknotetaker.richtext.MarkdownRichText
 import com.example.starbucknotetaker.richtext.RichTextDocument
@@ -115,24 +119,36 @@ private fun CitationPill(
     modifier: Modifier = Modifier,
 ) {
     val siteStyle = remember(citation.url) { citationSiteStyle(citation.url) }
+    val favicon = remember(citation.url) { faviconUrl(citation.url) }
+    val faviconPainter = rememberAsyncImagePainter(favicon)
     Surface(
         modifier = modifier.clickable(onClick = onOpen),
         shape = RoundedCornerShape(percent = 50),
         color = siteStyle.background,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = citation.label,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                color = siteStyle.foreground,
-                style = MaterialTheme.typography.caption.copy(
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
-                ),
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        ) {
+            if (favicon != null && faviconPainter.state is AsyncImagePainter.State.Success) {
+                Image(
+                    painter = faviconPainter,
+                    contentDescription = citation.label,
+                    modifier = Modifier.size(12.dp),
+                )
+            } else {
+                Text(
+                    text = citation.label,
+                    color = siteStyle.foreground,
+                    style = MaterialTheme.typography.caption.copy(
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -184,6 +200,18 @@ internal fun buildCitationDisplay(document: RichTextDocument): CitationDisplay {
 }
 
 private data class CitationRange(val start: Int, val end: Int, val url: String)
+
+/** Uses the conventional same-origin favicon, falling back to the website label if unavailable. */
+internal fun faviconUrl(url: String): String? = runCatching {
+    val uri = URI(url)
+    val scheme = uri.scheme?.lowercase(Locale.US)
+    val authority = uri.rawAuthority
+    if (scheme !in setOf("http", "https") || authority.isNullOrBlank()) {
+        null
+    } else {
+        "$scheme://$authority/favicon.ico"
+    }
+}.getOrNull()
 
 /** Uses recognizable site colors, with a stable domain-specific palette for other websites. */
 internal fun citationSiteStyle(url: String): CitationSiteStyle {
