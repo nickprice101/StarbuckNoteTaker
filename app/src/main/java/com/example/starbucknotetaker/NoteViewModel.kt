@@ -927,8 +927,9 @@ class NoteViewModel(
 
     /**
      * Sends [question] to the LLM foreground service with the content of note [noteId]
-     * as grounding context.  The answer is delivered via [LlamaForegroundService.ACTION_RESULT]
-     * and stored as a new child note.
+     * as its single-note context. The note becomes answer evidence only when [question] contains
+     * `/note`. The answer is delivered via [LlamaForegroundService.ACTION_RESULT] and stored as a
+     * new child note.
      */
     fun askQuestion(noteId: Long, question: String): Long? {
         val ctx = context ?: return null
@@ -943,10 +944,6 @@ class NoteViewModel(
         val localContext = LocalNoteContextRetriever.retrieve(
             question = trimmedQuestion,
             currentNote = note,
-            notes = _notes,
-            canRead = { candidate ->
-                !candidate.isLocked || candidate.id in unlockedNoteIds
-            },
             maxChars = LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT,
         )
         val requestId = java.util.UUID.randomUUID().toString()

@@ -24,33 +24,30 @@ class QwenAiSupportTest {
     }
 
     @Test
-    fun localRetrieverSelectsRelevantRelatedNoteAndExcludesUnreadableNote() {
-        val current = Note(id = 1, title = "Launch", content = "Prepare release checklist.")
-        val relevant = Note(
+    fun localRetrieverNeverIncludesContentFromAnotherNote() {
+        val current = Note(
+            id = 1,
+            title = "Launch",
+            content = "Priya selected Contoso as the launch analytics vendor.",
+        )
+        val other = Note(
             id = 2,
             title = "Vendor decision",
-            content = "Priya selected Northwind as the launch analytics vendor.",
-        )
-        val unrelated = Note(id = 3, title = "Groceries", content = "Milk, eggs, coffee.")
-        val locked = Note(
-            id = 4,
-            title = "Private budget",
             content = "Northwind budget is 4500 dollars.",
-            isLocked = true,
         )
 
         val context = LocalNoteContextRetriever.retrieve(
             question = "Which analytics vendor did Priya select?",
             currentNote = current,
-            notes = listOf(current, unrelated, locked, relevant),
-            canRead = { !it.isLocked },
             maxChars = 1_800,
         )
 
-        assertTrue(context.contains("Northwind"))
+        assertTrue(context.contains("Contoso"))
         assertTrue(context.contains("Priya"))
+        assertFalse(context.contains(other.content))
         assertFalse(context.contains("4500"))
         assertTrue(context.contains("role=\"current\""))
+        assertFalse(context.contains("role=\"related\""))
     }
 
     @Test
@@ -168,8 +165,23 @@ class QwenAiSupportTest {
 
         assertTrue(prompt.contains("<conversation_memory>"))
         assertTrue(prompt.contains("launch decision is final"))
+        assertTrue(prompt.contains("<current_note usage=\"context_only\">"))
         assertTrue(prompt.contains("<user_request>\nWhen is launch?"))
         assertTrue(prompt.length <= 900)
+    }
+
+    @Test
+    fun noteTagMarksTheCurrentNoteAsAnswerEvidence() {
+        val reference = NoteReference.parse("Based on /note, which restaurants serve steak?")
+        val prompt = AgentContextPromptBuilder.build(
+            currentNote = "Chez Example serves steak.",
+            userRequest = "Based on /note, which restaurants serve steak?",
+            maxChars = 900,
+        )
+
+        assertTrue(reference.usesCurrentNoteAsSource)
+        assertEquals("Based on, which restaurants serve steak?", reference.requestWithoutTag)
+        assertTrue(prompt.contains("<current_note usage=\"source\">"))
     }
 
     @Test

@@ -17,7 +17,9 @@ hosted crawler, API token, or research-service configuration.
    it blocks mixed content, images, non-HTTPS resources, popups, and invalid TLS.
 5. Query terms rank the extracted paragraphs locally. Only bounded, relevant excerpts and their
    source URLs enter the on-device model prompt.
-6. The final answer uses ordinary Markdown links, rendered by the app as citation pills.
+6. Qwen synthesizes the extracted excerpts into the answer. A deterministic grounding check
+   replaces citation-only output with a concise extracted-page digest.
+7. The final answer uses ordinary Markdown links, rendered by the app as citation pills.
 
 ## Cache and connectivity
 
@@ -31,7 +33,8 @@ represented by `WebSearchProvider`, allowing another compliant provider to be ad
 changing crawling or extraction.
 
 If Android reports no validated connection, research-required questions show a connectivity alert.
-Requests answerable from the current note or on-device model continue without web access.
+Requests explicitly grounded in `/note`, or answerable from the on-device model without note
+evidence, continue without web access.
 
 ## Security boundary
 

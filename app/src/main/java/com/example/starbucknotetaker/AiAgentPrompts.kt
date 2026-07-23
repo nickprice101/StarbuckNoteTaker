@@ -53,7 +53,28 @@ internal object AiAgentPrompts {
     private const val REFORMATTING_SECTION = "AI_REFORMATTING"
 }
 
-/** Builds explicit, bounded context blocks so the current note cannot be mistaken for chat history. */
+internal data class NoteReference(
+    val usesCurrentNoteAsSource: Boolean,
+    val requestWithoutTag: String,
+) {
+    companion object {
+        private val noteTag = Regex("""(?i)(?<![\p{L}\p{N}_])/note\b""")
+
+        fun parse(request: String): NoteReference {
+            val usesCurrentNoteAsSource = noteTag.containsMatchIn(request)
+            val requestWithoutTag = noteTag.replace(request, " ")
+                .replace(Regex("""[ \t]{2,}"""), " ")
+                .replace(Regex("""[ \t]+([,.;:!?])"""), "$1")
+                .trim()
+            return NoteReference(
+                usesCurrentNoteAsSource = usesCurrentNoteAsSource,
+                requestWithoutTag = requestWithoutTag,
+            )
+        }
+    }
+}
+
+/** Builds explicit, bounded context blocks so the one current note has an unambiguous role. */
 internal object AgentContextPromptBuilder {
     private const val OMISSION_MARKER = "\n[...context omitted to fit the on-device model...]\n"
 
@@ -107,9 +128,14 @@ internal object AgentContextPromptBuilder {
         val memory = compact(conversationMemory.trim(), memoryBudget)
         remaining -= memory.length
         val note = compact(currentNote.trim(), remaining)
+        val noteUsage = if (NoteReference.parse(userRequest).usesCurrentNoteAsSource) {
+            NOTE_USAGE_SOURCE
+        } else {
+            NOTE_USAGE_CONTEXT_ONLY
+        }
 
         return buildString {
-            appendLine(CURRENT_NOTE_OPEN)
+            appendLine("<current_note usage=\"$noteUsage\">")
             appendLine(note)
             appendLine(CURRENT_NOTE_CLOSE)
             if (research.isNotBlank()) {
@@ -156,8 +182,9 @@ internal object AgentContextPromptBuilder {
     private const val MAX_RECENT_CONVERSATION_CHARS = 800
     private const val MAX_CONVERSATION_MEMORY_CHARS = 1_000
     private const val MAX_WEB_RESEARCH_CHARS = 2_400
-    private const val CURRENT_NOTE_OPEN = "<current_note>"
     private const val CURRENT_NOTE_CLOSE = "</current_note>"
+    private const val NOTE_USAGE_CONTEXT_ONLY = "context_only"
+    private const val NOTE_USAGE_SOURCE = "source"
     private const val WEB_RESEARCH_OPEN = "<web_research>"
     private const val WEB_RESEARCH_CLOSE = "</web_research>"
     private const val RECENT_CONVERSATION_OPEN = "<recent_conversation>"
@@ -166,7 +193,7 @@ internal object AgentContextPromptBuilder {
     private const val CONVERSATION_MEMORY_CLOSE = "</conversation_memory>"
     private const val USER_REQUEST_OPEN = "<user_request>"
     private const val USER_REQUEST_CLOSE = "</user_request>"
-    private val baseStructuralChars = CURRENT_NOTE_OPEN.length +
+    private val baseStructuralChars = "<current_note usage=\"$NOTE_USAGE_CONTEXT_ONLY\">".length +
         CURRENT_NOTE_CLOSE.length + USER_REQUEST_OPEN.length + USER_REQUEST_CLOSE.length + 6
     private val recentConversationStructuralChars = RECENT_CONVERSATION_OPEN.length +
         RECENT_CONVERSATION_CLOSE.length + 4

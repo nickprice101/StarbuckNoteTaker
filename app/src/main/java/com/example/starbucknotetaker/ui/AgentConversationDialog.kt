@@ -53,7 +53,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.starbucknotetaker.AgentTurnUpdate
 import com.example.starbucknotetaker.ConversationMemoryStore
-import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteAiAgent
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -75,16 +74,14 @@ internal fun AgentConversationDialog(
     onInsertIntoNote: (String) -> Unit,
     memoryNoteId: Long? = null,
     persistMemory: Boolean = true,
-    relatedNotes: List<Note> = emptyList(),
 ) {
     val context = LocalContext.current
     val memoryStore = remember { ConversationMemoryStore(context.applicationContext) }
-    val conversation = remember(noteContext, memoryNoteId, persistMemory, relatedNotes) {
+    val conversation = remember(noteContext, memoryNoteId, persistMemory) {
         NoteAiAgent.conversation(
             context = context.applicationContext,
             sessionId = UUID.randomUUID().toString(),
             noteContext = noteContext,
-            relatedNotes = relatedNotes.filterNot { it.id == memoryNoteId },
             initialMemory = memoryNoteId
                 ?.let { memoryStore.get(it, persistMemory) }
                 .orEmpty(),
@@ -97,7 +94,7 @@ internal fun AgentConversationDialog(
         mutableStateListOf(
             ChatMessageUi(
                 author = ChatAuthor.STATUS,
-                text = "Ask about this note, explore an idea, or draft something new.",
+                text = "Use /note to summarise or extract from this note; without it, the note only provides context.",
             ),
         )
     }

@@ -106,12 +106,20 @@ class LlamaEngine(private val context: Context) {
     /** Uses Qwen to decide whether current external evidence is required before answering. */
     internal suspend fun planResearch(
         question: String,
+        noteContext: String? = null,
         taskId: String = newTaskId(),
     ): QwenResearchPlan {
+        val noteReference = NoteReference.parse(question)
         val prompt = buildString {
-            appendLine("<question>")
+            appendLine("<note_is_source>${noteReference.usesCurrentNoteAsSource}</note_is_source>")
+            noteContext?.takeIf(String::isNotBlank)?.let {
+                appendLine("<current_note_context>")
+                appendLine(it.take(RESEARCH_PLAN_NOTE_CHARS))
+                appendLine("</current_note_context>")
+            }
+            appendLine("<user_request>")
             appendLine(question.take(MAX_QUESTION_CHARS))
-            appendLine("</question>")
+            appendLine("</user_request>")
         }
         val raw = completeChat(
             messages = listOf(
@@ -121,8 +129,11 @@ class LlamaEngine(private val context: Context) {
                     Decide whether the user's question needs public internet evidence. Return one
                     JSON object only: {"needs_web":boolean,"queries":[string],"freshness":string,
                     "source_types":[string]}. Use the web for current, unfamiliar, cited, linked, or
-                    explicitly researched facts. Do not put private note text into a search query.
-                    Prefer official or primary sources. Return at most two concise search queries.
+                    explicitly researched facts and recommendations. The current note is evidence
+                    only when note_is_source is true. Otherwise use it only to derive a
+                    non-sensitive place, topic, or entity that makes the search query
+                    self-contained. Never copy private details into a query. Prefer official or
+                    primary sources. Return at most two concise search queries.
                     """.trimIndent(),
                 ),
                 ChatMessage("user", prompt),
@@ -132,7 +143,11 @@ class LlamaEngine(private val context: Context) {
             temperature = 0.0f,
             topP = 0.8f,
         )
-        return QwenResearchPlan.parse(raw, question)
+        return QwenResearchPlan.parse(
+            raw = raw,
+            question = noteReference.requestWithoutTag.ifBlank { question },
+            noteIsSource = noteReference.usesCurrentNoteAsSource,
+        )
     }
 
     /** Runs a grounded Qwen review and returns the corrected answer, not review commentary. */
@@ -143,15 +158,21 @@ class LlamaEngine(private val context: Context) {
         webResearch: String?,
         taskId: String = newTaskId(),
     ): String {
+        val noteReference = NoteReference.parse(question)
         val evidence = buildString {
             appendLine("<question>${question.take(MAX_QUESTION_CHARS)}</question>")
             appendLine("<draft_answer>")
             appendLine(draft.take(ANSWER_VERIFICATION_DRAFT_CHARS))
             appendLine("</draft_answer>")
-            noteContext?.takeIf(String::isNotBlank)?.let {
+            noteContext?.takeIf {
+                noteReference.usesCurrentNoteAsSource && it.isNotBlank()
+            }?.let {
                 appendLine("<local_evidence>")
                 appendLine(it.take(ANSWER_VERIFICATION_NOTE_CHARS))
                 appendLine("</local_evidence>")
+            }
+            if (!noteReference.usesCurrentNoteAsSource) {
+                appendLine("<note_context_not_evidence>true</note_context_not_evidence>")
             }
             webResearch?.takeIf(String::isNotBlank)?.let {
                 appendLine("<web_evidence>")
@@ -166,8 +187,10 @@ class LlamaEngine(private val context: Context) {
                     """
                     You verify an assistant answer using only the supplied local and web evidence.
                     Correct unsupported claims, conflicts, stale statements, and misplaced Markdown
-                    citations. Preserve useful advice that follows directly from the evidence.
-                    Output only the corrected final answer with no review preamble.
+                    citations. When web evidence is supplied, the answer must explain its extracted
+                    findings and cannot consist only of links. Preserve useful advice that follows
+                    directly from the evidence. Output only the corrected final answer with no
+                    review preamble.
                     """.trimIndent(),
                 ),
                 ChatMessage("user", evidence),
@@ -712,6 +735,7 @@ class LlamaEngine(private val context: Context) {
         private const val INTERACTIVE_GENERATION_TIMEOUT_MS = 30_000L
         private const val AGENT_GENERATION_TIMEOUT_MS = 45_000L
         private const val RESEARCH_PLAN_MAX_TOKENS = 96
+        private const val RESEARCH_PLAN_NOTE_CHARS = 1_200
         private const val ANSWER_VERIFICATION_DRAFT_CHARS = 1_600
         private const val ANSWER_VERIFICATION_NOTE_CHARS = 1_600
         private const val ANSWER_VERIFICATION_WEB_CHARS = 2_400

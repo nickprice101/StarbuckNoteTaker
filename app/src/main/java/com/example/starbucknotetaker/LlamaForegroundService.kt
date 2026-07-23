@@ -161,15 +161,20 @@ class LlamaForegroundService : Service() {
         requestId: String,
     ): String {
         val memory = memoryStore.get(noteId, persistConversationMemory)
+        val noteReference = NoteReference.parse(question)
         broadcastProgress(requestId, "", "Planning local and online evidence", LlamaEngine.Mode.QUESTION)
         val plan = runCatching {
             engine.planResearch(
                 question = question,
+                noteContext = noteContext,
                 taskId = "$requestId-plan",
             )
         }.getOrElse {
             Log.w(TAG, "Qwen research planning failed; using conservative routing", it)
-            QwenResearchPlan.fallback(question)
+            QwenResearchPlan.fallback(
+                question = noteReference.requestWithoutTag.ifBlank { question },
+                noteIsSource = noteReference.usesCurrentNoteAsSource,
+            )
         }
 
         var research: WebLookupResult? = null
@@ -181,7 +186,9 @@ class LlamaForegroundService : Service() {
                 AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
                 LlamaEngine.Mode.QUESTION,
             )
-            val queries = plan.queries.ifEmpty { listOf(question) }
+            val queries = plan.queries.ifEmpty {
+                listOf(noteReference.requestWithoutTag.ifBlank { question })
+            }
             val lookups = queries.take(MAX_PLANNED_RESEARCH_QUERIES).map { query ->
                 webLookup.lookup(query)
             }
@@ -214,7 +221,10 @@ class LlamaForegroundService : Service() {
                 AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
                 LlamaEngine.Mode.QUESTION,
             )
-            val lookup = webLookup.lookup(plan.queries.firstOrNull() ?: question)
+            val lookup = webLookup.lookup(
+                plan.queries.firstOrNull()
+                    ?: noteReference.requestWithoutTag.ifBlank { question },
+            )
             if (lookup.results.isNotEmpty()) {
                 research = lookup
                 broadcastProgress(
@@ -246,6 +256,11 @@ class LlamaForegroundService : Service() {
         }.getOrElse {
             Log.w(TAG, "Qwen answer verification failed; retaining grounded draft", it)
             finalAnswer
+        }
+        if (research != null &&
+            !AssistantWebLookup.answerSummarizesExtractedResearch(finalAnswer, research)
+        ) {
+            finalAnswer = AssistantWebLookup.quickAnswer(question, research)
         }
         finalAnswer = research?.let { AssistantWebLookup.appendMarkdownSources(finalAnswer, it) }
             ?: finalAnswer

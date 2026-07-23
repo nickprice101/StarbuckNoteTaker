@@ -525,9 +525,6 @@ fun AppContent(
                     onEnablePinCheck = {},
                     summarizerState = summarizerState,
                     openAttachment = { id -> noteViewModel.openAttachment(id) },
-                    relatedNotes = noteViewModel.notes.filter { candidate ->
-                        !candidate.isLocked || noteViewModel.isNoteTemporarilyUnlocked(candidate.id)
-                    },
                     onRewriteNote = { id, currentTitle, currentContent, currentStyledContent, destination ->
                         noteViewModel.rewriteNote(
                             id,
