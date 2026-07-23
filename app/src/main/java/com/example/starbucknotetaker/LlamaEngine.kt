@@ -76,7 +76,9 @@ class LlamaEngine(private val context: Context) {
         text: String,
         taskId: String = newTaskId(),
         maxTokensOverride: Int? = null,
-    ): String = infer(Mode.SUMMARISE, text, taskId = taskId, maxTokensOverride = maxTokensOverride)
+    ): String = QwenSummaryProtocol.render(
+        infer(Mode.SUMMARISE, text, taskId = taskId, maxTokensOverride = maxTokensOverride),
+    )
 
     suspend fun rewrite(
         text: String,
@@ -90,7 +92,161 @@ class LlamaEngine(private val context: Context) {
         taskId: String = newTaskId(),
         maxTokensOverride: Int? = null,
         webResearch: String? = null,
-    ): String = infer(Mode.QUESTION, question, context, taskId, maxTokensOverride, webResearch)
+        conversationMemory: String? = null,
+    ): String = infer(
+        mode = Mode.QUESTION,
+        primaryText = question,
+        secondaryText = context,
+        taskId = taskId,
+        maxTokensOverride = maxTokensOverride,
+        webResearch = webResearch,
+        conversationMemory = conversationMemory,
+    )
+
+    /** Uses Qwen to decide whether current external evidence is required before answering. */
+    internal suspend fun planResearch(
+        question: String,
+        taskId: String = newTaskId(),
+    ): QwenResearchPlan {
+        val prompt = buildString {
+            appendLine("<question>")
+            appendLine(question.take(MAX_QUESTION_CHARS))
+            appendLine("</question>")
+        }
+        val raw = completeChat(
+            messages = listOf(
+                ChatMessage(
+                    "system",
+                    """
+                    Decide whether the user's question needs public internet evidence. Return one
+                    JSON object only: {"needs_web":boolean,"queries":[string],"freshness":string,
+                    "source_types":[string]}. Use the web for current, unfamiliar, cited, linked, or
+                    explicitly researched facts. Do not put private note text into a search query.
+                    Prefer official or primary sources. Return at most two concise search queries.
+                    """.trimIndent(),
+                ),
+                ChatMessage("user", prompt),
+            ),
+            taskId = taskId,
+            maxTokens = RESEARCH_PLAN_MAX_TOKENS,
+            temperature = 0.0f,
+            topP = 0.8f,
+        )
+        return QwenResearchPlan.parse(raw, question)
+    }
+
+    /** Runs a grounded Qwen review and returns the corrected answer, not review commentary. */
+    suspend fun verifyAnswer(
+        question: String,
+        draft: String,
+        noteContext: String?,
+        webResearch: String?,
+        taskId: String = newTaskId(),
+    ): String {
+        val evidence = buildString {
+            appendLine("<question>${question.take(MAX_QUESTION_CHARS)}</question>")
+            appendLine("<draft_answer>")
+            appendLine(draft.take(ANSWER_VERIFICATION_DRAFT_CHARS))
+            appendLine("</draft_answer>")
+            noteContext?.takeIf(String::isNotBlank)?.let {
+                appendLine("<local_evidence>")
+                appendLine(it.take(ANSWER_VERIFICATION_NOTE_CHARS))
+                appendLine("</local_evidence>")
+            }
+            webResearch?.takeIf(String::isNotBlank)?.let {
+                appendLine("<web_evidence>")
+                appendLine(it.take(ANSWER_VERIFICATION_WEB_CHARS))
+                appendLine("</web_evidence>")
+            }
+        }
+        return completeChat(
+            messages = listOf(
+                ChatMessage(
+                    "system",
+                    """
+                    You verify an assistant answer using only the supplied local and web evidence.
+                    Correct unsupported claims, conflicts, stale statements, and misplaced Markdown
+                    citations. Preserve useful advice that follows directly from the evidence.
+                    Output only the corrected final answer with no review preamble.
+                    """.trimIndent(),
+                ),
+                ChatMessage("user", evidence),
+            ),
+            taskId = taskId,
+            maxTokens = ANSWER_VERIFICATION_MAX_TOKENS,
+            temperature = 0.0f,
+            topP = 0.8f,
+        )
+    }
+
+    /** Compacts a successful turn into durable, provenance-aware per-note memory. */
+    suspend fun updateConversationMemory(
+        previousMemory: String,
+        question: String,
+        answer: String,
+        taskId: String = newTaskId(),
+    ): String = completeChat(
+        messages = listOf(
+            ChatMessage(
+                "system",
+                """
+                Maintain compact memory for an on-device note assistant. Keep only durable user
+                preferences, named entities, decisions, constraints, and unresolved questions.
+                Remove transient wording and unsupported claims. Use short bullets, preserve fact
+                provenance as "User", "Note", or "Web", and stay under 180 words. Output memory only.
+                """.trimIndent(),
+            ),
+            ChatMessage(
+                "user",
+                buildString {
+                    appendLine("<previous_memory>")
+                    appendLine(previousMemory.take(MEMORY_INPUT_CHARS))
+                    appendLine("</previous_memory>")
+                    appendLine("<latest_user>${question.take(MAX_QUESTION_CHARS)}</latest_user>")
+                    appendLine("<latest_answer>")
+                    appendLine(answer.take(MEMORY_ANSWER_CHARS))
+                    append("</latest_answer>")
+                },
+            ),
+        ),
+        taskId = taskId,
+        maxTokens = MEMORY_MAX_TOKENS,
+        temperature = 0.0f,
+        topP = 0.8f,
+    ).take(MEMORY_OUTPUT_CHARS)
+
+    /** Repairs a summary after deterministic source-grounding checks identify new facts. */
+    suspend fun repairSummary(
+        source: String,
+        draft: String,
+        unsupportedFacts: Set<String>,
+        taskId: String = newTaskId(),
+    ): String {
+        val raw = completeChat(
+            messages = listOf(
+                ChatMessage("system", QwenSummaryProtocol.systemPrompt),
+                ChatMessage(
+                    "user",
+                    buildString {
+                        appendLine("<source_note>")
+                        appendLine(source.take(SUMMARY_REPAIR_SOURCE_CHARS))
+                        appendLine("</source_note>")
+                        appendLine("<invalid_draft>")
+                        appendLine(draft)
+                        appendLine("</invalid_draft>")
+                        appendLine("<unsupported_facts>")
+                        appendLine(unsupportedFacts.joinToString("\n"))
+                        append("</unsupported_facts>")
+                    },
+                ),
+            ),
+            taskId = taskId,
+            maxTokens = MAX_TOKENS_SUMMARISE,
+            temperature = 0.0f,
+            topP = 0.8f,
+        )
+        return QwenSummaryProtocol.render(raw)
+    }
 
     /** Completes an ADK-owned turn using real local model output. */
     suspend fun completeChat(
@@ -188,6 +344,7 @@ class LlamaEngine(private val context: Context) {
         taskId: String,
         maxTokensOverride: Int? = null,
         webResearch: String? = null,
+        conversationMemory: String? = null,
     ): String = withContext(Dispatchers.Default) {
         inferenceMutex.withLock {
             if (!DeviceCapabilityChecker.isAiCapable(context)) {
@@ -223,7 +380,13 @@ class LlamaEngine(private val context: Context) {
                 val maxTokens = maxTokensOverride?.coerceIn(MIN_MAX_TOKENS, thermalMaxTokens)
                     ?: thermalMaxTokens
                 val generated = generate(
-                    messages = buildMessages(mode, primaryText, secondaryText, webResearch),
+                    messages = buildMessages(
+                        mode,
+                        primaryText,
+                        secondaryText,
+                        webResearch,
+                        conversationMemory,
+                    ),
                     taskId = taskId,
                     maxTokens = maxTokens,
                     temperature = when (mode) {
@@ -455,11 +618,10 @@ class LlamaEngine(private val context: Context) {
         primary: String,
         secondary: String?,
         webResearch: String? = null,
+        conversationMemory: String? = null,
     ): List<ChatMessage> {
         val system = when (mode) {
-            Mode.SUMMARISE ->
-                "You are a concise note-taking assistant. Summarise the note in at most 3 short " +
-                    "lines. Output only the summary."
+            Mode.SUMMARISE -> QwenSummaryProtocol.systemPrompt
             Mode.REWRITE -> AiAgentPrompts.load(context).reformatting
             Mode.QUESTION -> AiAgentPrompts.load(context).chatbot
         }
@@ -469,6 +631,7 @@ class LlamaEngine(private val context: Context) {
                 currentNote = secondary.orEmpty().take(contextLimit),
                 userRequest = primary.take(MAX_QUESTION_CHARS),
                 webResearch = webResearch.orEmpty(),
+                conversationMemory = conversationMemory.orEmpty(),
                 maxChars = QUESTION_STRUCTURED_PROMPT_CHARS,
             )
         } else {
@@ -530,24 +693,34 @@ class LlamaEngine(private val context: Context) {
     companion object {
         private const val TAG = "LlamaEngine"
         private const val MIN_MAX_TOKENS = 1
-        private const val MAX_TOKENS_SUMMARISE = 64
+        private const val MAX_TOKENS_SUMMARISE = 128
         private const val MAX_TOKENS_REWRITE = 160
-        private const val MAX_TOKENS_QUESTION = 128
-        private const val AGENT_MAX_OUTPUT_TOKENS = 256
-        private const val AGENT_MAX_OUTPUT_TOKENS_EMULATOR = 192
-        private const val AGENT_PROMPT_CHARS_DEVICE = 4_000
-        private const val AGENT_PROMPT_CHARS_EMULATOR = 2_200
-        private const val MAX_CONTEXT_CHARS_SUMMARISE = 900
+        private const val MAX_TOKENS_QUESTION = 320
+        private const val AGENT_MAX_OUTPUT_TOKENS = 768
+        private const val AGENT_MAX_OUTPUT_TOKENS_EMULATOR = 384
+        private const val AGENT_PROMPT_CHARS_DEVICE = 7_000
+        private const val AGENT_PROMPT_CHARS_EMULATOR = 3_200
+        private const val MAX_CONTEXT_CHARS_SUMMARISE = 3_000
         private const val MAX_CONTEXT_CHARS_REWRITE = 2_000
-        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 1_600
-        private const val QUESTION_STRUCTURED_PROMPT_CHARS = 2_300
+        internal const val QUESTION_CONTEXT_CHAR_LIMIT = 3_000
+        private const val QUESTION_STRUCTURED_PROMPT_CHARS = 5_200
         private const val MAX_QUESTION_CHARS = 500
-        private const val MODEL_CONTEXT_TOKENS = 2_048
+        private const val MODEL_CONTEXT_TOKENS = 4_096
         private const val DEFAULT_TOP_K = 40
         private const val MAX_CPU_THREADS = 4
         private const val SUMMARISE_GENERATION_TIMEOUT_MS = 20_000L
         private const val INTERACTIVE_GENERATION_TIMEOUT_MS = 30_000L
-        private const val AGENT_GENERATION_TIMEOUT_MS = 35_000L
+        private const val AGENT_GENERATION_TIMEOUT_MS = 45_000L
+        private const val RESEARCH_PLAN_MAX_TOKENS = 96
+        private const val ANSWER_VERIFICATION_DRAFT_CHARS = 1_600
+        private const val ANSWER_VERIFICATION_NOTE_CHARS = 1_600
+        private const val ANSWER_VERIFICATION_WEB_CHARS = 2_400
+        private const val ANSWER_VERIFICATION_MAX_TOKENS = 320
+        private const val MEMORY_INPUT_CHARS = 1_200
+        private const val MEMORY_ANSWER_CHARS = 1_200
+        private const val MEMORY_OUTPUT_CHARS = 1_200
+        private const val MEMORY_MAX_TOKENS = 240
+        private const val SUMMARY_REPAIR_SOURCE_CHARS = 3_000
         private const val THERMAL_HEADROOM_THROTTLE_THRESHOLD = 0.15f
         private val THINKING_BLOCK_REGEX = Regex(
             pattern = "<think>.*?</think>\\s*",

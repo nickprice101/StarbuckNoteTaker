@@ -45,6 +45,7 @@ class LlamaForegroundService : Service() {
     private lateinit var notificationManager: NotificationManager
     private lateinit var engine: LlamaEngine
     private lateinit var webLookup: AssistantWebLookup
+    private lateinit var memoryStore: ConversationMemoryStore
     private var currentPhraseIndex = 0
 
     // ------------------------------------------------------------------
@@ -56,6 +57,7 @@ class LlamaForegroundService : Service() {
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         engine = LlamaEngineProvider.acquire(applicationContext)
         webLookup = AssistantWebLookup(applicationContext)
+        memoryStore = ConversationMemoryStore(applicationContext)
         createNotificationChannel()
     }
 
@@ -75,6 +77,9 @@ class LlamaForegroundService : Service() {
         val context   = intent.getStringExtra(EXTRA_CONTEXT_TEXT)
         val noteId    = intent.getLongExtra(EXTRA_NOTE_ID, -1L)
         val requestId = intent.getStringExtra(EXTRA_REQUEST_ID) ?: text.hashCode().toString()
+        val reformatInstruction = intent.getStringExtra(EXTRA_REFORMAT_INSTRUCTION)
+        val persistConversationMemory =
+            intent.getBooleanExtra(EXTRA_PERSIST_CONVERSATION_MEMORY, true)
 
         if (text.isBlank()) {
             broadcastResult(requestId, noteId, mode, "", isError = false)
@@ -107,10 +112,16 @@ class LlamaForegroundService : Service() {
                     }
                     LlamaEngine.Mode.REWRITE -> {
                         broadcastProgress(requestId, "", "ADK agent is correcting and formatting", mode)
-                        NoteAiAgent.reformat(applicationContext, text, requestId)
+                        reformatNote(text, reformatInstruction, requestId)
                     }
                     LlamaEngine.Mode.QUESTION ->
-                        answerQuestion(text, context, requestId)
+                        answerQuestion(
+                            question = text,
+                            noteContext = context,
+                            noteId = noteId,
+                            persistConversationMemory = persistConversationMemory,
+                            requestId = requestId,
+                        )
                 }
                 broadcastResult(requestId, noteId, mode, result, isError = false)
             } catch (e: CancellationException) {
@@ -145,17 +156,36 @@ class LlamaForegroundService : Service() {
     private suspend fun answerQuestion(
         question: String,
         noteContext: String?,
+        noteId: Long,
+        persistConversationMemory: Boolean,
         requestId: String,
     ): String {
+        val memory = memoryStore.get(noteId, persistConversationMemory)
+        broadcastProgress(requestId, "", "Planning local and online evidence", LlamaEngine.Mode.QUESTION)
+        val plan = runCatching {
+            engine.planResearch(
+                question = question,
+                taskId = "$requestId-plan",
+            )
+        }.getOrElse {
+            Log.w(TAG, "Qwen research planning failed; using conservative routing", it)
+            QwenResearchPlan.fallback(question)
+        }
+
         var research: WebLookupResult? = null
-        if (AssistantWebLookup.shouldLookup(question)) {
+        val needsWeb = plan.needsWeb || AssistantWebLookup.requiresInternet(question)
+        if (needsWeb) {
             broadcastProgress(
                 requestId,
                 "",
                 AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
                 LlamaEngine.Mode.QUESTION,
             )
-            val lookup = webLookup.lookup(question)
+            val queries = plan.queries.ifEmpty { listOf(question) }
+            val lookups = queries.take(MAX_PLANNED_RESEARCH_QUERIES).map { query ->
+                webLookup.lookup(query)
+            }
+            val lookup = mergeWebLookupResults(queries.joinToString(" | "), lookups)
             if (lookup.results.isNotEmpty()) {
                 research = lookup
                 broadcastProgress(
@@ -175,6 +205,7 @@ class LlamaForegroundService : Service() {
             context = noteContext,
             taskId = requestId,
             webResearch = research?.toPromptContext(),
+            conversationMemory = memory,
         )
         if (research == null && AssistantWebLookup.answerNeedsResearch(finalAnswer)) {
             broadcastProgress(
@@ -183,7 +214,7 @@ class LlamaForegroundService : Service() {
                 AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE,
                 LlamaEngine.Mode.QUESTION,
             )
-            val lookup = webLookup.lookup(question)
+            val lookup = webLookup.lookup(plan.queries.firstOrNull() ?: question)
             if (lookup.results.isNotEmpty()) {
                 research = lookup
                 broadcastProgress(
@@ -197,16 +228,69 @@ class LlamaForegroundService : Service() {
                     context = noteContext,
                     taskId = requestId,
                     webResearch = lookup.toPromptContext(),
+                    conversationMemory = memory,
                 )
             } else {
                 return AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
             }
         }
-        if (research != null && AssistantWebLookup.answerNeedsResearch(finalAnswer)) {
-            finalAnswer = AssistantWebLookup.quickAnswer(question, research)
+        broadcastProgress(requestId, "", "Verifying answer against its evidence", LlamaEngine.Mode.QUESTION)
+        finalAnswer = runCatching {
+            engine.verifyAnswer(
+                question = question,
+                draft = finalAnswer,
+                noteContext = noteContext,
+                webResearch = research?.toPromptContext(),
+                taskId = "$requestId-verify",
+            )
+        }.getOrElse {
+            Log.w(TAG, "Qwen answer verification failed; retaining grounded draft", it)
+            finalAnswer
         }
-        return research?.let { AssistantWebLookup.appendMarkdownSources(finalAnswer, it) }
+        finalAnswer = research?.let { AssistantWebLookup.appendMarkdownSources(finalAnswer, it) }
             ?: finalAnswer
+
+        if (noteId >= 0L && finalAnswer.isNotBlank()) {
+            val updatedMemory = runCatching {
+                engine.updateConversationMemory(
+                    previousMemory = memory,
+                    question = question,
+                    answer = finalAnswer,
+                    taskId = "$requestId-memory",
+                )
+            }.getOrElse {
+                Log.w(TAG, "Qwen conversation memory update failed", it)
+                memory
+            }
+            memoryStore.put(noteId, updatedMemory, persistConversationMemory)
+        }
+        return finalAnswer
+    }
+
+    private suspend fun reformatNote(
+        noteText: String,
+        userInstruction: String?,
+        requestId: String,
+    ): String {
+        val research = userInstruction
+            ?.takeIf(ReformatResearchPolicy::requiresOnlineEvidence)
+            ?.let { instruction ->
+                broadcastProgress(
+                    requestId,
+                    "",
+                    "Retrieving the requested public style or verification evidence",
+                    LlamaEngine.Mode.REWRITE,
+                )
+                webLookup.lookup(instruction)
+            }
+            ?.takeIf { it.results.isNotEmpty() }
+        return NoteAiAgent.reformat(
+            context = applicationContext,
+            noteText = noteText,
+            taskId = requestId,
+            userInstruction = userInstruction,
+            webResearch = research?.toPromptContext(),
+        )
     }
 
     override fun onDestroy() {
@@ -382,6 +466,8 @@ class LlamaForegroundService : Service() {
         const val EXTRA_IS_ERROR     = "llama_is_error"
         const val EXTRA_PROGRESS_TEXT = "llama_progress_text"
         const val EXTRA_PROGRESS_STATUS = "llama_progress_status"
+        const val EXTRA_REFORMAT_INSTRUCTION = "llama_reformat_instruction"
+        const val EXTRA_PERSIST_CONVERSATION_MEMORY = "llama_persist_conversation_memory"
 
         /** Broadcast action sent when inference is complete. */
         const val ACTION_RESULT = "com.example.starbucknotetaker.LLAMA_RESULT"
@@ -390,6 +476,7 @@ class LlamaForegroundService : Service() {
         private const val PHRASE_CYCLE_MS = 2_500L
         private const val PROGRESS_BROADCAST_MS = 750L
         private const val PROGRESS_MIN_CHAR_DELTA = 24
+        private const val MAX_PLANNED_RESEARCH_QUERIES = 2
 
         private const val THROTTLE_MESSAGE = "Taking a breather 🌡️ — cooling down…"
 
@@ -423,12 +510,28 @@ class LlamaForegroundService : Service() {
             noteId: Long = -1L,
             requestId: String = java.util.UUID.randomUUID().toString(),
             contextText: String? = null,
+            reformatInstruction: String? = null,
+            persistConversationMemory: Boolean = true,
         ): Intent = Intent(context, LlamaForegroundService::class.java).apply {
             putExtra(EXTRA_MODE, mode.name)
             putExtra(EXTRA_TEXT, text)
             putExtra(EXTRA_NOTE_ID, noteId)
             putExtra(EXTRA_REQUEST_ID, requestId)
             if (contextText != null) putExtra(EXTRA_CONTEXT_TEXT, contextText)
+            if (reformatInstruction != null) {
+                putExtra(EXTRA_REFORMAT_INSTRUCTION, reformatInstruction)
+            }
+            putExtra(EXTRA_PERSIST_CONVERSATION_MEMORY, persistConversationMemory)
         }
     }
+}
+
+internal object ReformatResearchPolicy {
+    private val explicitOnlineMode = Regex(
+        """\b(?:verify|fact[- ]?check|check citations?|validate sources?|style guide|APA|MLA|Chicago|linked (?:page|source|material)|online source|web source)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    fun requiresOnlineEvidence(instruction: String): Boolean =
+        explicitOnlineMode.containsMatchIn(instruction)
 }

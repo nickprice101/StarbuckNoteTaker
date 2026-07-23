@@ -1,8 +1,9 @@
-# Model training scripts (fast TFLite summary classifier)
+# Model training scripts (legacy TFLite category classifier)
 
-> **Note:** Automatic note summaries use `note_classifier.tflite` as a fast
-> category signal and `FastNoteSummarizer` for content-aware prose generation.
-> Rewrite and question-answering still use **MLC LLM with Llama 3.2 3B Instruct**.
+> **Note:** Completed chatbot, reformatting, and main-page summary output runs
+> through the on-device LiteRT-LM Qwen3 0.6B model. These scripts retain the
+> category-classifier training and validation pipeline for compatibility and
+> offline quality analysis.
 
 ## Main scripts
 
@@ -21,7 +22,7 @@
 
 ## Context
 
-The classifier should be treated as a routing hint, not a prose generator. The
-runtime summary must stay aligned with the enhanced-summary validation shape in
-`complete_pipeline.py`, while avoiding repetitive category-only templates.
+The classifier is not a prose generator. Qwen's structured summary prompt stays
+aligned with the category-aware enhanced-summary validation shape in
+`complete_pipeline.py`.
 

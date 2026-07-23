@@ -8,6 +8,7 @@ import com.example.starbucknotetaker.richtext.MarkdownRichText
 import com.example.starbucknotetaker.richtext.RichTextStyle
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -81,10 +82,12 @@ class NoteViewModelAiAnswerTest {
         assertTrue(answer.content.contains("Starting on-device AI"))
         assertEquals("AI answer in progress", answer.summary)
         val serviceIntent = ShadowApplication.getInstance().nextStartedService
-        assertEquals(
-            source.content,
-            serviceIntent.getStringExtra(LlamaForegroundService.EXTRA_CONTEXT_TEXT),
-        )
+        val selectedContext =
+            serviceIntent.getStringExtra(LlamaForegroundService.EXTRA_CONTEXT_TEXT).orEmpty()
+        assertTrue(selectedContext.contains("role=\"current\""))
+        assertTrue(selectedContext.contains("title=\"Geography\""))
+        assertTrue(selectedContext.contains(source.content))
+        assertFalse(selectedContext.contains("Waiting for the first response"))
     }
 
     @Test
@@ -239,5 +242,30 @@ class NoteViewModelAiAnswerTest {
         assertEquals(source.images, rewritten.images)
         assertTrue(rewritten.content.contains("[[image:0]]"))
         assertTrue(rewritten.content.contains("Attachments"))
+    }
+
+    @Test
+    fun rewriteCopyPreservesAttachmentMetadataAndPlaceholders() {
+        val viewModel = NoteViewModel(SavedStateHandle())
+        viewModel.loadNotes(appContext, "1234")
+        val source = Note(
+            id = 43L,
+            title = "Inspection",
+            content = "Review the evidence.\n[[image:0]]\n[[file:0]]",
+            styledContent = RichTextDocument.fromPlainText(
+                "Review the evidence.\n[[image:0]]\n[[file:0]]",
+            ),
+            images = listOf(NoteImage(attachmentId = "photo-2")),
+            files = listOf(NoteFile("report.pdf", "application/pdf", attachmentId = "file-2")),
+        )
+        viewModel.restoreNote(source)
+
+        val copyId = requireNotNull(viewModel.rewriteNote(source.id))
+        val copy = requireNotNull(viewModel.getNoteById(copyId))
+
+        assertEquals(source.images, copy.images)
+        assertEquals(source.files, copy.files)
+        assertTrue(copy.content.contains("[[image:0]]"))
+        assertTrue(copy.content.contains("[[file:0]]"))
     }
 }

@@ -188,9 +188,9 @@ internal class MlcAdkModel(
         const val MIN_OUTPUT_TOKENS = 32
         const val MIN_PROMPT_CHARS = 800
         const val MIN_USER_MESSAGE_CHARS = 320
-        const val MAX_SYSTEM_INSTRUCTION_CHARS = 1_400
-        const val PROMPT_OVERHEAD_CHARS = 1_200
+        const val MAX_SYSTEM_INSTRUCTION_CHARS = 2_400
+        const val PROMPT_OVERHEAD_CHARS = 2_600
         const val MIN_REFORMAT_CHUNK_CHARS = 800
-        const val MAX_REFORMAT_CHUNK_CHARS = 2_700
+        const val MAX_REFORMAT_CHUNK_CHARS = 3_800
     }
 }
