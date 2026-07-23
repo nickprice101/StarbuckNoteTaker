@@ -3,6 +3,7 @@ package com.example.starbucknotetaker
 import android.content.Context
 
 internal data class AiAgentPromptSet(
+    val summariser: String,
     val chatbot: String,
     val reformatting: String,
 )
@@ -21,6 +22,7 @@ internal object AiAgentPrompts {
 
         source.lineSequence().forEach { line ->
             val section = when (line.trim()) {
+                "[$SUMMARISER_SECTION]" -> SUMMARISER_SECTION
                 "[$CHATBOT_SECTION]" -> CHATBOT_SECTION
                 "[$REFORMATTING_SECTION]" -> REFORMATTING_SECTION
                 else -> null
@@ -40,11 +42,13 @@ internal object AiAgentPrompts {
             ?: error("$ASSET_NAME is missing the required [$name] section")
 
         return AiAgentPromptSet(
+            summariser = requiredSection(SUMMARISER_SECTION),
             chatbot = requiredSection(CHATBOT_SECTION),
             reformatting = requiredSection(REFORMATTING_SECTION),
         )
     }
 
+    private const val SUMMARISER_SECTION = "AI_SUMMARISER"
     private const val CHATBOT_SECTION = "AI_CHATBOT"
     private const val REFORMATTING_SECTION = "AI_REFORMATTING"
 }

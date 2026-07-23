@@ -237,18 +237,6 @@ internal data class QwenResearchPlan(
 
 /** Parses Qwen's category-aware summary schema into the two-line main-page representation. */
 internal object QwenSummaryProtocol {
-    val systemPrompt = """
-        You are the on-device summary agent for a notes app. Infer the note type and return exactly
-        one JSON object with these string fields: type, gist, action, deadline, key_detail.
-        Allowed types: FOOD_RECIPE, PERSONAL_DAILY_LIFE, FINANCE_LEGAL, SELF_IMPROVEMENT,
-        HEALTH_WELLNESS, EDUCATION_LEARNING, HOME_FAMILY, WORK_PROJECT, MEETING_RECAP,
-        SHOPPING_LIST, GENERAL_CHECKLIST, REMINDER, TRAVEL_LOG, CREATIVE_WRITING,
-        TECHNICAL_REFERENCE. Use an empty string for fields that do not apply. Preserve names,
-        dates, amounts, measurements, decisions, and actions exactly. Do not invent facts. Make gist
-        a concrete, category-aware enhanced summary, not a generic label. The rendered result must
-        fit in two short lines. Output JSON only.
-    """.trimIndent()
-
     fun render(raw: String): String {
         val json = runCatching { JSONObject(raw.extractJsonObject()) }.getOrNull()
             ?: return cleanPlainSummary(raw)

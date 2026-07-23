@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.CircularProgressIndicator
@@ -64,6 +64,7 @@ internal data class ChatMessageUi(
     val author: ChatAuthor,
     val text: String,
     val isError: Boolean = false,
+    val isThinking: Boolean = false,
 )
 
 /** Full-screen, private chat surface backed by a multi-turn Google ADK session. */
@@ -110,7 +111,7 @@ internal fun AgentConversationDialog(
         if (outgoing.isBlank() || isSending) return
         input = ""
         messages += ChatMessageUi(ChatAuthor.USER, outgoing)
-        messages += ChatMessageUi(ChatAuthor.AGENT, "")
+        messages += ChatMessageUi(ChatAuthor.AGENT, "", isThinking = true)
         val replyIndex = messages.lastIndex
         isSending = true
         scope.launch {
@@ -118,7 +119,11 @@ internal fun AgentConversationDialog(
                 conversation.send(outgoing).collect { update ->
                     when (update) {
                         is AgentTurnUpdate.Partial -> {
-                            messages[replyIndex] = ChatMessageUi(ChatAuthor.AGENT, update.text)
+                            messages[replyIndex] = ChatMessageUi(
+                                ChatAuthor.AGENT,
+                                update.text,
+                                isThinking = true,
+                            )
                         }
                         is AgentTurnUpdate.Complete -> {
                             messages[replyIndex] = ChatMessageUi(ChatAuthor.AGENT, update.text)
@@ -202,14 +207,15 @@ internal fun AgentConversationDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     item { Spacer(Modifier.height(4.dp)) }
-                    itemsIndexed(messages) { index, message ->
+                    items(messages) { message ->
                         ConversationBubble(
                             message = message,
-                            showProgress = isSending && index == messages.lastIndex && message.text.isBlank(),
+                            showProgress = message.isThinking && message.text.isBlank(),
                             onInsert = if (
                                 message.author == ChatAuthor.AGENT &&
                                 message.text.isNotBlank() &&
-                                !message.isError
+                                !message.isError &&
+                                !message.isThinking
                             ) {
                                 { onInsertIntoNote(message.text) }
                             } else {
@@ -312,6 +318,7 @@ private fun ConversationBubble(
                         color = when {
                             message.isError -> MaterialTheme.colors.error
                             isUser -> MaterialTheme.colors.onPrimary
+                            message.isThinking -> Color.LightGray
                             else -> MaterialTheme.colors.onSurface
                         },
                     )
