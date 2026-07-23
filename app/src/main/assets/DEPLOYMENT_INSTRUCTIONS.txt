@@ -3,6 +3,12 @@ NOTE CLASSIFIER - DEPLOYMENT FILES (V2 PIPELINE)
 Generated: 2026-04-02
 ================================================================================
 
+SCOPE NOTE:
+This file documents the legacy category-classifier training/export pipeline.
+Completed chatbot, reformatting, and main-page summary output now runs through
+the on-device LiteRT-LM Qwen3 0.6B model. The classifier assets remain for
+compatibility, offline model validation, and historical tooling.
+
 OUTPUT FILES CREATED:
 ================================================================================
 

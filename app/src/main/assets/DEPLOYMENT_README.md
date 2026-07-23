@@ -1,127 +1,86 @@
-# AI Deployment Notes (MLC LLM - Llama 3.2 3B Instruct)
+# AI Deployment Notes (LiteRT-LM Qwen3 0.6B)
 
-This document describes the AI inference stack integrated into the Android app.
+This document describes the production AI inference stack integrated into the Android app.
 
 ## Runtime Overview
 
-- Automatic note summaries run on-device through `FastNoteSummarizer`, using
-  `note_classifier.tflite` as an optional category signal and deterministic
-  content extraction for the final preview.
-- Rewrite and question-answering are performed on-device via MLC LLM
-  (`ai.mlc.mlcllm.MLCEngine`).
-- The LLM is Llama 3.2 3B Instruct with q4f16_0 quantization.
-- Devices with less than 4 GB total RAM skip LLM-backed rewrite/question features and use local summary heuristics (`DeviceCapabilityChecker`).
-- Thermal throttling is applied on API 31+ devices when `PowerManager.thermalHeadroom` is critically low.
+- Qwen3 0.6B is the single on-device semantic and generative model for chatbot answers, note
+  reformatting, and completed main-page summaries.
+- The model runs through Google's LiteRT-LM Android runtime. ARM64 devices try the GPU backend
+  first and fall back to CPU; x86/x86_64 emulator profiles use CPU.
+- `LlamaEngineProvider` keeps one process-local engine warm so consecutive tasks do not repeatedly
+  load model weights.
+- Devices with less than 4 GB total RAM do not load the model.
+- Thermal throttling reduces generation budgets when Android reports critically low thermal
+  headroom.
 
-## Build-Time Requirements
+The Android app, rather than the model runtime, performs public web discovery, HTTPS retrieval,
+page extraction, caching, and citation formatting. Only a planned search query is sent to public
+search providers. Private note content remains on-device and retrieved evidence is passed back to
+Qwen in a bounded `web_research` block.
 
-The build has two Llama native ABI profiles:
+## Model Download
 
-| ABI | Model archive | TVM runtime source |
-|-----|---------------|--------------------|
-| `arm64-v8a` | `app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar` | `bash scripts/fetch_mlc_native.sh` |
-| `x86_64` | `app/src/main/assets/Llama-3.2-1B-Instruct-q4f32_1-MLC-android-x86_64.tar` | `TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh` |
-
-The checked-in model archive uses TVM FFI system-library metadata
-(`__tvm_ffi_*`, `library_bin`, and `library_ctx`). It requires a
-TVM FFI-capable `libtvm4j_runtime_packed.so`; the old `Android-09262024`
-binary APK runtime does not provide `ffi.SystemLib` and cannot load this archive.
-
-## TVM Runtime
-
-The packed TVM Android runtime must be present before building:
+The mixed-int4 model is not bundled in the APK. `LlamaModelManager` downloads the pinned
+`qwen3_0_6b_mixed_int4.litertlm` artifact from `litert-community/Qwen3-0.6B`, verifies its expected
+size, and stores it under:
 
 ```text
-mlc4j/src/main/jniLibs/<abi>/libtvm4j_runtime_packed.so
+filesDir/models/Qwen3-0.6B-LiteRT-LM/
 ```
 
-Install the MLC Python tooling, then build the runtime from MLC source:
-
-```bash
-bash scripts/install_mlc_llm.sh
-bash scripts/fetch_mlc_native.sh
-```
-
-For an x86_64 web or desktop emulator, build both the x86_64 model archive and
-runtime:
-
-```bash
-bash scripts/install_mlc_llm.sh
-TARGET_ABI=x86_64 bash scripts/compile_model_tar.sh
-TARGET_ABI=x86_64 bash scripts/fetch_mlc_native.sh
-```
-
-Gradle task `buildModelLibSo` validates that the runtime contains
-`ffi.SystemLib` and `TVMFFIEnvModRegisterSystemLibSymbol` before linking the
-model objects. This prevents builds that package the stale runtime and later fail
-with `Cannot find system lib with llama_q4f16_0`.
-
-## Model Library Archive
-
-The compiled model library is distributed as a tar archive bundled inside the APK:
-
-```text
-app/src/main/assets/Llama-3.2-3B-Instruct-q4f16_0-MLC-android.tar
-```
-
-The archive contains TVM system-lib object files such as `lib0.o` and
-`llama_q4f16_0_devc.o`. Gradle links those objects into:
-
-```text
-app/src/main/jniLibs/<abi>/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so
-```
-
-At runtime `LlamaEngine` loads that shared library with `System.load(path)` and
-passes `system://llama_q4f16_0` to `MLCEngine.reload()`, causing MLC to retrieve
-the registered module through `ffi.SystemLib`.
-
-Regenerate the arm64 model archive with:
-
-```bash
-bash scripts/compile_model_tar.sh
-```
-
-The script downloads the quantized weights from HuggingFace, runs
-`mlc_llm compile --target android --system-lib`, verifies the output, and writes
-the `.tar` to the assets directory.
-
-## Runtime Weight Download
-
-The model weights, approximately 2 GB, are not bundled in the APK. They are
-downloaded from HuggingFace on first use via the Settings screen and cached at:
-
-```text
-filesDir/models/Llama-3.2-3B-Instruct-q4f16_0-MLC/
-```
-
-The download is managed by `LlamaModelManager`, which exposes a `modelStatus`
-`StateFlow` for UI progress.
+The download is approximately 475 MB. Model status and download progress are exposed to the
+Settings UI through a `StateFlow`.
 
 ## AI Modes
 
-| Mode | Description |
-|------|-------------|
-| `SUMMARISE` | Concise note preview via the fast local summarizer; LLM fallback remains available only for direct engine callers |
-| `REWRITE` | Rewrites the note in a clean, professional style |
-| `QUESTION` | Answers a free-form question using optional note context |
+| Mode | Qwen workflow |
+|------|---------------|
+| `SUMMARISE` | Category-aware JSON summary, hierarchical reduction for long notes, grounding repair, and content-hash caching |
+| `REWRITE` | Global document plan, token-bounded structured fragments, continuation, protected-fact repair, and a consistent Markdown result |
+| `QUESTION` | Local related-note retrieval, Qwen web-research planning, evidence-grounded answer verification, and rolling per-note memory |
 
-## Latency Budgets
+All Qwen prompts append `/no_think` to the active user turn to avoid a hidden reasoning phase and
+improve time to first token.
 
-- Note summaries are generated without loading the Llama model and should return within a few seconds on the default Galaxy S24 Ultra target.
-- LLM summaries, if called directly, use a 3 second completion timeout.
-- Rewrite and question-answering use a 30 second completion timeout.
-- Question context is trimmed before inference so x86 CPU test runs remain bounded, even when slower than the target device.
+## Main-Page Summary Scheduling
 
-## Fallback Behavior
+Saving a note immediately stores a bounded plain-text placeholder so the UI remains responsive.
+Completed AI summaries always come from Qwen:
 
-When the model is unavailable, native artifacts are missing, the engine reports a
-background failure, or the device has insufficient RAM, AI operations fall back
-automatically to the lightweight rule-based heuristics in `Summarizer`.
+1. content-addressed cache lookup;
+2. serialized inference through the shared engine;
+3. salience-aware selection of beginning, middle, ending, structured, and fact-bearing chunks;
+4. per-chunk Qwen summaries followed by a Qwen reduction when needed;
+5. deterministic high-risk fact validation and one targeted Qwen repair pass.
 
-## Fast TFLite Summary Assets
+If Qwen is unavailable or a result remains ungrounded after repair, the app retains a plain
+truncated preview and marks the summarizer as being in fallback mode. That preview is not treated
+as an AI-generated summary.
 
-The files `note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`,
-`category_mapping.json`, and `deployment_metadata.json` are retained in
-`app/src/main/assets/` for the fast summary path. The classifier does not
-generate prose directly; `FastNoteSummarizer` combines the category signal with
-content extraction so summaries stay specific and less repetitive.
+## Reformatting and Online Evidence
+
+Ordinary formatting is fully offline. Online retrieval is enabled only by an explicit instruction
+such as fact checking, citation verification, applying APA/MLA/Chicago guidance, or using linked
+public material. Retrieved evidence may support only that requested operation and may not silently
+enrich the note.
+
+The reformatter protects URLs, code, numbers, dates, measurements, attachment placeholders, and
+other high-risk facts. It preserves rich-text citations and copies attachment metadata when a
+reformatted note is created as a new note.
+
+## Conversation Memory and Privacy
+
+Qwen maintains a compact memory containing durable preferences, decisions, constraints, named
+entities, and unresolved questions with provenance labels. Memory for ordinary notes is stored
+locally by note ID. Memory for locked notes remains process-local and is not written to persistent
+preferences.
+
+Related-note retrieval excludes locked notes unless the user has already unlocked them for the
+current process.
+
+## Legacy Assets
+
+`note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, and the offline
+training scripts remain packaged for compatibility, model verification, and historical tooling.
+They no longer generate the completed main-page AI summary.

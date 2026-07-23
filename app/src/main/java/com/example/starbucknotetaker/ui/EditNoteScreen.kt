@@ -130,6 +130,7 @@ fun EditNoteScreen(
     onEnablePinCheck: () -> Unit,
     summarizerState: Summarizer.SummarizerState,
     openAttachment: suspend (String) -> ByteArray?,
+    relatedNotes: List<Note> = emptyList(),
     onRewriteNote: ((Long, String?, String, RichTextDocument, RewriteDestination) -> Unit)? = null,
     inferenceProgress: LlamaEngine.InferenceProgress = LlamaEngine.InferenceProgress.Idle,
 ) {
@@ -1422,6 +1423,9 @@ fun EditNoteScreen(
     if (showConversation) {
         AgentConversationDialog(
             noteContext = conversationNoteContext,
+            memoryNoteId = note.id,
+            persistMemory = !note.isLocked,
+            relatedNotes = relatedNotes,
             onDismiss = { showConversation = false },
             onInsertIntoNote = { response ->
                 appendAgentText(response)

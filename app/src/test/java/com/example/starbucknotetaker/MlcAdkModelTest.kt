@@ -93,7 +93,7 @@ class MlcAdkModelTest {
         val backend = RecordingBackend(result = "ok", promptCharLimit = 2_200)
         val model = MlcAdkModel(backend)
 
-        assertEquals(1_000, model.recommendedReformatChunkChars)
+        assertEquals(800, model.recommendedReformatChunkChars)
     }
 
     @Test
@@ -110,10 +110,11 @@ class MlcAdkModelTest {
 
         assertTrue(result.contains("## Meeting"))
         assertTrue(result.contains("tomorrow"))
-        assertTrue(fakeModel.requests.single().config.systemInstruction
+        assertEquals(2, fakeModel.requests.size)
+        assertTrue(fakeModel.requests.last().config.systemInstruction
             ?.parts?.first()?.text.orEmpty().contains("Correct spelling"))
-        assertTrue(fakeModel.requests.single().contents.last().parts.first().text.orEmpty()
-            .contains("<note>"))
+        assertTrue(fakeModel.requests.last().contents.last().parts.first().text.orEmpty()
+            .contains("<structured_note_fragment>"))
     }
 
     @Test
@@ -137,7 +138,8 @@ class MlcAdkModelTest {
         assertTrue(secondTurnText.contains("When is launch?"))
         assertTrue(secondTurnText.contains("A concise reply."))
         assertTrue(secondTurnText.contains("What day was that?"))
-        assertTrue(secondTurnText.contains("<current_note>\nLaunch on Friday.\n</current_note>"))
+        assertTrue(secondTurnText.contains("<local_note role=\"current\""))
+        assertTrue(secondTurnText.contains("Launch on Friday."))
         assertTrue(secondTurnText.contains("<recent_conversation>"))
         assertEquals(
             AiAgentPrompts.load(ApplicationProvider.getApplicationContext()).chatbot,

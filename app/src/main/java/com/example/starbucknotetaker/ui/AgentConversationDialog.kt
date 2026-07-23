@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.starbucknotetaker.AgentTurnUpdate
+import com.example.starbucknotetaker.ConversationMemoryStore
+import com.example.starbucknotetaker.Note
 import com.example.starbucknotetaker.NoteAiAgent
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -70,13 +72,24 @@ internal fun AgentConversationDialog(
     noteContext: String,
     onDismiss: () -> Unit,
     onInsertIntoNote: (String) -> Unit,
+    memoryNoteId: Long? = null,
+    persistMemory: Boolean = true,
+    relatedNotes: List<Note> = emptyList(),
 ) {
     val context = LocalContext.current
-    val conversation = remember(noteContext) {
+    val memoryStore = remember { ConversationMemoryStore(context.applicationContext) }
+    val conversation = remember(noteContext, memoryNoteId, persistMemory, relatedNotes) {
         NoteAiAgent.conversation(
             context = context.applicationContext,
             sessionId = UUID.randomUUID().toString(),
             noteContext = noteContext,
+            relatedNotes = relatedNotes.filterNot { it.id == memoryNoteId },
+            initialMemory = memoryNoteId
+                ?.let { memoryStore.get(it, persistMemory) }
+                .orEmpty(),
+            onMemoryUpdated = { memory ->
+                memoryNoteId?.let { memoryStore.put(it, memory, persistMemory) }
+            },
         )
     }
     val messages = remember {

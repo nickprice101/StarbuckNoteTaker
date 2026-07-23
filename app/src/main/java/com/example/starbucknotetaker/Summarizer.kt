@@ -5,6 +5,8 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
@@ -12,10 +14,9 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * On-device summariser backed by [LlamaEngine] (LiteRT-LM + Qwen3 0.6B).
  *
- * When the LiteRT-LM model has not been downloaded yet, or when the native runtime
- * is unavailable, all inference automatically falls back to the lightweight
- * rule-based heuristics defined in this class — behaviour identical to the
- * previous TFLite path.
+ * Completed summaries always come from Qwen. When the model is unavailable or a
+ * Qwen result fails grounding checks, callers receive a bounded plain-text
+ * placeholder that is not represented as an AI-generated summary.
  *
  * Callers that previously constructed [Summarizer] with a custom
  * [interpreterFactory] (e.g. in unit tests) can continue to do so; the
@@ -58,11 +59,9 @@ class Summarizer(
     private val _state = MutableStateFlow<SummarizerState>(SummarizerState.Ready)
     val state: StateFlow<SummarizerState> = _state
 
-    private val fastSummarizer by lazy {
-        FastNoteSummarizer(context, assetLoader, logger)
-    }
-
     private val engine by lazy { LlamaEngineProvider.acquire(context) }
+    private val summaryCache by lazy { QwenSummaryCache(context) }
+    private val summaryMutex = Mutex()
 
     /** Live streaming inference progress from the underlying [LlamaEngine]. */
     val inferenceProgress: StateFlow<LlamaEngine.InferenceProgress>
@@ -75,16 +74,15 @@ class Summarizer(
     // ------------------------------------------------------------------
 
     /**
-     * Warms up the summariser engine. When the LiteRT-LM model is present the
-     * native context is initialised; otherwise the method returns [SummarizerState.Fallback]
-     * to signal that heuristic summaries will be used.
+     * Warms up the Qwen engine. When the LiteRT-LM model is absent, this returns
+     * [SummarizerState.Fallback] to signal that plain placeholders will be used.
      */
     suspend fun warmUp(): SummarizerState = withContext(Dispatchers.Default) {
         _state.emit(SummarizerState.Loading)
         try {
-            fastSummarizer.warmUp()
-            _state.emit(SummarizerState.Ready)
-            debugSink("warmUp: fast summarizer ready")
+            val ready = engine.warmUp()
+            _state.emit(if (ready) SummarizerState.Ready else SummarizerState.Fallback)
+            debugSink("warmUp: Qwen ready=$ready")
         } catch (t: Throwable) {
             logger("warm up failed", t)
             _state.emit(SummarizerState.Error(t.message ?: "warmUp failed"))
@@ -95,28 +93,87 @@ class Summarizer(
     /**
      * Generates a concise 1–3 line summary of [text].
      *
-     * Uses the LLM when the model is available, otherwise falls back to the
-     * rule-based heuristic summariser.
+     * Uses Qwen when the model is available, otherwise returns a bounded plain preview.
      */
     suspend fun summarize(text: String): String = withContext(Dispatchers.Default) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return@withContext ""
-        val trace = mutableListOf<String>()
-        try {
-            _state.emit(SummarizerState.Loading)
-            debugSink("summarize: input length=${trimmed.length}")
-            trace += "fast summarizing text of length ${trimmed.length}"
-            val result = fastSummarizer.summarize(trimmed)
-            _state.emit(SummarizerState.Ready)
-            trace += "result: $result"
-            lastDebugTrace.set(trace)
-            result
-        } catch (t: Throwable) {
-            logger("summarize failed", t)
-            trace += "fallback reason: ${t.message}"
-            lastDebugTrace.set(trace)
-            _state.emit(SummarizerState.Fallback)
-            fallbackSummaryInternal(trimmed)
+        summaryMutex.withLock {
+            val trace = mutableListOf<String>()
+            try {
+                summaryCache.get(trimmed)?.let { cached ->
+                    _state.emit(SummarizerState.Ready)
+                    trace += "Qwen summary cache hit"
+                    lastDebugTrace.set(trace)
+                    return@withLock cached
+                }
+                engine.agentUnavailableReason()?.let { unavailable ->
+                    trace += "Qwen unavailable: $unavailable"
+                    lastDebugTrace.set(trace)
+                    _state.emit(SummarizerState.Fallback)
+                    return@withLock smartTruncate(lightweightPreview(trimmed), MAX_SUMMARY_LENGTH)
+                }
+
+                _state.emit(SummarizerState.Loading)
+                debugSink("summarize: Qwen input length=${trimmed.length}")
+                val chunks = selectSummaryChunks(
+                    NoteTextChunker.chunkForQwen(
+                        text = trimmed,
+                        maxChars = QWEN_SUMMARY_CHUNK_CHARS,
+                        maxTokens = QWEN_SUMMARY_CHUNK_TOKENS,
+                    ),
+                )
+                trace += "Qwen hierarchical chunks=${chunks.size}"
+                val partials = chunks.mapIndexed { index, chunk ->
+                    engine.summarise(
+                        text = chunk,
+                        taskId = "summary-part-${trimmed.hashCode()}-$index",
+                    )
+                }
+                var result = if (partials.size == 1) {
+                    partials.single()
+                } else {
+                    engine.summarise(
+                        text = buildString {
+                            appendLine(
+                                "Combine these Qwen-generated section summaries into one final " +
+                                    "category-aware two-line preview. Preserve exact facts.",
+                            )
+                            partials.forEachIndexed { index, partial ->
+                                appendLine("Section ${index + 1}: $partial")
+                            }
+                        },
+                        taskId = "summary-reduce-${trimmed.hashCode()}",
+                    )
+                }
+
+                val unsupported = AiGroundingValidator.unsupportedFacts(trimmed, result)
+                if (unsupported.isNotEmpty()) {
+                    trace += "Qwen grounding repair: ${unsupported.joinToString()}"
+                    result = engine.repairSummary(
+                        source = summaryEvidence(trimmed, unsupported),
+                        draft = result,
+                        unsupportedFacts = unsupported,
+                        taskId = "summary-repair-${trimmed.hashCode()}",
+                    )
+                }
+                val remainingUnsupported = AiGroundingValidator.unsupportedFacts(trimmed, result)
+                require(remainingUnsupported.isEmpty()) {
+                    "Qwen summary contained unsupported facts: ${remainingUnsupported.joinToString()}"
+                }
+                require(result.isNotBlank()) { "Qwen summary was empty" }
+                summaryCache.put(trimmed, result)
+                _state.emit(SummarizerState.Ready)
+                trace += "Qwen result: $result"
+                lastDebugTrace.set(trace)
+                result
+            } catch (t: Throwable) {
+                logger("Qwen summarize failed", t)
+                trace += "fallback reason: ${t.message}"
+                lastDebugTrace.set(trace)
+                _state.emit(SummarizerState.Fallback)
+                smartTruncate(lightweightPreview(trimmed), MAX_SUMMARY_LENGTH)
+            }
         }
     }
 
@@ -161,70 +218,71 @@ class Summarizer(
             }
         }
 
-    /** Returns a rule-based heuristic summary (no LLM call). */
+    /** Returns a bounded plain preview (no model call). */
     suspend fun fallbackSummary(text: String): String = fallbackSummary(text, null)
 
-    /** Returns a rule-based heuristic summary (no LLM call). */
+    /** Returns a bounded plain preview (no model call). */
     suspend fun fallbackSummary(
         text: String,
         @Suppress("UNUSED_PARAMETER") event: NoteEvent?,
     ): String = withContext(Dispatchers.Default) {
-        runCatching { fastSummarizer.summarize(text) }
-            .getOrElse { fallbackSummaryInternal(text) }
+        smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH)
     }
 
-    /** Synchronous rule-based preview (used as a placeholder until async result arrives). */
+    /** Synchronous plain preview used as a placeholder until Qwen finishes. */
     fun quickFallbackSummary(text: String): String =
-        runCatching { fastSummarizer.summarize(text) }
-            .getOrElse { smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH) }
+        smartTruncate(lightweightPreview(text), MAX_SUMMARY_LENGTH)
 
     /** Consumes and returns the debug trace from the last [summarize] call. */
     fun consumeDebugTrace(): List<String> = lastDebugTrace.getAndSet(emptyList())
 
     /** Releases the native model context and associated resources. */
     fun close() {
-        fastSummarizer.close()
         LlamaEngineProvider.releaseAfterIdle()
     }
 
-    // ------------------------------------------------------------------
-    // Rule-based fallback logic
-    // ------------------------------------------------------------------
-
-    private fun fallbackSummaryInternal(text: String): String {
-        val contentOnly = extractContentForFallback(text)
-        val normalized = contentOnly.trim().replace(WHITESPACE_REGEX, " ")
-        if (normalized.isEmpty()) return ""
-        val truncated = normalized.take(FALLBACK_CHAR_LIMIT)
-        return formatFallbackAcrossTwoLines(truncated)
+    private fun selectSummaryChunks(chunks: List<String>): List<String> {
+        if (chunks.size <= MAX_QWEN_SUMMARY_CHUNKS) return chunks
+        val middle = chunks.withIndex()
+            .drop(1)
+            .dropLast(1)
+            .sortedByDescending { (_, chunk) -> summarySalience(chunk) }
+            .take(MAX_QWEN_SUMMARY_CHUNKS - 2)
+            .sortedBy(IndexedValue<String>::index)
+            .map(IndexedValue<String>::value)
+        return buildList {
+            add(chunks.first())
+            addAll(middle)
+            add(chunks.last())
+        }.distinct()
     }
 
-    private fun extractContentForFallback(text: String): String {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return ""
-        val separatorIndex = trimmed.indexOf("\n\n")
-        if (separatorIndex >= 0 && separatorIndex + 2 < trimmed.length) {
-            val afterSeparator = trimmed.substring(separatorIndex + 2).trim()
-            if (afterSeparator.isNotEmpty()) return afterSeparator
+    private fun summarySalience(chunk: String): Int {
+        val lower = chunk.lowercase(Locale.US)
+        val priorityTerms = SUMMARY_PRIORITY_TERMS.count { lower.contains(it) }
+        val structuredLines = chunk.lines().count { line ->
+            line.trimStart().let { it.startsWith("#") || it.startsWith("-") || it.startsWith("[") }
         }
-        if (trimmed.startsWith("Title:", ignoreCase = true)) {
-            return trimmed.removePrefix("Title:").trim()
-        }
-        return trimmed
+        return priorityTerms * 5 + structuredLines * 2 +
+            AiGroundingValidator.protectedFacts(chunk).size * 3
     }
 
-    private fun formatFallbackAcrossTwoLines(truncated: String): String {
-        if (truncated.isEmpty()) return ""
-        if (truncated.length <= FALLBACK_FIRST_LINE_TARGET) return truncated
-        val desiredBreak = minOf(truncated.length, FALLBACK_FIRST_LINE_TARGET)
-        val whitespaceBreak = truncated.lastIndexOf(' ', desiredBreak)
-        val breakIndex = when {
-            whitespaceBreak in 0 until truncated.length - 1 -> whitespaceBreak + 1
-            truncated.length > FALLBACK_FIRST_LINE_TARGET -> FALLBACK_FIRST_LINE_TARGET
-            else -> truncated.length
+    private fun summaryEvidence(source: String, facts: Set<String>): String {
+        if (source.length <= SUMMARY_REPAIR_EVIDENCE_CHARS) return source
+        val windows = facts.mapNotNull { fact ->
+            val index = source.indexOf(fact, ignoreCase = true)
+            if (index < 0) null else {
+                val start = (index - SUMMARY_FACT_WINDOW_CHARS).coerceAtLeast(0)
+                val end = (index + fact.length + SUMMARY_FACT_WINDOW_CHARS).coerceAtMost(source.length)
+                source.substring(start, end)
+            }
         }
-        if (breakIndex <= 0 || breakIndex >= truncated.length) return truncated
-        return truncated.substring(0, breakIndex) + "\n" + truncated.substring(breakIndex)
+        val head = source.take(SUMMARY_REPAIR_EVIDENCE_CHARS / 3)
+        val tail = source.takeLast(SUMMARY_REPAIR_EVIDENCE_CHARS / 3)
+        return (listOf(head) + windows + tail)
+            .distinct()
+            .joinToString("\n[...]\n")
+            .take(SUMMARY_REPAIR_EVIDENCE_CHARS)
     }
 
     // ------------------------------------------------------------------
@@ -241,14 +299,21 @@ class Summarizer(
 
         private const val MAX_SUMMARY_LENGTH = 140
         private const val MAX_PREVIEW_LENGTH = 160
-        private const val FALLBACK_CHAR_LIMIT = 150
-        private const val FALLBACK_FIRST_LINE_TARGET = FALLBACK_CHAR_LIMIT / 2
         internal val WHITESPACE_REGEX = Regex("\\s+")
         private val TITLE_PREFIX_REGEX = Regex("^\\s*Title:\\s*", RegexOption.IGNORE_CASE)
         private val SENTENCE_CAPTURE = Regex("([^.!?]+[.!?])")
         private val TOKEN_SPLIT_REGEX = Regex("\\s+")
         private val STRIP_PUNCTUATION_REGEX = Regex("[\\p{Punct}]")
         private const val MODEL_SEQUENCE_LENGTH = 120
+        private const val QWEN_SUMMARY_CHUNK_CHARS = 3_000
+        private const val QWEN_SUMMARY_CHUNK_TOKENS = 900
+        private const val MAX_QWEN_SUMMARY_CHUNKS = 4
+        private const val SUMMARY_REPAIR_EVIDENCE_CHARS = 3_000
+        private const val SUMMARY_FACT_WINDOW_CHARS = 220
+        private val SUMMARY_PRIORITY_TERMS = listOf(
+            "action", "assigned", "deadline", "decided", "due", "follow-up", "important",
+            "meeting", "must", "next", "reminder", "todo", "urgent",
+        )
 
         /**
          * Returns a lightweight heuristic preview of [text] (≤2 sentences).

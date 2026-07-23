@@ -1,39 +1,48 @@
 # AI / ML assets
 
-This directory contains assets bundled into the APK and related deployment documentation.
+This directory contains APK assets and deployment documentation for the app's on-device AI.
 
 ## Active runtime
 
-Automatic note summaries use a fast local path:
+Qwen3 0.6B through LiteRT-LM is the single semantic and generative model for:
 
-- `note_classifier.tflite` provides an optional category signal.
-- `tokenizer_vocabulary_v2.txt` keeps Android tokenization aligned with the exported model.
-- `category_mapping.json` maps classifier outputs to note categories.
-- `FastNoteSummarizer` generates the final preview from the note contents, not from category-only templates.
+- chatbot research planning, grounded answers, verification, and conversation memory;
+- hierarchical rich-text note reformatting and repair;
+- completed category-aware main-page summaries.
 
-Interactive rewrite and question-answering use **MLC LLM** with Llama 3.2 3B Instruct. Gradle builds ABI-specific model libraries under `app/src/main/jniLibs/<abi>/` from the MLC tar assets before packaging (see `DEPLOYMENT_README.md`). Model weights (~2 GB) are downloaded at runtime by `LlamaModelManager`.
+`LlamaModelManager` downloads the pinned mixed-int4 model (~475 MB) at runtime. Public web
+resources are discovered and extracted by Android; Qwen receives bounded evidence blocks and
+private note text remains on-device.
 
-## Fast summary assets
+See `DEPLOYMENT_README.md` for runtime, privacy, fallback, and scheduling details.
+
+## Legacy classifier assets
+
+The following assets remain for compatibility, offline training/model verification, and historical
+tooling. They no longer generate completed main-page AI summaries.
 
 ### `note_classifier.tflite`
-- TensorFlow Lite classifier model used as a fast category hint.
+
+- TensorFlow Lite category classifier.
 - Input contract: token IDs (`int32[1,120]`).
 
 ### `tokenizer_vocabulary_v2.txt`
-- Vocabulary exported from the TFLite training pipeline.
+
+- Vocabulary exported from the classifier training pipeline.
 
 ### `category_mapping.json`
-- Maps output indices to category labels.
+
+- Maps classifier output indices to category labels.
 
 ### `deployment_metadata.json`
-- Training/deployment metadata (version and quality indicators).
+
+- Classifier training/deployment metadata.
 
 ### `note_classifier_smoke_test_output.txt`
-- Captured sample output from legacy TFLite verification checks.
 
-## Notes
+- Captured sample output from classifier verification checks.
 
-- All AI inference is performed entirely on-device.
-- Summaries do not require the Llama model download and should complete in a few seconds or less.
-- If the TFLite classifier is unavailable, `FastNoteSummarizer` falls back to heuristic category detection and still generates content-aware summaries.
+## Fallback
 
+When Qwen is unavailable, the UI may show a bounded plain-text preview. It is not presented as an
+AI-generated summary.

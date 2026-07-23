@@ -842,6 +842,7 @@ class NoteViewModel(
         sourceContent: String? = null,
         sourceStyledContent: RichTextDocument? = null,
         destination: RewriteDestination = RewriteDestination.NEW_NOTE,
+        reformatInstruction: String? = null,
     ): Long? {
         val ctx = context ?: return null
         val note = getNoteById(noteId) ?: return null
@@ -855,7 +856,7 @@ class NoteViewModel(
                 note.styledContent?.text?.trim() == text -> note.styledContent.trimmed()
             else -> MarkdownRichText.parse(text)
         }
-        val formatSource = attachmentTagRegex.replace(CitationMarkdown.encode(sourceDocument), " ")
+        val formatSource = CitationMarkdown.encode(sourceDocument)
             .replace(Regex("[ \\t]+"), " ")
             .trim()
         val rewrittenNoteId = when (destination) {
@@ -864,16 +865,26 @@ class NoteViewModel(
                     "Reformatted - ${sourceTitle?.trim()?.takeIf { it.isNotBlank() } ?: note.title}"
                         .take(80)
                 val pendingCopy = MarkdownRichText.parse(formatSource)
-                addNote(
+                val copyId = addNote(
                     title = copyTitle,
                     content = pendingCopy.text,
                     styledContent = pendingCopy,
                     images = emptyList(),
                     files = emptyList(),
-                    linkPreviews = emptyList(),
+                    linkPreviews = note.linkPreviews,
                     skipAiSummary = true,
                     isLocked = note.isLocked,
                 )
+                val copyIndex = _notes.indexOfFirst { it.id == copyId }
+                if (copyIndex >= 0) {
+                    _notes[copyIndex] = _notes[copyIndex].copy(
+                        images = note.images,
+                        files = note.files,
+                        linkPreviews = note.linkPreviews,
+                    )
+                    pin?.let { store?.saveNotes(_notes, it) }
+                }
+                copyId
             }
             RewriteDestination.CURRENT_NOTE -> {
                 val updated = applyRewriteToNote(
@@ -897,6 +908,7 @@ class NoteViewModel(
             text = formatSource,
             noteId = rewrittenNoteId,
             requestId = requestId,
+            reformatInstruction = reformatInstruction,
         )
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -925,9 +937,18 @@ class NoteViewModel(
         if (trimmedQuestion.isBlank()) return null
 
         if (ProfessionalNoteFormatter.isRewriteRequest(trimmedQuestion)) {
-            return rewriteNote(noteId)
+            return rewriteNote(noteId, reformatInstruction = trimmedQuestion)
         }
 
+        val localContext = LocalNoteContextRetriever.retrieve(
+            question = trimmedQuestion,
+            currentNote = note,
+            notes = _notes,
+            canRead = { candidate ->
+                !candidate.isLocked || candidate.id in unlockedNoteIds
+            },
+            maxChars = LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT,
+        )
         val requestId = java.util.UUID.randomUUID().toString()
         rememberAnswerStatus(requestId, "Received question")
         rememberAnswerStatus(requestId, "Starting on-device AI")
@@ -957,9 +978,8 @@ class NoteViewModel(
             text = trimmedQuestion,
             noteId = noteId,
             requestId = requestId,
-            contextText = note.content
-                .take(LlamaEngine.QUESTION_CONTEXT_CHAR_LIMIT)
-                .takeIf { it.isNotBlank() },
+            contextText = localContext.takeIf { it.isNotBlank() },
+            persistConversationMemory = !note.isLocked,
         )
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
