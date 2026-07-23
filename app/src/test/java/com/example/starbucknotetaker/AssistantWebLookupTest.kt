@@ -175,6 +175,66 @@ class AssistantWebLookupTest {
 
         assertTrue(answer.contains("[Example](https://example.com/one)"))
         assertTrue(answer.contains("A concise result snippet."))
+        assertFalse(answer.contains("Sources:"))
+        assertTrue(answer.endsWith("[Example](https://example.com/one)"))
+    }
+
+    @Test
+    fun citationsMoveFromSourceListToEveryRelatedParagraph() {
+        val url = "https://example.com/heat-pumps"
+        val result = WebLookupResult(
+            query = "heat pumps",
+            results = listOf(
+                WebLookupEntry(
+                    title = "Heat pump guide",
+                    url = url,
+                    snippet = "Heat pumps transfer thermal energy and reduce electricity demand " +
+                        "in mild conditions.",
+                ),
+            ),
+        )
+        val answer = """
+            Heat pumps transfer thermal energy into a building.
+
+            In mild conditions, heat pumps can reduce electricity demand.
+
+            Sources:
+            - [Example]($url)
+        """.trimIndent()
+
+        val formatted = AssistantWebLookup.appendMarkdownSources(answer, result)
+        val paragraphs = formatted.split("\n\n")
+
+        assertFalse(formatted.contains("Sources:"))
+        assertEquals(2, Regex(Regex.escape(url)).findAll(formatted).count())
+        assertTrue(paragraphs[0].endsWith("[Example]($url)"))
+        assertTrue(paragraphs[1].endsWith("[Example]($url)"))
+    }
+
+    @Test
+    fun duplicateCitationsAreConsolidatedAfterLastSupportedText() {
+        val url = "https://example.com/facts"
+        val result = WebLookupResult(
+            query = "facts",
+            results = listOf(
+                WebLookupEntry(
+                    title = "Facts",
+                    url = url,
+                    snippet = "The first fact and second fact are related.",
+                ),
+            ),
+        )
+
+        val formatted = AssistantWebLookup.appendMarkdownSources(
+            "The first fact [Example]($url) and the second fact [Example]($url).",
+            result,
+        )
+
+        assertEquals(1, Regex(Regex.escape(url)).findAll(formatted).count())
+        assertEquals(
+            "The first fact and the second fact. [Example]($url)",
+            formatted,
+        )
     }
 
     @Test

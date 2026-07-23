@@ -35,4 +35,13 @@ class CitationTextTest {
             citationSiteStyle("https://youtube.com/watch?v=123").background,
         )
     }
+
+    @Test
+    fun `citation pills request the favicon from the linked website`() {
+        assertEquals(
+            "https://science.nasa.gov/favicon.ico",
+            faviconUrl("https://science.nasa.gov/mission/webb/"),
+        )
+        assertEquals(null, faviconUrl("not a link"))
+    }
 }

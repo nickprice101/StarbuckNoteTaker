@@ -130,7 +130,7 @@ fun EditNoteScreen(
     onEnablePinCheck: () -> Unit,
     summarizerState: Summarizer.SummarizerState,
     openAttachment: suspend (String) -> ByteArray?,
-    onRewriteNote: ((Long, String?, String, RewriteDestination) -> Unit)? = null,
+    onRewriteNote: ((Long, String?, String, RichTextDocument, RewriteDestination) -> Unit)? = null,
     inferenceProgress: LlamaEngine.InferenceProgress = LlamaEngine.InferenceProgress.Idle,
 ) {
     var title by remember { mutableStateOf(note.title) }
@@ -631,6 +631,25 @@ fun EditNoteScreen(
         }
     }.trim()
 
+    fun currentDraftStyledContent(): RichTextDocument {
+        val builder = RichTextDocumentBuilder()
+        var imageIndex = 0
+        var fileIndex = 0
+        var linkIndex = 0
+        blocks.forEach { block ->
+            when (block) {
+                is EditBlock.Text -> {
+                    builder.append(block.value.toDocument())
+                    builder.appendPlain("\n")
+                }
+                is EditBlock.Image -> builder.appendPlain("[[image:${imageIndex++}]]\n")
+                is EditBlock.File -> builder.appendPlain("[[file:${fileIndex++}]]\n")
+                is EditBlock.LinkPreview -> builder.appendPlain("[[link:${linkIndex++}]]\n")
+            }
+        }
+        return builder.build().trimmed()
+    }
+
     Scaffold(
         scaffoldState = scaffoldState,
         topBar = {
@@ -667,10 +686,12 @@ fun EditNoteScreen(
                                 ReformatDestinationDialog(
                                     onDismiss = { showReformatDialog = false },
                                     onReformat = { destination ->
+                                        val styledDraft = currentDraftStyledContent()
                                         onRewriteNote(
                                             note.id,
                                             title,
-                                            currentDraftContent(),
+                                            styledDraft.text,
+                                            styledDraft,
                                             destination,
                                         )
                                         showReformatDialog = false

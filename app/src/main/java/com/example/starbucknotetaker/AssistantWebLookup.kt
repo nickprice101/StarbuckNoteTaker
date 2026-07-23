@@ -291,22 +291,14 @@ internal class AssistantWebLookup(
             if (webLookup.results.isEmpty()) return INTERNET_REQUIRED_MESSAGE
             val primary = webLookup.results.first()
             return buildString {
-                appendLine(primary.snippet.ifBlank { "Research results for ${question.trim()}." })
-                appendLine()
-                appendLine("Sources:")
-                webLookup.results.take(3).forEach { appendLine("- ${it.markdownLink()}") }
+                append(primary.snippet.ifBlank { "Research results for ${question.trim()}." }.trim())
+                append(' ')
+                append(primary.markdownLink())
             }.trim()
         }
 
         fun appendMarkdownSources(answer: String, webLookup: WebLookupResult): String {
-            val missing = webLookup.results.filterNot { answer.contains(it.url, ignoreCase = true) }.take(3)
-            if (missing.isEmpty()) return answer.trim()
-            return buildString {
-                append(answer.trim())
-                if (isNotEmpty()) appendLine().appendLine()
-                appendLine("Sources:")
-                missing.forEach { appendLine("- ${it.markdownLink()}") }
-            }.trim()
+            return AssistantCitationFormatter.format(answer, webLookup)
         }
 
         private fun defaultSearchProviders(httpClient: HttpClient): List<WebSearchProvider> = listOf(
@@ -409,7 +401,11 @@ internal data class WebLookupResult(
             error?.let { appendLine("Research error: $it") }
             return@buildString
         }
-        appendLine("Use relevant facts below to answer directly. Cite sources with the website name.")
+        appendLine(
+            "Use relevant facts below to answer directly. Put each Markdown source link immediately " +
+                "after the final claim it supports in that paragraph. Cite a source again when it " +
+                "supports another paragraph. Do not create a Sources or References section.",
+        )
         results.forEachIndexed { index, result ->
             appendLine()
             appendLine("Source ${index + 1}: ${result.title}")

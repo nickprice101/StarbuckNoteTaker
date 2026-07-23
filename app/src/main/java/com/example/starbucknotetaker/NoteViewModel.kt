@@ -40,6 +40,7 @@ import com.example.starbucknotetaker.richtext.StyleRange
 import com.example.starbucknotetaker.richtext.RichTextDocument
 import com.example.starbucknotetaker.richtext.RichTextStyle
 import com.example.starbucknotetaker.richtext.MarkdownRichText
+import com.example.starbucknotetaker.richtext.CitationMarkdown
 
 /**
  * ViewModel storing notes in memory.
@@ -839,6 +840,7 @@ class NoteViewModel(
         noteId: Long,
         sourceTitle: String? = null,
         sourceContent: String? = null,
+        sourceStyledContent: RichTextDocument? = null,
         destination: RewriteDestination = RewriteDestination.NEW_NOTE,
     ): Long? {
         val ctx = context ?: return null
@@ -847,7 +849,13 @@ class NoteViewModel(
         if (text.isBlank()) return null
 
         val attachmentTags = attachmentTagRegex.findAll(text).map { it.value }.toList()
-        val formatSource = attachmentTagRegex.replace(text, " ")
+        val sourceDocument = when {
+            sourceStyledContent?.text?.trim() == text -> sourceStyledContent.trimmed()
+            (sourceContent == null || note.content.trim() == text) &&
+                note.styledContent?.text?.trim() == text -> note.styledContent.trimmed()
+            else -> MarkdownRichText.parse(text)
+        }
+        val formatSource = attachmentTagRegex.replace(CitationMarkdown.encode(sourceDocument), " ")
             .replace(Regex("[ \\t]+"), " ")
             .trim()
         val rewrittenNoteId = when (destination) {
@@ -1192,15 +1200,17 @@ class NoteViewModel(
         val index = _notes.indexOfFirst { it.id == noteId }
         if (index == -1) return false
         val note = _notes[index]
+        val sourceStyled = note.styledContent ?: RichTextDocument.fromPlainText(note.content)
         val attachmentTags = attachmentTagsOverride
             ?: attachmentTagRegex.findAll(note.content).map { it.value }.toList()
         val markdownBody = attachmentTagRegex.replace(rewrittenContent, " ").trim()
         if (markdownBody.isBlank()) return false
+        val linkPreservedBody = CitationMarkdown.preserve(sourceStyled, markdownBody)
         val markdownWithAttachments = if (attachmentTags.isEmpty()) {
-            markdownBody
+            linkPreservedBody
         } else {
             buildString {
-                append(markdownBody)
+                append(linkPreservedBody)
                 append("\n\n## Attachments\n")
                 append(attachmentTags.joinToString("\n"))
             }

@@ -47,4 +47,41 @@ class MarkdownRichTextTest {
             .single()
         assertEquals("https://example.com/brief", citation.url)
     }
+
+    @Test
+    fun encodesSemanticCitationsForAiReformatting() {
+        val document = MarkdownRichText.parse(
+            "Read [the brief](https://example.com/brief) before the meeting.",
+        )
+
+        assertEquals(
+            "Read [the brief](https://example.com/brief) before the meeting.",
+            CitationMarkdown.encode(document),
+        )
+    }
+
+    @Test
+    fun restoresCitationsOmittedByAiInTheirClosestParagraphs() {
+        val source = MarkdownRichText.parse(
+            """
+            Heat pumps transfer thermal energy [Example](https://example.com/heat).
+
+            Efficient heat pumps reduce electricity demand [Example](https://example.com/heat).
+            """.trimIndent(),
+        )
+
+        val restored = CitationMarkdown.preserve(
+            source,
+            """
+            Heat pumps move thermal energy into a building.
+
+            Efficient systems reduce electricity demand.
+            """.trimIndent(),
+        )
+        val paragraphs = restored.split("\n\n")
+
+        assertEquals(2, Regex("https://example.com/heat").findAll(restored).count())
+        assertTrue(paragraphs[0].endsWith("[Example](https://example.com/heat)"))
+        assertTrue(paragraphs[1].endsWith("[Example](https://example.com/heat)"))
+    }
 }
