@@ -79,8 +79,11 @@ preferences.
 Related-note retrieval excludes locked notes unless the user has already unlocked them for the
 current process.
 
-## Legacy Assets
+## Prompt Source
 
-`note_classifier.tflite`, `tokenizer_vocabulary_v2.txt`, `category_mapping.json`, and the offline
-training scripts remain packaged for compatibility, model verification, and historical tooling.
-They no longer generate the completed main-page AI summary.
+The canonical system prompts are maintained in `config/AI_AGENT_PROMPTS.txt`. Gradle copies this
+file into generated APK assets during `preBuild`; `AiAgentPrompts` requires the summariser, chatbot,
+and reformatting sections and `LlamaEngine` routes every user-facing AI mode through them.
+
+The APK contains no TensorFlow Lite note classifier. The build also has no MLC/TVM compiler step or
+`mlc-llm` Python dependency.

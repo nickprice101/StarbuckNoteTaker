@@ -71,28 +71,6 @@ class SummarizerFallbackTest {
     }
 
     @Test
-    fun tokenizeForModelInputPadsAndTruncatesTo120Tokens() {
-        val vocabulary = TokenizerVocabulary.from(listOf("[PAD]", "[UNK]", "travel", "prep", "book"))
-        val input = List(130) { if (it % 2 == 0) "travel" else "book" }.joinToString(" ")
-
-        val tokenIds = Summarizer.tokenizeForModelInput(input, vocabulary)
-
-        assertEquals(120, tokenIds.size)
-        assertTrue(tokenIds.all { it == 2 || it == 4 })
-    }
-
-    @Test
-    fun tokenizeForModelInputUsesUnknownTokenForMissingWords() {
-        val vocabulary = TokenizerVocabulary.from(listOf("[PAD]", "[UNK]", "travel", "prep"))
-
-        val tokenIds = Summarizer.tokenizeForModelInput("travel espresso prep", vocabulary)
-
-        assertEquals(2, tokenIds[0])
-        assertEquals(1, tokenIds[1])
-        assertEquals(3, tokenIds[2])
-    }
-
-    @Test
     fun qwenUnavailableUsesBoundedPlainPlaceholder() = runTest {
         val summarizer = Summarizer(appContext)
 

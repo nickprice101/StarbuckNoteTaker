@@ -4,15 +4,11 @@ import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
-import org.json.JSONObject
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.tensorflow.lite.Interpreter
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Instrumentation tests for [Summarizer] and [LlamaModelManager] running on a real device.
@@ -23,39 +19,6 @@ import java.nio.ByteOrder
  */
 @RunWith(AndroidJUnit4::class)
 class SummarizerModelInstrumentationTest {
-
-    @Test
-    fun bundledTfliteClassifier_invokesOnDevice() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val categories = context.assets.open(Summarizer.CATEGORY_MAPPING_ASSET_NAME)
-            .bufferedReader()
-            .use { JSONObject(it.readText()).getJSONArray("categories") }
-        val modelBytes = context.assets.open(Summarizer.MODEL_ASSET_NAME).use { it.readBytes() }
-        val modelBuffer = ByteBuffer.allocateDirect(modelBytes.size)
-            .order(ByteOrder.nativeOrder())
-            .put(modelBytes)
-        modelBuffer.rewind()
-
-        val interpreter = Interpreter(modelBuffer)
-        try {
-            val input = arrayOf(
-                arrayOf(
-                    "Homemade pasta recipe: mix 2 cups flour with 3 eggs, " +
-                        "knead for 10 minutes, and cut into fettuccine."
-                )
-            )
-            val output = Array(1) { FloatArray(categories.length()) }
-
-            interpreter.run(input, output)
-
-            val scores = output[0]
-            assertTrue("Expected one score for each category", scores.size == categories.length())
-            assertTrue("Expected finite classifier scores", scores.all { it.isFinite() })
-            assertTrue("Expected classifier to produce a non-zero signal", scores.any { it != 0f })
-        } finally {
-            interpreter.close()
-        }
-    }
 
     @Test
     fun summarizer_fallbackPath_producesNonEmptyResult() = runBlocking {

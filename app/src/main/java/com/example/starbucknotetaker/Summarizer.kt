@@ -18,31 +18,13 @@ import java.util.concurrent.atomic.AtomicReference
  * Qwen result fails grounding checks, callers receive a bounded plain-text
  * placeholder that is not represented as an AI-generated summary.
  *
- * Callers that previously constructed [Summarizer] with a custom
- * [interpreterFactory] (e.g. in unit tests) can continue to do so; the
- * factory parameter is retained but ignored at runtime.  Tests that need
- * to exercise the fallback path independently can use the public static
- * helpers directly.
- *
- * New functionality added over the previous TFLite version:
- *  - [rewrite] — rewrites a note in a clean, professional style
- *  - [answer]  — answers a question using optional note context
- *  - [inferenceProgress] — [StateFlow] of streaming inference progress
+ * [rewrite] and [answer] use the same Qwen engine and prompt asset as summary
+ * generation. [inferenceProgress] exposes streaming inference progress.
  */
 class Summarizer(
     private val context: Context,
-    /** Retained for source compatibility with existing tests; not used at runtime. */
-    @Suppress("UNUSED_PARAMETER")
-    private val interpreterFactory: (java.nio.MappedByteBuffer) -> LiteInterpreter = {
-        throw UnsupportedOperationException("LiteInterpreter not used in LiteRT-LM path")
-    },
     private val logger: (String, Throwable) -> Unit = { msg, t -> Log.e("Summarizer", msg, t) },
     private val debugSink: (String) -> Unit = { msg -> Log.d("Summarizer", msg) },
-    /** Retained for source compatibility with existing tests; not used at runtime. */
-    @Suppress("UNUSED_PARAMETER")
-    private val assetLoader: (Context, String) -> java.io.InputStream = { ctx, name ->
-        ctx.assets.open(name)
-    },
 ) {
 
     // ------------------------------------------------------------------
@@ -286,25 +268,15 @@ class Summarizer(
     }
 
     // ------------------------------------------------------------------
-    // Companion — static helpers kept for backward-compat with tests
-    // and for use in fallback / preview paths across the app.
+    // Companion helpers used in fallback / preview paths across the app.
     // ------------------------------------------------------------------
 
     companion object {
-        // Asset name constants retained for backward compatibility.
-        internal const val MODELS_DIR_NAME            = "models"
-        internal const val MODEL_ASSET_NAME           = "note_classifier.tflite"
-        internal const val CATEGORY_MAPPING_ASSET_NAME = "category_mapping.json"
-        internal const val TOKENIZER_VOCAB_ASSET_NAME  = "tokenizer_vocabulary_v2.txt"
-
         private const val MAX_SUMMARY_LENGTH = 140
         private const val MAX_PREVIEW_LENGTH = 160
         internal val WHITESPACE_REGEX = Regex("\\s+")
         private val TITLE_PREFIX_REGEX = Regex("^\\s*Title:\\s*", RegexOption.IGNORE_CASE)
         private val SENTENCE_CAPTURE = Regex("([^.!?]+[.!?])")
-        private val TOKEN_SPLIT_REGEX = Regex("\\s+")
-        private val STRIP_PUNCTUATION_REGEX = Regex("[\\p{Punct}]")
-        private const val MODEL_SEQUENCE_LENGTH = 120
         private const val QWEN_SUMMARY_CHUNK_CHARS = 3_000
         private const val QWEN_SUMMARY_CHUNK_TOKENS = 900
         private const val MAX_QWEN_SUMMARY_CHUNKS = 4
@@ -370,50 +342,5 @@ class Summarizer(
             return trimmed.replace(WHITESPACE_REGEX, " ").trim()
         }
 
-        /**
-         * Tokenises [text] against [vocabulary] into a fixed-length int array.
-         * Retained for backward compatibility with unit tests.
-         */
-        internal fun tokenizeForModelInput(text: String, vocabulary: TokenizerVocabulary): IntArray {
-            val normalized = normalizeForModelInput(text).lowercase(Locale.US)
-            val stripped = STRIP_PUNCTUATION_REGEX.replace(normalized, " ")
-            val tokens = TOKEN_SPLIT_REGEX.split(stripped).filter { it.isNotBlank() }
-            val output = IntArray(MODEL_SEQUENCE_LENGTH)
-            var index = 0
-            for (token in tokens) {
-                if (index >= MODEL_SEQUENCE_LENGTH) break
-                output[index] = vocabulary.tokenToId(token)
-                index++
-            }
-            return output
-        }
-    }
-}
-
-// --------------------------------------------------------------------------
-// TokenizerVocabulary — kept for backward compatibility with existing tests
-// --------------------------------------------------------------------------
-
-internal class TokenizerVocabulary private constructor(
-    private val tokenToIndex: Map<String, Int>,
-    private val unknownTokenId: Int,
-) {
-    fun tokenToId(token: String): Int = tokenToIndex[token] ?: unknownTokenId
-
-    companion object {
-        val EMPTY: TokenizerVocabulary = from(emptyList())
-        private const val UNKNOWN_TOKEN = "[UNK]"
-
-        fun from(tokens: List<String>): TokenizerVocabulary {
-            val map = LinkedHashMap<String, Int>(tokens.size)
-            tokens.forEachIndexed { index, token ->
-                map.putIfAbsent(token, index)
-            }
-            val unknownId = map[UNKNOWN_TOKEN]
-                ?: map["[unk]"]
-                ?: map["UNK"]
-                ?: 1
-            return TokenizerVocabulary(map, unknownId)
-        }
     }
 }

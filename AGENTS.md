@@ -10,14 +10,35 @@ Before performing any edits in this repository:
 
 Do not proceed with modifications until the repo is synced.
 
-This application is a full-featured note-taking app with checklist and reminder functionality. It is intended to work offline for core note workflows and supports encryption for user-selected notes and archived note collections.
+This application is a full-featured, offline-first Android note-taking app with rich text,
+checklists, reminders, attachments, encrypted protected notes, and encrypted archived
+collections.
 
-The app uses an on-device TensorFlow Lite model (`note_classifier.tflite`) in the assets directory to classify/summarize notes. The model is generated offline and bundled with the APK so summarization works without cloud inference.
+Qwen3 0.6B through Google LiteRT-LM is the app's only semantic and generative AI runtime. Summary,
+rewrite, chatbot, research-planning, verification, and repair flows must run through the shared
+Qwen engine. A bounded plain-text preview may be used while Qwen is unavailable, but it is fallback
+UI text and must not be represented as an AI-generated summary.
 
-Model-building code lives in `app/src/main/assets/scripts/complete_pipeline.py`, and training data lives in `app/src/main/assets/scripts/training_data_large.py`.
+The canonical Qwen system prompts are in `config/AI_AGENT_PROMPTS.txt`:
 
-Category mapping information is stored in `category_mapping.json` (next to the `.tflite` file). `DEPLOYMENT_README.md` and `DEPLOYMENT_INSTRUCTIONS.txt` provide Android deployment details.
+- `[AI_SUMMARISER]`
+- `[AI_CHATBOT]`
+- `[AI_REFORMATTING]`
 
-`complete_pipeline.py` includes validation output for an "Enhanced summary" format; runtime summarization should remain aligned to that structure.
+Gradle copies that file into generated APK assets during `preBuild`, and `AiAgentPrompts.kt` loads
+the required sections. Keep production system-prompt changes in that file instead of embedding
+replacement base prompts in Kotlin.
 
-During Codex development, run Gradle with `--console=plain` to avoid session issues from large default console output.
+`LlamaModelManager.kt` owns the pinned `litert-community/Qwen3-0.6B` model identity, download,
+checksum validation, and device support. `LlamaEngine.kt` owns LiteRT-LM initialization, generation,
+and prompt-mode routing. `QwenAdkModel.kt` adapts the shared Qwen engine to Google ADK workflows.
+
+Do not add or restore a TensorFlow Lite note classifier, classifier vocabulary/category assets, an
+MLC/TVM model compiler, or `mlc-llm` installation steps. The standard Android build must remain a
+normal Gradle build with no Python model-compilation dependency.
+
+`app/src/main/assets/DEPLOYMENT_README.md` and
+`app/src/main/assets/DEPLOYMENT_INSTRUCTIONS.txt` describe the current Qwen deployment.
+
+During Codex development, run Gradle with `--console=plain` to avoid session issues from large
+default console output.

@@ -35,7 +35,7 @@ BUILD_TOOLS_VERSION="${COMPILE_SDK}.0.0"
 # Export paths
 export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$GRADLE_INSTALL_DIR/bin:$PATH"
 
-echo "📦 Starting Android SDK + Gradle + asset setup..."
+echo "📦 Starting Android SDK + Gradle setup..."
 
 echo "ℹ️  Detected compileSdk: ${COMPILE_SDK}"
 if [ -n "$NDK_VERSION" ]; then
@@ -83,30 +83,6 @@ echo "📄 Writing local.properties with SDK path..."
 cat <<EOF > "$PROJECT_DIR/local.properties"
 sdk.dir=$ANDROID_SDK_ROOT
 EOF
-
-# ----------------------------
-# ASSET GENERATION (ON-DEMAND)
-# ----------------------------
-ASSETS_DIR="$PROJECT_DIR/app/src/main/assets"
-REQUIRED_ASSETS=("encoder_int8_dynamic.tflite" "decoder_step_int8_dynamic.tflite" "tokenizer.json")
-
-MISSING_ASSETS=()
-for asset in "${REQUIRED_ASSETS[@]}"; do
-  if [ ! -f "$ASSETS_DIR/$asset" ]; then
-    MISSING_ASSETS+=("$asset")
-  fi
-done
-
-if [ "${#MISSING_ASSETS[@]}" -gt 0 ]; then
-  echo "⚠️  Missing summarizer assets detected in $ASSETS_DIR:"
-  for asset in "${MISSING_ASSETS[@]}"; do
-    echo "   - $asset"
-  done
-  echo "   The summariser models are generated offline and must be uploaded manually."
-  echo "   Please copy the required files into the assets directory before running ML-dependent features."
-else
-  echo "✅ All ML assets present in $ASSETS_DIR."
-fi
 
 # ----------------------------
 # GRADLE INSTALLATION

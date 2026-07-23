@@ -1,4 +1,0 @@
-x86_64 TVM runtime output directory.
-
-Run `TARGET_ABI=x86_64 bash scripts/build_mlc_tvm_runtime.sh` to generate
-`libtvm4j_runtime_packed.so` here.
