@@ -30,35 +30,24 @@ internal object QwenTokenBudget {
     private val PUNCTUATION_REGEX = Regex("""[^\p{L}\p{N}\s]""")
 }
 
-/** Selects locally stored note fragments that are most relevant to a Qwen question-answer turn. */
+/** Selects fragments from the current note without reading any other note. */
 internal object LocalNoteContextRetriever {
     fun retrieve(
         question: String,
         currentNote: Note,
-        notes: List<Note>,
-        canRead: (Note) -> Boolean,
         maxChars: Int = DEFAULT_MAX_CHARS,
     ): String {
         val queryTerms = importantTerms(question)
-        val candidates = buildList {
-            addAll(noteChunks(currentNote, isCurrent = true))
-            notes.asSequence()
-                .filter { it.id != currentNote.id && canRead(it) }
-                .sortedByDescending(Note::date)
-                .take(MAX_RELATED_NOTES)
-                .flatMap { noteChunks(it, isCurrent = false).asSequence() }
-                .forEach(::add)
-        }.map { candidate ->
+        val candidates = noteChunks(currentNote).map { candidate ->
             candidate.copy(score = relevanceScore(candidate, queryTerms))
         }
 
         val selected = mutableListOf<ContextChunk>()
-        candidates.firstOrNull { it.isCurrent }?.let(selected::add)
+        candidates.firstOrNull()?.let(selected::add)
         candidates.asSequence()
             .filterNot { it in selected }
             .sortedWith(
                 compareByDescending<ContextChunk> { it.score }
-                    .thenByDescending { it.isCurrent }
                     .thenByDescending(ContextChunk::date),
             )
             .forEach { candidate ->
@@ -70,13 +59,7 @@ internal object LocalNoteContextRetriever {
         val output = StringBuilder()
         selected.forEach { chunk ->
             val block = buildString {
-                appendLine(
-                    if (chunk.isCurrent) {
-                        "<local_note role=\"current\" title=\"${chunk.title.xmlEscape()}\">"
-                    } else {
-                        "<local_note role=\"related\" title=\"${chunk.title.xmlEscape()}\">"
-                    },
-                )
+                appendLine("<local_note role=\"current\" title=\"${chunk.title.xmlEscape()}\">")
                 appendLine(chunk.text)
                 append("</local_note>")
             }
@@ -87,7 +70,7 @@ internal object LocalNoteContextRetriever {
         return output.toString().trim()
     }
 
-    private fun noteChunks(note: Note, isCurrent: Boolean): List<ContextChunk> {
+    private fun noteChunks(note: Note): List<ContextChunk> {
         val structured = buildString {
             if (note.checklistItems != null) {
                 append(note.checklistItems.asChecklistContent())
@@ -115,7 +98,6 @@ internal object LocalNoteContextRetriever {
                 noteId = note.id,
                 title = note.title,
                 text = paragraph,
-                isCurrent = isCurrent,
                 date = note.date,
                 position = index,
             )
@@ -127,8 +109,7 @@ internal object LocalNoteContextRetriever {
         val bodyTerms = importantTerms(chunk.text)
         val titleMatches = queryTerms.count(titleTerms::contains)
         val bodyMatches = queryTerms.count(bodyTerms::contains)
-        return titleMatches * 8 + bodyMatches * 3 +
-            if (chunk.isCurrent) CURRENT_NOTE_BONUS else 0 -
+        return titleMatches * 8 + bodyMatches * 3 + CURRENT_NOTE_BONUS -
             chunk.position.coerceAtMost(4)
     }
 
@@ -142,7 +123,6 @@ internal object LocalNoteContextRetriever {
         val noteId: Long,
         val title: String,
         val text: String,
-        val isCurrent: Boolean,
         val date: Long,
         val position: Int,
         val score: Int = 0,
@@ -150,7 +130,6 @@ internal object LocalNoteContextRetriever {
 
     private const val DEFAULT_MAX_CHARS = 3_000
     private const val CHUNK_CHARS = 700
-    private const val MAX_RELATED_NOTES = 24
     private const val CURRENT_NOTE_BONUS = 10
     private val TERM_REGEX = Regex("""[\p{L}\p{N}][\p{L}\p{N}_'-]*""")
     private val STOP_WORDS = setOf(
@@ -201,7 +180,11 @@ internal data class QwenResearchPlan(
     val sourceTypes: List<String>,
 ) {
     companion object {
-        fun parse(raw: String, question: String): QwenResearchPlan {
+        fun parse(
+            raw: String,
+            question: String,
+            noteIsSource: Boolean = false,
+        ): QwenResearchPlan {
             val cleaned = raw.extractJsonObject()
             return runCatching {
                 val json = JSONObject(cleaned)
@@ -219,12 +202,16 @@ internal data class QwenResearchPlan(
                         .take(MAX_SOURCE_TYPES),
                 )
             }.getOrElse {
-                fallback(question)
+                fallback(question, noteIsSource)
             }
         }
 
-        fun fallback(question: String): QwenResearchPlan = QwenResearchPlan(
-            needsWeb = AssistantWebLookup.shouldLookup(question),
+        fun fallback(
+            question: String,
+            noteIsSource: Boolean = false,
+        ): QwenResearchPlan = QwenResearchPlan(
+            needsWeb = AssistantWebLookup.shouldLookup(question) &&
+                (!noteIsSource || AssistantWebLookup.requiresInternet(question)),
             queries = listOf(question.trim()).filter(String::isNotBlank),
             freshness = if (AssistantWebLookup.requiresInternet(question)) "current" else "stable",
             sourceTypes = emptyList(),

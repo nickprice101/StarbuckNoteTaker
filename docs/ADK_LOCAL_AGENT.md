@@ -21,10 +21,12 @@ sections of `config/AI_AGENT_PROMPTS.txt`. Gradle copies the file into the APK a
 
 ## Privacy
 
-The note and related-note context remain on-device. When a question requires current public
-information, the app sends only a planned search query to public search providers. Android
-downloads, extracts, ranks, and caches the pages locally, then supplies a bounded evidence block to
-Qwen. Private note context is not included in search requests.
+Every chat is scoped to exactly one current note; content is never retrieved from another note.
+The current note and its per-note conversation memory remain on-device. When a question requires
+current public information, Qwen may use a non-sensitive place, topic, or named entity from the
+current note to make the planned search query self-contained. Android downloads, extracts, ranks,
+and caches the pages locally, then supplies a bounded evidence block to Qwen. Raw note text and
+private details are not included in search requests.
 
 ## Quality controls
 
@@ -33,7 +35,8 @@ Qwen. Private note context is not included in search requests.
   validated and repaired through Qwen when necessary.
 - Completed summaries use content-hash caching, hierarchical reduction for long notes, grounding
   validation, and one Qwen repair pass.
-- Chat answers that use web evidence receive a Qwen verification pass.
+- Chat answers that use web evidence receive a Qwen verification pass and a deterministic check
+  that rejects citation-only replies without extracted findings.
 - An unavailable model preserves original note content and produces only documented plain fallback
   UI.
 
@@ -50,12 +53,16 @@ Qwen. Private note context is not included in search requests.
 
 ### Chat
 
-1. The chat action opens a full-screen conversation with optional note context.
+1. The chat action opens a full-screen conversation scoped to the current note.
 2. An ADK in-memory session retains the dialog's user and model turns.
-3. Current, explicit-lookup, and unfamiliar questions use on-device public-page extraction.
-4. Qwen produces and verifies the grounded answer; Markdown links render as citation pills.
-5. The user may append an answer to the note while preserving citation metadata.
-6. Closing the dialog discards the in-memory messages.
+3. Without `/note`, the current note supplies context only; `/note` explicitly allows extraction,
+   summarisation, or other requested work using the note as evidence.
+4. Current, explicit-lookup, recommendation, and unfamiliar questions use on-device public-page
+   extraction.
+5. Qwen summarises the extracted findings, verifies the grounded answer, and renders Markdown links
+   as citation pills.
+6. The user may append an answer to the note while preserving citation metadata.
+7. Closing the dialog discards the in-memory messages.
 
 ## References
 

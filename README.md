@@ -23,8 +23,8 @@ Google LiteRT-LM:
 
 - `SUMMARISE` creates grounded, category-aware note previews.
 - `REWRITE` corrects and restructures a note without changing protected facts.
-- `QUESTION` answers with optional note context, related-note retrieval, and bounded public web
-  evidence.
+- `QUESTION` keeps every note context discrete, uses `/note` for explicit note evidence, and
+  synthesises bounded public web evidence.
 
 The canonical system prompts live in
 [`config/AI_AGENT_PROMPTS.txt`](config/AI_AGENT_PROMPTS.txt). Its `[AI_SUMMARISER]`,

@@ -69,6 +69,9 @@ class AiAssistantDialogInstrumentationTest {
         composeRule.onNodeWithTag("agentConversation").assertExists()
         composeRule.onNodeWithText("Chat").assertExists()
         composeRule.onNodeWithText("On-device AI + web research").assertExists()
+        composeRule.onNodeWithText(
+            "Use /note to summarise or extract from this note; without it, the note only provides context.",
+        ).assertExists()
         composeRule.onNodeWithTag("agentMessageInput").assertExists()
         composeRule.onNodeWithTag("sendAgentMessage").assertExists()
     }

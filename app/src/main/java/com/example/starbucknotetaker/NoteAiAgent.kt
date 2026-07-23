@@ -170,7 +170,6 @@ internal object NoteAiAgent {
         context: Context,
         sessionId: String,
         noteContext: String,
-        relatedNotes: List<Note> = emptyList(),
         model: Model = QwenAdkModel(context.applicationContext),
         initialMemory: String = "",
         onMemoryUpdated: (String) -> Unit = {},
@@ -178,7 +177,6 @@ internal object NoteAiAgent {
         model = model,
         sessionId = sessionId,
         noteContext = noteContext,
-        relatedNotes = relatedNotes,
         systemInstruction = AiAgentPrompts.load(context).chatbot,
         webResearcher = AssistantWebLookup(context.applicationContext),
         initialMemory = initialMemory,
@@ -321,7 +319,6 @@ internal class NoteConversationAgent(
     private val model: Model,
     private val sessionId: String,
     private val noteContext: String,
-    private val relatedNotes: List<Note> = emptyList(),
     private val systemInstruction: String,
     private val webResearcher: WebResearcher,
     initialMemory: String = "",
@@ -359,6 +356,7 @@ internal class NoteConversationAgent(
             message = trimmed,
             previousRequests = recentTurns.map(ConversationTurn::user),
         )
+        val noteReference = NoteReference.parse(answerRequest)
         val researchPlan = if (model is QwenAdkModel) {
             emit(AgentTurnUpdate.Partial("Planning local and online evidence…"))
             runCatching {
@@ -368,20 +366,45 @@ internal class NoteConversationAgent(
                     systemInstruction =
                         "Return JSON only: {\"needs_web\":boolean,\"queries\":[string]," +
                             "\"freshness\":string,\"source_types\":[string]}. Use web evidence for " +
-                            "current, unfamiliar, cited, linked, or explicitly researched facts. " +
-                            "Never copy private note text into a query. Prefer primary sources.",
-                    prompt = "<user_request>${answerRequest.take(600)}</user_request>",
+                            "current, unfamiliar, cited, linked, recommended, or explicitly researched " +
+                            "facts. The current note is source evidence only when note_is_source is " +
+                            "true. Otherwise use it only to derive a non-sensitive place, topic, or " +
+                            "entity that makes each query self-contained. Never copy private details " +
+                            "into a query. Prefer primary sources.",
+                    prompt = buildString {
+                        appendLine(
+                            "<note_is_source>${noteReference.usesCurrentNoteAsSource}</note_is_source>",
+                        )
+                        appendLine("<current_note_context>")
+                        appendLine(noteContext.take(RESEARCH_PLANNER_NOTE_CHARS))
+                        appendLine("</current_note_context>")
+                        append("<user_request>${answerRequest.take(600)}</user_request>")
+                    },
                     maxOutputTokens = 96,
                 )
-                QwenResearchPlan.parse(raw, answerRequest)
-            }.getOrElse { QwenResearchPlan.fallback(answerRequest) }
+                QwenResearchPlan.parse(
+                    raw = raw,
+                    question = noteReference.requestWithoutTag.ifBlank { answerRequest },
+                    noteIsSource = noteReference.usesCurrentNoteAsSource,
+                )
+            }.getOrElse {
+                QwenResearchPlan.fallback(
+                    question = noteReference.requestWithoutTag.ifBlank { answerRequest },
+                    noteIsSource = noteReference.usesCurrentNoteAsSource,
+                )
+            }
         } else {
-            QwenResearchPlan.fallback(answerRequest)
+            QwenResearchPlan.fallback(
+                question = noteReference.requestWithoutTag.ifBlank { answerRequest },
+                noteIsSource = noteReference.usesCurrentNoteAsSource,
+            )
         }
         var research: WebLookupResult? = null
         if (researchPlan.needsWeb || AssistantWebLookup.requiresInternet(trimmed)) {
             emit(AgentTurnUpdate.Partial(AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE))
-            val queries = researchPlan.queries.ifEmpty { listOf(answerRequest) }
+            val queries = researchPlan.queries.ifEmpty {
+                listOf(noteReference.requestWithoutTag.ifBlank { answerRequest })
+            }
             val lookup = mergeWebLookupResults(
                 queries.joinToString(" | "),
                 queries.take(2).map { webResearcher.lookup(it) },
@@ -406,7 +429,9 @@ internal class NoteConversationAgent(
         // says it cannot answer, research is attempted; an outage then produces a clear alert.
         if (research == null && AssistantWebLookup.answerNeedsResearch(finalText)) {
             emit(AgentTurnUpdate.Partial(AssistantWebLookup.RESEARCH_PROGRESS_MESSAGE))
-            val lookup = webResearcher.lookup(answerRequest)
+            val lookup = webResearcher.lookup(
+                noteReference.requestWithoutTag.ifBlank { answerRequest },
+            )
             if (lookup.results.isEmpty()) {
                 finalText = AssistantWebLookup.INTERNET_REQUIRED_MESSAGE
             } else {
@@ -430,6 +455,11 @@ internal class NoteConversationAgent(
             finalText = AssistantWebLookup.quickAnswer(answerRequest, research)
         }
         finalText = verifyAnswer(answerRequest, finalText, research)
+        if (research != null &&
+            !AssistantWebLookup.answerSummarizesExtractedResearch(finalText, research)
+        ) {
+            finalText = AssistantWebLookup.quickAnswer(answerRequest, research)
+        }
         research?.let { finalText = AssistantWebLookup.appendMarkdownSources(finalText, it) }
         updateMemory(answerRequest, finalText)
         rememberTurn(trimmed, finalText)
@@ -441,8 +471,6 @@ internal class NoteConversationAgent(
             currentNote = LocalNoteContextRetriever.retrieve(
                 question = message,
                 currentNote = Note(id = 0L, title = "Current note", content = noteContext),
-                notes = relatedNotes,
-                canRead = { true },
                 maxChars = userPromptCharLimit.coerceAtLeast(MIN_USER_PROMPT_CHARS),
             ),
             webResearch = research?.toPromptContext().orEmpty(),
@@ -458,6 +486,7 @@ internal class NoteConversationAgent(
         research: WebLookupResult?,
     ): String {
         if (model !is QwenAdkModel) return draft
+        val noteReference = NoteReference.parse(question)
         return runCatching {
             NoteAiAgent.auxiliaryTurn(
                 model = model,
@@ -467,7 +496,11 @@ internal class NoteConversationAgent(
                         "citations. Output only the corrected answer.",
                 prompt = buildString {
                     appendLine("<question>${question.take(600)}</question>")
-                    appendLine("<local_evidence>${noteContext.take(1_600)}</local_evidence>")
+                    if (noteReference.usesCurrentNoteAsSource) {
+                        appendLine("<local_evidence>${noteContext.take(1_600)}</local_evidence>")
+                    } else {
+                        appendLine("<note_context_not_evidence>true</note_context_not_evidence>")
+                    }
                     research?.let {
                         appendLine("<web_evidence>")
                         appendLine(it.toPromptContext().take(2_400))
@@ -547,6 +580,7 @@ internal class NoteConversationAgent(
         const val MODEL_PROMPT_MARGIN_CHARS = 64
         const val MIN_USER_PROMPT_CHARS = 320
         const val MAX_RECENT_EXCHANGES = 4
+        const val RESEARCH_PLANNER_NOTE_CHARS = 1_200
     }
 }
 

@@ -270,7 +270,8 @@ internal class AssistantWebLookup(
             if (trimmed.isBlank()) return false
             return extractUrls(trimmed, treatUnterminatedAsComplete = true).isNotEmpty() ||
                 EXPLICIT_LOOKUP_REGEX.containsMatchIn(trimmed) ||
-                CURRENT_INFO_REGEX.containsMatchIn(trimmed)
+                CURRENT_INFO_REGEX.containsMatchIn(trimmed) ||
+                PLACE_RECOMMENDATION_REGEX.containsMatchIn(trimmed)
         }
 
         fun answerNeedsResearch(answer: String): Boolean =
@@ -289,12 +290,38 @@ internal class AssistantWebLookup(
 
         fun quickAnswer(question: String, webLookup: WebLookupResult): String {
             if (webLookup.results.isEmpty()) return INTERNET_REQUIRED_MESSAGE
-            val primary = webLookup.results.first()
-            return buildString {
-                append(primary.snippet.ifBlank { "Research results for ${question.trim()}." }.trim())
-                append(' ')
-                append(primary.markdownLink())
-            }.trim()
+            return webLookup.results.take(MAX_FALLBACK_SUMMARIES)
+                .mapNotNull { result ->
+                    conciseExtractedSummary(result.snippet)
+                        .takeIf(String::isNotBlank)
+                        ?.let { summary -> "$summary ${result.markdownLink()}" }
+                }
+                .joinToString("\n\n")
+                .ifBlank { "Research results for ${question.trim()}." }
+                .trim()
+        }
+
+        /**
+         * Rejects citation-only or generic drafts. A researched answer must contain substantive
+         * information found in the extracted page text, not merely repeat the search request.
+         */
+        fun answerSummarizesExtractedResearch(
+            answer: String,
+            webLookup: WebLookupResult,
+        ): Boolean {
+            val answerWords = researchSummaryWords(
+                MARKDOWN_LINK_REGEX.replace(answer, " "),
+            )
+            if (answerWords.size < MIN_RESEARCH_SUMMARY_WORDS) return false
+
+            val queryWords = researchSummaryWords(webLookup.query)
+            val extractedWords = webLookup.results
+                .flatMap { result -> researchSummaryWords("${result.title} ${result.snippet}") }
+                .toSet()
+            val evidenceSpecificWords = extractedWords - queryWords
+            if (evidenceSpecificWords.isEmpty()) return false
+            val requiredOverlap = minOf(MIN_EVIDENCE_WORD_OVERLAP, evidenceSpecificWords.size)
+            return answerWords.count(evidenceSpecificWords::contains) >= requiredOverlap
         }
 
         fun appendMarkdownSources(answer: String, webLookup: WebLookupResult): String {
@@ -402,9 +429,11 @@ internal data class WebLookupResult(
             return@buildString
         }
         appendLine(
-            "Use relevant facts below to answer directly. Put each Markdown source link immediately " +
-                "after the final claim it supports in that paragraph. Cite a source again when it " +
-                "supports another paragraph. Do not create a Sources or References section.",
+            "The app downloaded and extracted the readable page text below. Synthesize its relevant " +
+                "facts into a direct, substantive answer; never return links without explaining what " +
+                "the pages say. Put each Markdown source link immediately after the final claim it " +
+                "supports in that paragraph. Cite a source again when it supports another paragraph. " +
+                "Do not create a Sources or References section.",
         )
         results.forEachIndexed { index, result ->
             appendLine()
@@ -510,6 +539,23 @@ private fun cleanReadableTextPreservingLines(value: String): String = value.line
     .filter(String::isNotBlank)
     .joinToString("\n")
 
+private fun conciseExtractedSummary(value: String): String {
+    val cleaned = cleanReadableText(value)
+    if (cleaned.isBlank()) return ""
+    val sentences = cleaned.split(Regex("""(?<=[.!?])\s+"""))
+        .filter(String::isNotBlank)
+    return sentences.take(MAX_FALLBACK_SUMMARY_SENTENCES)
+        .joinToString(" ")
+        .take(MAX_FALLBACK_SUMMARY_CHARS)
+        .trim()
+}
+
+private fun researchSummaryWords(value: String): Set<String> =
+    RESEARCH_SUMMARY_WORD_REGEX.findAll(value.lowercase(Locale.US))
+        .map { it.value }
+        .filter { it.length >= 3 && it !in RESEARCH_SUMMARY_STOP_WORDS }
+        .toSet()
+
 private fun resolveProtocolRelativeUrl(value: String): String = when {
     value.startsWith("//") -> "https:$value"
     else -> value
@@ -585,6 +631,11 @@ private const val MAX_PAGE_RESPONSE_BYTES = 2 * 1024 * 1024
 private const val MAX_EXTRACTED_TEXT = 100_000
 private const val MAX_EXCERPT_TEXT = 1_200
 private const val MAX_EXCERPT_PARAGRAPHS = 4
+private const val MAX_FALLBACK_SUMMARIES = 3
+private const val MAX_FALLBACK_SUMMARY_SENTENCES = 2
+private const val MAX_FALLBACK_SUMMARY_CHARS = 420
+private const val MIN_RESEARCH_SUMMARY_WORDS = 4
+private const val MIN_EVIDENCE_WORD_OVERLAP = 2
 private const val MIN_BLOCK_TEXT = 35
 private const val MIN_READABLE_TEXT = 80
 private const val WEBVIEW_FALLBACK_THRESHOLD = 500
@@ -613,6 +664,15 @@ private val CURRENT_INFO_REGEX = Regex(
 )
 private val EXPLICIT_LOOKUP_REGEX = Regex(
     "\\b(search|web|internet|online|look\\s*up|lookup|google|source|sources|cite|citation)\\b",
+    RegexOption.IGNORE_CASE,
+)
+private val PLACE_RECOMMENDATION_REGEX = Regex(
+    "\\b(?:recommend|suggest|find|best|top|highly[ -]rated)\\b.{0,80}" +
+        "\\b(?:restaurant|cafe|coffee|bar|pub|hotel|hostel|shop|store|venue|attraction|" +
+        "museum|cinema|theater|theatre|place|service|provider)\\b|" +
+        "\\b(?:restaurant|cafe|coffee|bar|pub|hotel|hostel|shop|store|venue|attraction|" +
+        "museum|cinema|theater|theatre|place|service|provider)\\b.{0,80}" +
+        "\\b(?:recommend|suggest|best|top|highly[ -]rated)\\b",
     RegexOption.IGNORE_CASE,
 )
 private val FACTUAL_QUESTION_REGEX = Regex(
@@ -681,4 +741,12 @@ private val WEBSITE_NAMES = linkedMapOf(
 )
 private val MULTIPART_SUFFIXES = setOf(
     "co.uk", "org.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "com.br",
+)
+private val MARKDOWN_LINK_REGEX = Regex("""\[[^\]]*]\(https://[^)\s]+\)""")
+private val RESEARCH_SUMMARY_WORD_REGEX = Regex("""[\p{L}\p{N}][\p{L}\p{N}'’-]*""")
+private val RESEARCH_SUMMARY_STOP_WORDS = setOf(
+    "about", "after", "also", "and", "are", "best", "but", "for", "from", "here", "into",
+    "latest", "link", "links", "more", "most", "page", "pages", "research", "result", "results",
+    "source", "sources", "that", "the", "their", "these", "this", "was", "were", "what", "when",
+    "where", "which", "with", "you", "your",
 )

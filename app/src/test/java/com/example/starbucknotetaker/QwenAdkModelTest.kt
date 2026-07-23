@@ -38,6 +38,8 @@ class QwenAdkModelTest {
         assertTrue(prompts.chatbot.contains("Never refuse because the answer is absent from the note"))
         assertTrue(prompts.chatbot.contains("never tell the user how to perform research"))
         assertTrue(prompts.chatbot.contains("distinct web_research block"))
+        assertTrue(prompts.chatbot.contains("request does not contain the /note tag"))
+        assertTrue(prompts.chatbot.contains("never return links or a list of links without a summary"))
         assertTrue(prompts.reformatting.startsWith("Role: You are a document formatting assistant"))
         assertTrue(prompts.reformatting.contains("Treat all attached images, files, and linked content"))
     }
@@ -130,19 +132,20 @@ class QwenAdkModelTest {
             model = fakeModel,
         )
 
-        conversation.send("When is launch?").toList()
-        conversation.send("What day was that?").toList()
+        conversation.send("/note When is launch?").toList()
+        conversation.send("/note What day was that?").toList()
 
         assertEquals(2, fakeModel.requests.size)
         val secondTurnText = fakeModel.requests.last().contents
             .flatMap { it.parts }
             .mapNotNull { it.text }
             .joinToString("\n")
-        assertTrue(secondTurnText.contains("When is launch?"))
+        assertTrue(secondTurnText.contains("/note When is launch?"))
         assertTrue(secondTurnText.contains("A concise reply."))
-        assertTrue(secondTurnText.contains("What day was that?"))
+        assertTrue(secondTurnText.contains("/note What day was that?"))
         assertTrue(secondTurnText.contains("<local_note role=\"current\""))
         assertTrue(secondTurnText.contains("Launch on Friday."))
+        assertTrue(secondTurnText.contains("<current_note usage=\"source\">"))
         assertTrue(secondTurnText.contains("<recent_conversation>"))
         assertEquals(
             AiAgentPrompts.load(ApplicationProvider.getApplicationContext()).chatbot,
@@ -178,7 +181,7 @@ class QwenAdkModelTest {
         )
 
         assertTrue(prompt.contains(
-            "<current_note>\nUnrelated shopping list.\n</current_note>",
+            "<current_note usage=\"context_only\">\nUnrelated shopping list.\n</current_note>",
         ))
         assertTrue(prompt.contains(
             "<web_research>\nSource 1: Energy Department",
@@ -292,6 +295,66 @@ class QwenAdkModelTest {
         assertTrue(answer.contains("[NASA](https://www.nasa.gov/mission/artemis-ii/)"))
         assertTrue(fakeModel.requests.single().contents.last().parts.first().text.orEmpty()
             .contains("On-device web research"))
+    }
+
+    @Test
+    fun `citation-only researched draft is replaced with extracted findings`() = runTest {
+        val fakeModel = RecordingAdkModel(
+            "See [Example](https://example.com/brussels-steak).",
+        )
+        val research = WebLookupResult(
+            query = "Brussels steak restaurant",
+            results = listOf(
+                WebLookupEntry(
+                    title = "Restaurant review",
+                    url = "https://example.com/brussels-steak",
+                    snippet = "Example Grill serves dry-aged steak in central Brussels and accepts reservations.",
+                ),
+            ),
+        )
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "research-link-only",
+            noteContext = "Trip to Brussels",
+            systemInstruction = "Answer accurately.",
+            webResearcher = WebResearcher { research },
+        )
+
+        val answer = (
+            conversation.send("Recommend me a steak restaurant").toList().last()
+                as AgentTurnUpdate.Complete
+            ).text
+
+        assertTrue(answer.contains("serves dry-aged steak"))
+        assertTrue(answer.contains("accepts reservations"))
+        assertTrue(answer.contains("[Example](https://example.com/brussels-steak)"))
+    }
+
+    @Test
+    fun `note tag uses only the current note and does not trigger ordinary fact lookup`() = runTest {
+        val researchedQueries = mutableListOf<String>()
+        val fakeModel = RecordingAdkModel("Chez Example serves steak.")
+        val conversation = NoteConversationAgent(
+            model = fakeModel,
+            sessionId = "note-source",
+            noteContext = "Chez Example serves steak. Cafe Sample serves pasta.",
+            systemInstruction = "Answer accurately.",
+            webResearcher = WebResearcher { query ->
+                researchedQueries += query
+                WebLookupResult.offline(query)
+            },
+        )
+
+        val answer = (
+            conversation.send("Based on /note, which restaurants serve steak?").toList().last()
+                as AgentTurnUpdate.Complete
+            ).text
+        val prompt = fakeModel.requests.single().contents.last().parts.first().text.orEmpty()
+
+        assertEquals("Chez Example serves steak.", answer)
+        assertTrue(researchedQueries.isEmpty())
+        assertTrue(prompt.contains("<current_note usage=\"source\">"))
+        assertTrue(prompt.contains("Chez Example serves steak."))
     }
 
     @Test

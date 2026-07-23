@@ -38,7 +38,7 @@ Settings UI through a `StateFlow`.
 |------|---------------|
 | `SUMMARISE` | Category-aware JSON summary, hierarchical reduction for long notes, grounding repair, and content-hash caching |
 | `REWRITE` | Global document plan, token-bounded structured fragments, continuation, protected-fact repair, and a consistent Markdown result |
-| `QUESTION` | Local related-note retrieval, Qwen web-research planning, evidence-grounded answer verification, and rolling per-note memory |
+| `QUESTION` | Discrete current-note context, `/note` evidence control, Qwen web-research planning, extracted-page synthesis, answer verification, and rolling per-note memory |
 
 All Qwen prompts append `/no_think` to the active user turn to avoid a hidden reasoning phase and
 improve time to first token.

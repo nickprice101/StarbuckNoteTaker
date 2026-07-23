@@ -21,8 +21,10 @@ class AssistantWebLookupTest {
         assertTrue(AssistantWebLookup.shouldLookup("Could you explain how geothermal power works?"))
         assertTrue(AssistantWebLookup.shouldLookup("Is geothermal energy renewable?"))
         assertTrue(AssistantWebLookup.shouldLookup("Tell me about the James Webb telescope"))
+        assertTrue(AssistantWebLookup.shouldLookup("Recommend me a steak restaurant"))
         assertFalse(AssistantWebLookup.shouldLookup("rewrite this note more clearly"))
         assertTrue(AssistantWebLookup.requiresInternet("what is the stock price today?"))
+        assertTrue(AssistantWebLookup.requiresInternet("find a highly rated restaurant"))
         assertFalse(AssistantWebLookup.requiresInternet("Who wrote The Hobbit?"))
         assertTrue(AssistantWebLookup.answerNeedsResearch("I don't know that answer."))
         assertTrue(AssistantWebLookup.answerNeedsResearch("The note does not provide enough context."))
@@ -177,6 +179,33 @@ class AssistantWebLookupTest {
         assertTrue(answer.contains("A concise result snippet."))
         assertFalse(answer.contains("Sources:"))
         assertTrue(answer.endsWith("[Example](https://example.com/one)"))
+    }
+
+    @Test
+    fun extractedResearchSummaryRejectsLinksWithoutFindings() {
+        val result = WebLookupResult(
+            query = "Brussels steak restaurant",
+            results = listOf(
+                WebLookupEntry(
+                    title = "Restaurant review",
+                    url = "https://example.com/brussels-steak",
+                    snippet = "Example Grill serves dry-aged steak in central Brussels and accepts reservations.",
+                ),
+            ),
+        )
+
+        assertFalse(
+            AssistantWebLookup.answerSummarizesExtractedResearch(
+                "See [Example](https://example.com/brussels-steak).",
+                result,
+            ),
+        )
+        assertTrue(
+            AssistantWebLookup.answerSummarizesExtractedResearch(
+                "Example Grill serves dry-aged steak and accepts reservations.",
+                result,
+            ),
+        )
     }
 
     @Test
